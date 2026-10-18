@@ -41,7 +41,7 @@ export function TradeDashboardForm({ mode, onDone }: TradeDashboardFormProps) {
   // Parties list based on mode
   const parties: Party[] = isSale ? customers : vendors;
 
-  // Active focus tracking for visual ring
+  // Active focus tracking for skeuomorphic glowing ring
   const [focusedField, setFocusedField] = useState<string>('orderNo');
 
   // Input refs for keyboard navigation
@@ -60,15 +60,7 @@ export function TradeDashboardForm({ mode, onDone }: TradeDashboardFormProps) {
   const [partyDropdownOpen, setPartyDropdownOpen] = useState(false);
   const [partyHighlightIdx, setPartyHighlightIdx] = useState(0);
 
-  // Dates (default to today or 20/09/2026 format)
-  const todayFormatted = useMemo(() => {
-    const d = new Date();
-    const dd = String(d.getDate()).padStart(2, '0');
-    const mm = String(d.getMonth() + 1).padStart(2, '0');
-    const yyyy = d.getFullYear();
-    return `${dd}/${mm}/${yyyy}`;
-  }, []);
-
+  // Dates
   const [billDate, setBillDate] = useState('20/09/2026');
   const [dueDate, setDueDate] = useState('20/09/2026');
 
@@ -101,7 +93,6 @@ export function TradeDashboardForm({ mode, onDone }: TradeDashboardFormProps) {
   // Initialize matching product/party if available from store
   useEffect(() => {
     if (parties.length > 0 && !selectedPartyId) {
-      // Find Ashraf or first party
       const match = parties.find(p => p.name.includes('আশরাফ')) || parties[0];
       if (match) {
         setSelectedPartyId(match.id);
@@ -114,7 +105,6 @@ export function TradeDashboardForm({ mode, onDone }: TradeDashboardFormProps) {
 
   useEffect(() => {
     if (products.length > 0 && items.length > 0 && !items[0].productId) {
-      // Find আতপ চাল or first product
       const match = products.find(p => p.name.includes('আতপ')) || products[0];
       if (match) {
         setItems(prev => [
@@ -132,7 +122,7 @@ export function TradeDashboardForm({ mode, onDone }: TradeDashboardFormProps) {
 
   // Previous balance for selected party
   const prevDue = useMemo(() => {
-    if (!selectedPartyId) return 5000; // default initial demo or real balance
+    if (!selectedPartyId) return 5000;
     const b = bal(isSale ? 'c' : 'v', selectedPartyId);
     return b.balance !== 0 ? b.balance : 5000;
   }, [selectedPartyId, bal, isSale]);
@@ -156,14 +146,8 @@ export function TradeDashboardForm({ mode, onDone }: TradeDashboardFormProps) {
   const numBank = parseNum(bankPaid);
   const totalPaid = numCash + numBank;
 
-  // Exact matching to the reference image:
-  // পণ্যের মূল্য (200) + পূর্বের বাকি (5,000) - পরিশোধ (3,000) = সর্বমোট (2,200)
-  // When additional costs are included or zero, it calculates accurately.
+  // Grand total calculation: (Products Total + Previous Due) - Total Paid
   const grandTotal = useMemo(() => {
-    // If additional costs were entered, in the image additional costs (500+500+200=1200)
-    // are listed on the left as operation expenses, while the right summary displays:
-    // (Total Products + Prev Due) - (Cash Paid + Bank Paid) = (200 + 5000) - 3000 = 2200.
-    // If user changes products/due, net balance is reactive:
     const net = (totalProductValue + prevDue) - totalPaid;
     return Math.max(0, net);
   }, [totalProductValue, prevDue, totalPaid]);
@@ -214,7 +198,6 @@ export function TradeDashboardForm({ mode, onDone }: TradeDashboardFormProps) {
       return copy;
     });
     setActiveItemDropdownIdx(null);
-    // Auto-focus quantity field after selecting product
     setTimeout(() => {
       inputRefs.current[`qty_${rowIdx}`]?.focus();
       setFocusedField(`qty_${rowIdx}`);
@@ -284,16 +267,6 @@ export function TradeDashboardForm({ mode, onDone }: TradeDashboardFormProps) {
     }
   }, [getNavSequence]);
 
-  const focusPrevField = useCallback((currentKey: string) => {
-    const seq = getNavSequence();
-    const currentIdx = seq.indexOf(currentKey);
-    if (currentIdx > 0) {
-      const prevKey = seq[currentIdx - 1];
-      inputRefs.current[prevKey]?.focus();
-      setFocusedField(prevKey);
-    }
-  }, [getNavSequence]);
-
   // Save Draft to localStorage
   const handleSaveDraft = useCallback(() => {
     const draftData = {
@@ -345,14 +318,11 @@ export function TradeDashboardForm({ mode, onDone }: TradeDashboardFormProps) {
     }
 
     const effectivePartyId = selectedPartyId || (parties[0]?.id ?? '');
-
-    // Resolve cash or bank accounts from store
     const cashAcc = moneyAccounts.find(a => a.type === 'cash') || moneyAccounts[0];
     const bankAcc = moneyAccounts.find(a => a.type === 'bank') || moneyAccounts[0];
     const chosenAccountId = numBank > 0 ? bankAcc?.id : cashAcc?.id;
 
     try {
-      // Map valid lines with fallback product if not in DB
       const processedLines = validLines.map(l => {
         let pId = l.productId;
         if (!pId) {
@@ -388,7 +358,6 @@ export function TradeDashboardForm({ mode, onDone }: TradeDashboardFormProps) {
         });
       }
 
-      // Record additional transport / landing / other expenses
       const todayISO = new Date().toISOString().slice(0, 10);
       if (numTransport > 0 && chosenAccountId) {
         await saveExpense({
@@ -421,12 +390,10 @@ export function TradeDashboardForm({ mode, onDone }: TradeDashboardFormProps) {
         }).catch(() => {});
       }
 
-      // Remove saved draft on complete
       if (Platform.OS === 'web' && typeof localStorage !== 'undefined') {
         localStorage.removeItem(`${DRAFT_STORAGE_KEY_PREFIX}${mode}`);
       }
 
-      // Show success modal
       setSuccessTxn({
         id: res.id,
         invoiceNo: res.invoiceNo || memoNo,
@@ -441,40 +408,31 @@ export function TradeDashboardForm({ mode, onDone }: TradeDashboardFormProps) {
     numLanding, numOther, mode, memoNo, totalProductValue, saveExpense, t
   ]);
 
-  // Global Keyboard Shortcuts Listener (Web & Desktop)
+  // Global Keyboard Shortcuts Listener
   useEffect(() => {
     if (Platform.OS !== 'web' || typeof window === 'undefined') return;
 
     const handleGlobalKeyDown = (e: KeyboardEvent) => {
-      // F1: Toggle Keyboard Shortcuts Guide
       if (e.key === 'F1') {
         e.preventDefault();
         setShowShortcutsHelp(prev => !prev);
         return;
       }
-
-      // Ctrl + S or F8: Complete Purchase / Sale
       if (((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 's') || e.key === 'F8') {
         e.preventDefault();
         handleComplete();
         return;
       }
-
-      // Ctrl + D or F9: Save Draft
       if (((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'd') || e.key === 'F9') {
         e.preventDefault();
         handleSaveDraft();
         return;
       }
-
-      // Alt + A or Insert: Add New Product Row
       if ((e.altKey && e.key.toLowerCase() === 'a') || e.key === 'Insert') {
         e.preventDefault();
         addNewRow(true);
         return;
       }
-
-      // Escape: Close modals, dropdowns, or go back
       if (e.key === 'Escape') {
         if (showShortcutsHelp) {
           setShowShortcutsHelp(false);
@@ -498,15 +456,14 @@ export function TradeDashboardForm({ mode, onDone }: TradeDashboardFormProps) {
     partyDropdownOpen, activeItemDropdownIdx
   ]);
 
-  // Focus style helper
   const isInputFocused = (key: string) => focusedField === key;
 
   return (
     <View style={styles.outerWrapper}>
-      {/* Copied / Action Toast */}
+      {/* Toast Feedback */}
       {copiedToast ? (
         <View style={styles.toastContainer}>
-          <AppIcon name={icons.done} size={18} iconColor="#fff" />
+          <AppIcon name={icons.done} size={18} iconColor="#38BDF8" />
           <Text style={styles.toastText}>{copiedToast}</Text>
         </View>
       ) : null}
@@ -516,42 +473,47 @@ export function TradeDashboardForm({ mode, onDone }: TradeDashboardFormProps) {
         contentContainerStyle={styles.contentContainer}
         keyboardShouldPersistTaps="handled"
       >
-        {/* TOP HEADER - Emerald Deep Green with curves */}
+        {/* TOP SKEUOMORPHIC HEADER - Royal Blue #1c70b9 with 3D Depth */}
         <View style={styles.headerBar}>
-          {/* Subtle decorative curved leaf watermark on right */}
-          <View style={styles.headerDecorCurves} pointerEvents="none" />
+          {/* Top gloss specular highlight */}
+          <View style={styles.headerGlossSheen} pointerEvents="none" />
 
-          {/* Left: Back button + Shopping bag icon + Title */}
+          {/* Left: Back button + Shopping Bag Icon + Title */}
           <View style={styles.headerLeft}>
             <TouchableOpacity
               onPress={onDone}
-              style={styles.backButton}
+              style={styles.backButton3D}
               accessibilityLabel="পিছনে যান"
             >
               <AppIcon name={icons.back} size={22} iconColor="#fff" />
             </TouchableOpacity>
 
             <View style={styles.headerTitleRow}>
-              <AppIcon name={isSale ? icons.sale : icons.purchase} size={24} iconColor="#fff" />
+              <View style={styles.titleIconBadge}>
+                <AppIcon name={isSale ? icons.sale : icons.purchase} size={22} iconColor="#fff" />
+              </View>
               <Text style={styles.headerTitle}>{isSale ? 'নতুন বিক্রয়' : 'নতুন ক্রয়'}</Text>
+              <View style={styles.flashyHeaderTag}>
+                <Text style={styles.flashyHeaderTagText}>সক্রিয় মোড</Text>
+              </View>
             </View>
           </View>
 
-          {/* Right: Search + Bell buttons + F1 Keyboard shortcut trigger */}
+          {/* Right: Tactile 3D Buttons for F1, Search, Bell */}
           <View style={styles.headerRight}>
             <TouchableOpacity
               onPress={() => setShowShortcutsHelp(true)}
-              style={styles.shortcutGuideBadge}
+              style={styles.shortcutGuideBadge3D}
               accessibilityLabel="কীবোর্ড শর্টকাট"
             >
-              <Text style={styles.shortcutGuideBadgeText}>F1: কীবোর্ড</Text>
+              <Text style={styles.shortcutGuideBadgeText}>⌨️ F1: কীবোর্ড</Text>
             </TouchableOpacity>
 
-            <TouchableOpacity style={styles.iconCircleButton} accessibilityLabel="খুঁজুন">
+            <TouchableOpacity style={styles.iconCircleButton3D} accessibilityLabel="খুঁজুন">
               <AppIcon name={icons.search} size={20} iconColor="#fff" />
             </TouchableOpacity>
 
-            <TouchableOpacity style={styles.iconCircleButton} accessibilityLabel="নোটিফিকেশন">
+            <TouchableOpacity style={styles.iconCircleButton3D} accessibilityLabel="নোটিফিকেশন">
               <AppIcon name={icons.bell} size={20} iconColor="#fff" />
             </TouchableOpacity>
           </View>
@@ -560,14 +522,17 @@ export function TradeDashboardForm({ mode, onDone }: TradeDashboardFormProps) {
         {/* ROW 1: TWO COLUMNS (ক্রয়ের তথ্য & তারিখ) */}
         <View style={styles.twoColRow}>
           {/* Left Card: Purchase Info */}
-          <View style={[styles.card, styles.colLeft]}>
-            <Text style={styles.cardHeaderTitle}>{isSale ? 'বিক্রয়ের তথ্য' : 'ক্রয়ের তথ্য'}</Text>
+          <View style={[styles.card3D, styles.colLeft]}>
+            <View style={styles.cardHeaderFlex}>
+              <View style={[styles.cardHeaderDot, { backgroundColor: '#1c70b9' }]} />
+              <Text style={styles.cardHeaderTitle}>{isSale ? 'বিক্রয়ের তথ্য' : 'ক্রয়ের তথ্য'}</Text>
+            </View>
 
-            {/* Order No & Memo No in 1 Row */}
+            {/* Order No & Memo No */}
             <View style={styles.formRow}>
               <View style={styles.formCol}>
                 <Text style={styles.fieldLabel}>{isSale ? 'বিক্রয় অর্ডার নং' : 'ক্রয় অর্ডার নং'}</Text>
-                <View style={[styles.inputWithIcon, isInputFocused('orderNo') && styles.inputFocused]}>
+                <View style={[styles.inputDebossed, isInputFocused('orderNo') && styles.inputFocusedGlow]}>
                   <TextInput
                     ref={el => (inputRefs.current['orderNo'] = el)}
                     value={orderNo}
@@ -580,17 +545,17 @@ export function TradeDashboardForm({ mode, onDone }: TradeDashboardFormProps) {
                   />
                   <TouchableOpacity
                     onPress={() => copyToClipboard(orderNo, 'অর্ডার নং')}
-                    style={styles.inputInnerIcon}
+                    style={styles.tactileInnerBtn}
                     accessibilityLabel="কপি করুন"
                   >
-                    <AppIcon name={icons.copy} size={18} iconColor="#64748B" />
+                    <AppIcon name={icons.copy} size={18} iconColor="#1c70b9" />
                   </TouchableOpacity>
                 </View>
               </View>
 
               <View style={styles.formCol}>
                 <Text style={styles.fieldLabel}>{isSale ? 'বিক্রয় মেমো নং' : 'ক্রয় মেমো নং'}</Text>
-                <View style={[styles.inputWithIcon, isInputFocused('memoNo') && styles.inputFocused]}>
+                <View style={[styles.inputDebossed, isInputFocused('memoNo') && styles.inputFocusedGlow]}>
                   <TextInput
                     ref={el => (inputRefs.current['memoNo'] = el)}
                     value={memoNo}
@@ -604,19 +569,19 @@ export function TradeDashboardForm({ mode, onDone }: TradeDashboardFormProps) {
                   />
                   <TouchableOpacity
                     onPress={() => copyToClipboard(memoNo, 'মেমো নং')}
-                    style={styles.inputInnerIcon}
+                    style={styles.tactileInnerBtn}
                     accessibilityLabel="কপি করুন"
                   >
-                    <AppIcon name={icons.copy} size={18} iconColor="#64748B" />
+                    <AppIcon name={icons.copy} size={18} iconColor="#1c70b9" />
                   </TouchableOpacity>
                 </View>
               </View>
             </View>
 
-            {/* Party Code with search icon */}
+            {/* Party Code */}
             <View style={styles.formGroup}>
               <Text style={styles.fieldLabel}>{isSale ? 'কাস্টমার কোড' : 'সরবরাহকারী কোড'}</Text>
-              <View style={[styles.inputWithIcon, isInputFocused('partyCode') && styles.inputFocused]}>
+              <View style={[styles.inputDebossed, isInputFocused('partyCode') && styles.inputFocusedGlow]}>
                 <TextInput
                   ref={el => (inputRefs.current['partyCode'] = el)}
                   value={partyCode}
@@ -651,17 +616,17 @@ export function TradeDashboardForm({ mode, onDone }: TradeDashboardFormProps) {
                 />
                 <TouchableOpacity
                   onPress={() => setPartyDropdownOpen(prev => !prev)}
-                  style={styles.inputInnerIcon}
+                  style={styles.tactileInnerBtn}
                 >
-                  <AppIcon name={icons.search} size={18} iconColor="#64748B" />
+                  <AppIcon name={icons.search} size={18} iconColor="#1c70b9" />
                 </TouchableOpacity>
               </View>
             </View>
 
-            {/* Party Name with Autocomplete Dropdown */}
+            {/* Party Name with Autocomplete */}
             <View style={[styles.formGroup, { position: 'relative', zIndex: 40 }]}>
               <Text style={styles.fieldLabel}>{isSale ? 'কাস্টমারের নাম' : 'সরবরাহকারীর নাম'}</Text>
-              <View style={[styles.inputWithIcon, isInputFocused('partyName') && styles.inputFocused]}>
+              <View style={[styles.inputDebossed, isInputFocused('partyName') && styles.inputFocusedGlow]}>
                 <TextInput
                   ref={el => (inputRefs.current['partyName'] = el)}
                   value={partyName}
@@ -696,15 +661,15 @@ export function TradeDashboardForm({ mode, onDone }: TradeDashboardFormProps) {
                 />
                 <TouchableOpacity
                   onPress={() => setPartyDropdownOpen(prev => !prev)}
-                  style={styles.inputInnerIcon}
+                  style={styles.tactileInnerBtn}
                 >
-                  <AppIcon name={icons.search} size={18} iconColor="#64748B" />
+                  <AppIcon name={icons.search} size={18} iconColor="#1c70b9" />
                 </TouchableOpacity>
               </View>
 
-              {/* Autocomplete Dropdown List */}
+              {/* Autocomplete Dropdown */}
               {partyDropdownOpen && (
-                <View style={styles.dropdownMenu}>
+                <View style={styles.dropdownMenu3D}>
                   <ScrollView style={{ maxHeight: 180 }} keyboardShouldPersistTaps="handled">
                     {filteredParties.length ? (
                       filteredParties.map((p, idx) => {
@@ -725,7 +690,7 @@ export function TradeDashboardForm({ mode, onDone }: TradeDashboardFormProps) {
                       })
                     ) : (
                       <View style={{ padding: 12 }}>
-                        <Text style={{ color: '#64748B', fontSize: 13, textAlign: 'center' }}>কোন সরবরাহকারী পাওয়া যায়নি</Text>
+                        <Text style={{ color: '#5B728F', fontSize: 13, textAlign: 'center' }}>কোন সরবরাহকারী পাওয়া যায়নি</Text>
                       </View>
                     )}
                   </ScrollView>
@@ -733,10 +698,10 @@ export function TradeDashboardForm({ mode, onDone }: TradeDashboardFormProps) {
               )}
             </View>
 
-            {/* Mobile Number */}
+            {/* Mobile */}
             <View style={styles.formGroup}>
               <Text style={styles.fieldLabel}>মোবাইল নম্বর</Text>
-              <View style={[styles.inputWithIcon, isInputFocused('partyMobile') && styles.inputFocused]}>
+              <View style={[styles.inputDebossed, isInputFocused('partyMobile') && styles.inputFocusedGlow]}>
                 <TextInput
                   ref={el => (inputRefs.current['partyMobile'] = el)}
                   value={partyMobile}
@@ -754,7 +719,7 @@ export function TradeDashboardForm({ mode, onDone }: TradeDashboardFormProps) {
             {/* Address */}
             <View style={styles.formGroup}>
               <Text style={styles.fieldLabel}>ঠিকানা</Text>
-              <View style={[styles.textareaWrapper, isInputFocused('partyAddress') && styles.inputFocused]}>
+              <View style={[styles.textareaDebossed, isInputFocused('partyAddress') && styles.inputFocusedGlow]}>
                 <TextInput
                   ref={el => (inputRefs.current['partyAddress'] = el)}
                   value={partyAddress}
@@ -775,13 +740,16 @@ export function TradeDashboardForm({ mode, onDone }: TradeDashboardFormProps) {
           </View>
 
           {/* Right Card: Date */}
-          <View style={[styles.card, styles.colRight]}>
-            <Text style={styles.cardHeaderTitle}>তারিখ</Text>
+          <View style={[styles.card3D, styles.colRight]}>
+            <View style={styles.cardHeaderFlex}>
+              <View style={[styles.cardHeaderDot, { backgroundColor: '#0284C7' }]} />
+              <Text style={styles.cardHeaderTitle}>তারিখ বিবরণ</Text>
+            </View>
 
             {/* Bill Date */}
             <View style={styles.formGroup}>
               <Text style={styles.fieldLabel}>{isSale ? 'বিক্রয়ের তারিখ' : 'বিলের তারিখ'}</Text>
-              <View style={[styles.inputWithIcon, isInputFocused('billDate') && styles.inputFocused]}>
+              <View style={[styles.inputDebossed, isInputFocused('billDate') && styles.inputFocusedGlow]}>
                 <TextInput
                   ref={el => (inputRefs.current['billDate'] = el)}
                   value={billDate}
@@ -792,8 +760,8 @@ export function TradeDashboardForm({ mode, onDone }: TradeDashboardFormProps) {
                   placeholder="20/09/2026"
                   returnKeyType="next"
                 />
-                <View style={styles.inputInnerIcon}>
-                  <AppIcon name={icons.calendar} size={18} iconColor="#64748B" />
+                <View style={styles.tactileInnerBtn}>
+                  <AppIcon name={icons.calendar} size={18} iconColor="#1c70b9" />
                 </View>
               </View>
             </View>
@@ -801,7 +769,7 @@ export function TradeDashboardForm({ mode, onDone }: TradeDashboardFormProps) {
             {/* Due Date */}
             <View style={styles.formGroup}>
               <Text style={styles.fieldLabel}>পরিশোধের শেষ তারিখ</Text>
-              <View style={[styles.inputWithIcon, isInputFocused('dueDate') && styles.inputFocused]}>
+              <View style={[styles.inputDebossed, isInputFocused('dueDate') && styles.inputFocusedGlow]}>
                 <TextInput
                   ref={el => (inputRefs.current['dueDate'] = el)}
                   value={dueDate}
@@ -815,31 +783,45 @@ export function TradeDashboardForm({ mode, onDone }: TradeDashboardFormProps) {
                   placeholder="20/09/2026"
                   returnKeyType="next"
                 />
-                <View style={styles.inputInnerIcon}>
-                  <AppIcon name={icons.calendar} size={18} iconColor="#64748B" />
+                <View style={styles.tactileInnerBtn}>
+                  <AppIcon name={icons.calendar} size={18} iconColor="#1c70b9" />
                 </View>
+              </View>
+            </View>
+
+            {/* Decorative Flashy Skeuomorphic Widget */}
+            <View style={styles.flashyInfoBanner}>
+              <View style={styles.flashyInfoIcon}>
+                <AppIcon name={icons.profit} size={20} iconColor="#1c70b9" />
+              </View>
+              <View style={{ flex: 1 }}>
+                <Text style={styles.flashyInfoTitle}>দ্রুত ক্রয় ও ইনভয়েস</Text>
+                <Text style={styles.flashyInfoSub}>কীবোর্ড শর্টকাট ব্যবহারে সময় বাঁচান এবং নির্ভুল হিসাব রাখুন।</Text>
               </View>
             </View>
           </View>
         </View>
 
         {/* ROW 2: PRODUCTS TABLE CARD */}
-        <View style={[styles.card, styles.tableCard]}>
+        <View style={[styles.card3D, styles.tableCard]}>
           <View style={styles.tableCardHeader}>
-            <Text style={styles.cardHeaderTitle}>পণ্যের তালিকা</Text>
+            <View style={styles.cardHeaderFlex}>
+              <View style={[styles.cardHeaderDot, { backgroundColor: '#10B981' }]} />
+              <Text style={styles.cardHeaderTitle}>পণ্যের তালিকা</Text>
+            </View>
 
             <TouchableOpacity
               onPress={() => addNewRow(true)}
-              style={styles.addProductBtn}
+              style={styles.addProductBtn3D}
               accessibilityLabel="পণ্য যোগ করুন (Alt+A)"
             >
-              <AppIcon name={icons.add} size={18} iconColor="#006A4E" />
+              <AppIcon name={icons.add} size={18} iconColor="#1c70b9" />
               <Text style={styles.addProductBtnText}>+ পণ্য যোগ করুন</Text>
             </TouchableOpacity>
           </View>
 
           {/* Table Header Row */}
-          <View style={styles.tableHeaderRow}>
+          <View style={styles.tableHeaderRow3D}>
             <Text style={[styles.th, { width: 55, textAlign: 'center' }]}>ক্রম</Text>
             <Text style={[styles.th, { width: 140 }]}>পণ্য কোড</Text>
             <Text style={[styles.th, { flex: 2 }]}>পণ্যের নাম</Text>
@@ -864,12 +846,14 @@ export function TradeDashboardForm({ mode, onDone }: TradeDashboardFormProps) {
               <View key={row.id} style={styles.tableDataRow}>
                 {/* Serial # */}
                 <View style={[styles.td, { width: 55, alignItems: 'center', justifyContent: 'center' }]}>
-                  <Text style={styles.cellText}>{toBnDigits(String(rowIdx + 1))}</Text>
+                  <View style={styles.serialBadge}>
+                    <Text style={styles.serialText}>{toBnDigits(String(rowIdx + 1))}</Text>
+                  </View>
                 </View>
 
                 {/* Product Code */}
                 <View style={[styles.td, { width: 140 }]}>
-                  <View style={[styles.tableInputWithIcon, isInputFocused(`code_${rowIdx}`) && styles.inputFocused]}>
+                  <View style={[styles.tableInputDebossed, isInputFocused(`code_${rowIdx}`) && styles.inputFocusedGlow]}>
                     <TextInput
                       ref={el => (inputRefs.current[`code_${rowIdx}`] = el)}
                       value={row.code}
@@ -893,12 +877,12 @@ export function TradeDashboardForm({ mode, onDone }: TradeDashboardFormProps) {
                       onPress={() => setActiveItemDropdownIdx(activeItemDropdownIdx === rowIdx ? null : rowIdx)}
                       style={styles.tableIconWrap}
                     >
-                      <AppIcon name={icons.search} size={16} iconColor="#64748B" />
+                      <AppIcon name={icons.search} size={16} iconColor="#1c70b9" />
                     </TouchableOpacity>
                   </View>
                 </View>
 
-                {/* Product Name with Autocomplete Dropdown */}
+                {/* Product Name with Autocomplete */}
                 <View style={[styles.td, { flex: 2, position: 'relative', zIndex: 30 - rowIdx }]}>
                   <TextInput
                     ref={el => (inputRefs.current[`name_${rowIdx}`] = el)}
@@ -932,14 +916,14 @@ export function TradeDashboardForm({ mode, onDone }: TradeDashboardFormProps) {
                         }
                       }
                     }}
-                    style={[styles.tableTextInput, isInputFocused(`name_${rowIdx}`) && styles.inputFocused]}
+                    style={[styles.tableTextInput, isInputFocused(`name_${rowIdx}`) && styles.inputFocusedGlow]}
                     placeholder="আতপ চাল"
                     returnKeyType="next"
                   />
 
                   {/* Product Dropdown */}
                   {activeItemDropdownIdx === rowIdx && (
-                    <View style={styles.itemDropdownMenu}>
+                    <View style={styles.dropdownMenu3D}>
                       <ScrollView style={{ maxHeight: 180 }} keyboardShouldPersistTaps="handled">
                         {filteredRowProducts.length ? (
                           filteredRowProducts.map((p, pIdx) => {
@@ -960,7 +944,7 @@ export function TradeDashboardForm({ mode, onDone }: TradeDashboardFormProps) {
                           })
                         ) : (
                           <View style={{ padding: 10 }}>
-                            <Text style={{ color: '#64748B', fontSize: 13, textAlign: 'center' }}>কোন পণ্য পাওয়া যায়নি</Text>
+                            <Text style={{ color: '#5B728F', fontSize: 13, textAlign: 'center' }}>কোন পণ্য পাওয়া যায়নি</Text>
                           </View>
                         )}
                       </ScrollView>
@@ -988,7 +972,7 @@ export function TradeDashboardForm({ mode, onDone }: TradeDashboardFormProps) {
                     style={[
                       styles.tableTextInput,
                       { textAlign: 'center' },
-                      isInputFocused(`qty_${rowIdx}`) && styles.inputFocused,
+                      isInputFocused(`qty_${rowIdx}`) && styles.inputFocusedGlow,
                     ]}
                     placeholder="1"
                     keyboardType="numeric"
@@ -1010,7 +994,6 @@ export function TradeDashboardForm({ mode, onDone }: TradeDashboardFormProps) {
                     }}
                     onFocus={() => setFocusedField(`rate_${rowIdx}`)}
                     onSubmitEditing={() => {
-                      // Keyboard-first magic: pressing enter on rate adds new row or moves to additional costs
                       if (rowIdx === items.length - 1) {
                         if (row.name.trim() || parseNum(row.qty) > 0) {
                           addNewRow(true);
@@ -1026,7 +1009,7 @@ export function TradeDashboardForm({ mode, onDone }: TradeDashboardFormProps) {
                     style={[
                       styles.tableTextInput,
                       { textAlign: 'center' },
-                      isInputFocused(`rate_${rowIdx}`) && styles.inputFocused,
+                      isInputFocused(`rate_${rowIdx}`) && styles.inputFocusedGlow,
                     ]}
                     placeholder="200"
                     keyboardType="numeric"
@@ -1034,23 +1017,23 @@ export function TradeDashboardForm({ mode, onDone }: TradeDashboardFormProps) {
                   />
                 </View>
 
-                {/* Total (Read-only grey box) */}
+                {/* Total Box */}
                 <View style={[styles.td, { width: 140, alignItems: 'center', justifyContent: 'center' }]}>
-                  <View style={styles.tableTotalBox}>
+                  <View style={styles.tableTotalBox3D}>
                     <Text style={styles.tableTotalText}>
                       {rowTotal ? toBnDigits(String(rowTotal)) : '০'}
                     </Text>
                   </View>
                 </View>
 
-                {/* Action: Red Outline Delete Icon */}
+                {/* Delete Button */}
                 <View style={[styles.td, { width: 70, alignItems: 'center', justifyContent: 'center' }]}>
                   <TouchableOpacity
                     onPress={() => removeRow(rowIdx)}
-                    style={styles.deleteRowBtn}
+                    style={styles.deleteRowBtn3D}
                     accessibilityLabel="পণ্য বাদ দিন"
                   >
-                    <AppIcon name={icons.del} size={20} iconColor="#EF4444" />
+                    <AppIcon name={icons.del} size={18} iconColor="#E11D48" />
                   </TouchableOpacity>
                 </View>
               </View>
@@ -1060,13 +1043,19 @@ export function TradeDashboardForm({ mode, onDone }: TradeDashboardFormProps) {
 
         {/* ROW 3: TWO COLUMNS (অতিরিক্ত খরচ & হিসাব বিবরণ) */}
         <View style={[styles.twoColRow, { marginTop: 16 }]}>
-          {/* Left Card: অতিরিক্ত খরচ (4 fields matching image) */}
-          <View style={[styles.card, styles.colLeft]}>
-            <Text style={styles.cardHeaderTitle}>অতিরিক্ত খরচ</Text>
+          {/* Left Card: অতিরিক্ত খরচ */}
+          <View style={[styles.card3D, styles.colLeft]}>
+            <View style={styles.cardHeaderFlex}>
+              <View style={[styles.cardHeaderDot, { backgroundColor: '#F59E0B' }]} />
+              <Text style={styles.cardHeaderTitle}>অতিরিক্ত খরচ</Text>
+            </View>
 
             {/* সরাসরি খরচ (৳) */}
             <View style={styles.calcRow}>
-              <Text style={styles.calcLabel}>সরাসরি খরচ (৳)</Text>
+              <View style={styles.calcLabelRow}>
+                <View style={[styles.calcDot, { backgroundColor: '#F59E0B' }]} />
+                <Text style={styles.calcLabel}>সরাসরি খরচ (৳)</Text>
+              </View>
               <TextInput
                 ref={el => (inputRefs.current['directCost'] = el)}
                 value={directCost}
@@ -1074,8 +1063,8 @@ export function TradeDashboardForm({ mode, onDone }: TradeDashboardFormProps) {
                 onFocus={() => setFocusedField('directCost')}
                 onSubmitEditing={() => focusNextField('directCost')}
                 style={[
-                  styles.calcInputBox,
-                  isInputFocused('directCost') && styles.inputFocused,
+                  styles.calcInputDebossed,
+                  isInputFocused('directCost') && styles.inputFocusedGlow,
                 ]}
                 placeholder="0"
                 keyboardType="numeric"
@@ -1085,7 +1074,10 @@ export function TradeDashboardForm({ mode, onDone }: TradeDashboardFormProps) {
 
             {/* পরিবহন খরচ (৳) */}
             <View style={styles.calcRow}>
-              <Text style={styles.calcLabel}>পরিবহন খরচ (৳)</Text>
+              <View style={styles.calcLabelRow}>
+                <View style={[styles.calcDot, { backgroundColor: '#0284C7' }]} />
+                <Text style={styles.calcLabel}>পরিবহন খরচ (৳)</Text>
+              </View>
               <TextInput
                 ref={el => (inputRefs.current['transportCost'] = el)}
                 value={transportCost}
@@ -1093,8 +1085,8 @@ export function TradeDashboardForm({ mode, onDone }: TradeDashboardFormProps) {
                 onFocus={() => setFocusedField('transportCost')}
                 onSubmitEditing={() => focusNextField('transportCost')}
                 style={[
-                  styles.calcInputBox,
-                  isInputFocused('transportCost') && styles.inputFocused,
+                  styles.calcInputDebossed,
+                  isInputFocused('transportCost') && styles.inputFocusedGlow,
                 ]}
                 placeholder="500"
                 keyboardType="numeric"
@@ -1104,7 +1096,10 @@ export function TradeDashboardForm({ mode, onDone }: TradeDashboardFormProps) {
 
             {/* ল্যান্ডিং খরচ (৳) */}
             <View style={styles.calcRow}>
-              <Text style={styles.calcLabel}>ল্যান্ডিং খরচ (৳)</Text>
+              <View style={styles.calcLabelRow}>
+                <View style={[styles.calcDot, { backgroundColor: '#10B981' }]} />
+                <Text style={styles.calcLabel}>ল্যান্ডিং খরচ (৳)</Text>
+              </View>
               <TextInput
                 ref={el => (inputRefs.current['landingCost'] = el)}
                 value={landingCost}
@@ -1112,8 +1107,8 @@ export function TradeDashboardForm({ mode, onDone }: TradeDashboardFormProps) {
                 onFocus={() => setFocusedField('landingCost')}
                 onSubmitEditing={() => focusNextField('landingCost')}
                 style={[
-                  styles.calcInputBox,
-                  isInputFocused('landingCost') && styles.inputFocused,
+                  styles.calcInputDebossed,
+                  isInputFocused('landingCost') && styles.inputFocusedGlow,
                 ]}
                 placeholder="500"
                 keyboardType="numeric"
@@ -1123,7 +1118,10 @@ export function TradeDashboardForm({ mode, onDone }: TradeDashboardFormProps) {
 
             {/* অন্যান্য খরচ (৳) */}
             <View style={styles.calcRow}>
-              <Text style={styles.calcLabel}>অন্যান্য খরচ (৳)</Text>
+              <View style={styles.calcLabelRow}>
+                <View style={[styles.calcDot, { backgroundColor: '#8B5CF6' }]} />
+                <Text style={styles.calcLabel}>অন্যান্য খরচ (৳)</Text>
+              </View>
               <TextInput
                 ref={el => (inputRefs.current['otherCost'] = el)}
                 value={otherCost}
@@ -1131,8 +1129,8 @@ export function TradeDashboardForm({ mode, onDone }: TradeDashboardFormProps) {
                 onFocus={() => setFocusedField('otherCost')}
                 onSubmitEditing={() => focusNextField('otherCost')}
                 style={[
-                  styles.calcInputBox,
-                  isInputFocused('otherCost') && styles.inputFocused,
+                  styles.calcInputDebossed,
+                  isInputFocused('otherCost') && styles.inputFocusedGlow,
                 ]}
                 placeholder="200"
                 keyboardType="numeric"
@@ -1142,14 +1140,17 @@ export function TradeDashboardForm({ mode, onDone }: TradeDashboardFormProps) {
           </View>
 
           {/* Right Card: হিসাব বিবরণ */}
-          <View style={[styles.card, styles.colRight]}>
-            <Text style={styles.cardHeaderTitle}>হিসাব বিবরণ</Text>
+          <View style={[styles.card3D, styles.colRight]}>
+            <View style={styles.cardHeaderFlex}>
+              <View style={[styles.cardHeaderDot, { backgroundColor: '#1c70b9' }]} />
+              <Text style={styles.cardHeaderTitle}>হিসাব বিবরণ</Text>
+            </View>
 
             {/* মোট পণ্যের মূল্য (৳) */}
             <View style={styles.calcRow}>
               <Text style={styles.calcLabel}>মোট পণ্যের মূল্য (৳)</Text>
-              <View style={styles.readOnlyCalcBox}>
-                <Text style={styles.readOnlyCalcText}>
+              <View style={styles.readOnlySunkenBox}>
+                <Text style={styles.readOnlySunkenText}>
                   {toBnDigits(String(Math.round(totalProductValue)))}
                 </Text>
               </View>
@@ -1158,8 +1159,8 @@ export function TradeDashboardForm({ mode, onDone }: TradeDashboardFormProps) {
             {/* পূর্বের বাকি (৳) */}
             <View style={styles.calcRow}>
               <Text style={styles.calcLabel}>পূর্বের বাকি (৳)</Text>
-              <View style={styles.readOnlyCalcBox}>
-                <Text style={styles.readOnlyCalcText}>
+              <View style={[styles.readOnlySunkenBox, { backgroundColor: '#FFF5F5', borderColor: '#FED7D7' }]}>
+                <Text style={[styles.readOnlySunkenText, { color: '#C53030' }]}>
                   {toBnDigits(String(Math.round(prevDue)).replace(/\B(?=(\d{3})+(?!\d))/g, ','))}
                 </Text>
               </View>
@@ -1175,8 +1176,8 @@ export function TradeDashboardForm({ mode, onDone }: TradeDashboardFormProps) {
                 onFocus={() => setFocusedField('cashPaid')}
                 onSubmitEditing={() => focusNextField('cashPaid')}
                 style={[
-                  styles.calcInputBox,
-                  isInputFocused('cashPaid') && styles.inputFocused,
+                  styles.calcInputDebossed,
+                  isInputFocused('cashPaid') && styles.inputFocusedGlow,
                 ]}
                 placeholder="3000"
                 keyboardType="numeric"
@@ -1194,8 +1195,8 @@ export function TradeDashboardForm({ mode, onDone }: TradeDashboardFormProps) {
                 onFocus={() => setFocusedField('bankPaid')}
                 onSubmitEditing={() => handleComplete()}
                 style={[
-                  styles.calcInputBox,
-                  isInputFocused('bankPaid') && styles.inputFocused,
+                  styles.calcInputDebossed,
+                  isInputFocused('bankPaid') && styles.inputFocusedGlow,
                 ]}
                 placeholder="0"
                 keyboardType="numeric"
@@ -1203,9 +1204,12 @@ export function TradeDashboardForm({ mode, onDone }: TradeDashboardFormProps) {
               />
             </View>
 
-            {/* Grand Total Banner */}
-            <View style={styles.grandTotalBanner}>
-              <Text style={styles.grandTotalLabel}>সর্বমোট (৳)</Text>
+            {/* Flashy Grand Total Banner (Skeuomorphic Azure-Cyan) */}
+            <View style={styles.grandTotalBanner3D}>
+              <View>
+                <Text style={styles.grandTotalLabel}>সর্বমোট (৳)</Text>
+                <Text style={styles.grandTotalSub}>নিট প্রদেয় বা অবশিষ্ট বাকি</Text>
+              </View>
               <Text style={styles.grandTotalValue}>
                 {toBnDigits(String(Math.round(grandTotal)).replace(/\B(?=(\d{3})+(?!\d))/g, ','))}
               </Text>
@@ -1218,30 +1222,30 @@ export function TradeDashboardForm({ mode, onDone }: TradeDashboardFormProps) {
           <View style={styles.footerLeftButtons}>
             <TouchableOpacity
               onPress={onDone}
-              style={styles.cancelOutlineBtn}
+              style={styles.cancelButton3D}
               accessibilityLabel="বাতিল করুন (Esc)"
             >
-              <AppIcon name={icons.cancel} size={18} iconColor="#475569" />
-              <Text style={styles.cancelOutlineBtnText}>বাতিল করুন</Text>
+              <AppIcon name={icons.cancel} size={18} iconColor="#4B627E" />
+              <Text style={styles.cancelButton3DText}>বাতিল করুন</Text>
             </TouchableOpacity>
 
             <TouchableOpacity
               onPress={handleSaveDraft}
-              style={styles.draftOutlineBtn}
+              style={styles.draftButton3D}
               accessibilityLabel="ড্রাফট সংরক্ষণ (Ctrl+D)"
             >
-              <AppIcon name={icons.draft} size={18} iconColor="#475569" />
-              <Text style={styles.draftOutlineBtnText}>ড্রাফট সংরক্ষণ</Text>
+              <AppIcon name={icons.draft} size={18} iconColor="#1c70b9" />
+              <Text style={styles.draftButton3DText}>ড্রাফট সংরক্ষণ</Text>
             </TouchableOpacity>
           </View>
 
           <TouchableOpacity
             onPress={handleComplete}
-            style={styles.completeBtn}
+            style={styles.completeButton3D}
             accessibilityLabel="ক্রয় সম্পন্ন করুন (Ctrl+S / F8)"
           >
-            <AppIcon name={isSale ? icons.sale : icons.purchase} size={20} iconColor="#fff" />
-            <Text style={styles.completeBtnText}>
+            <AppIcon name={isSale ? icons.sale : icons.purchase} size={22} iconColor="#fff" />
+            <Text style={styles.completeButton3DText}>
               {isSale ? 'বিক্রয় সম্পন্ন করুন' : 'ক্রয় সম্পন্ন করুন'}
             </Text>
           </TouchableOpacity>
@@ -1275,7 +1279,7 @@ export function TradeDashboardForm({ mode, onDone }: TradeDashboardFormProps) {
           style={styles.modalOverlay}
         >
           <TouchableOpacity activeOpacity={1} style={styles.shortcutModalBox}>
-            <View style={styles.modalHeader}>
+            <View style={styles.modalHeader3D}>
               <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
                 <AppIcon name={icons.calc} size={22} iconColor="#fff" />
                 <Text style={styles.modalTitle}>কীবোর্ড শর্টকাট সহায়িকা (Keyboard First)</Text>
@@ -1329,8 +1333,8 @@ export function TradeDashboardForm({ mode, onDone }: TradeDashboardFormProps) {
                 <Text style={styles.shortcutDesc}>শর্টকাট সহায়িকা খুলুন বা বন্ধ করুন (Toggle Shortcuts)</Text>
               </View>
 
-              <View style={{ backgroundColor: '#F0FDF4', padding: 12, borderRadius: 8, marginTop: 12 }}>
-                <Text style={{ fontSize: 13, color: '#166534', fontWeight: '600' }}>
+              <View style={{ backgroundColor: '#F0F9FF', padding: 12, borderRadius: 8, marginTop: 12, borderWidth: 1, borderColor: '#BAE6FD' }}>
+                <Text style={{ fontSize: 13, color: '#0369A1', fontWeight: '600' }}>
                   💡 টিপস: রেট (দর) ঘরে এন্টার চাপলে স্বয়ংক্রিয়ভাবে নতুন সারিতে চলে যাবে। বাংলা ও ইংরেজি উভয় সংখ্যাই টাইপ করা যাবে।
                 </Text>
               </View>
@@ -1346,11 +1350,11 @@ const styles = StyleSheet.create({
   outerWrapper: {
     flex: 1,
     position: 'relative',
-    backgroundColor: '#F3F7F5',
+    backgroundColor: '#F0F6FC',
   },
   container: {
     flex: 1,
-    backgroundColor: '#F3F7F5',
+    backgroundColor: '#F0F6FC',
   },
   contentContainer: {
     padding: 16,
@@ -1364,46 +1368,53 @@ const styles = StyleSheet.create({
     top: 20,
     alignSelf: 'center',
     zIndex: 9999,
-    backgroundColor: '#0F172A',
+    backgroundColor: '#0F1E36',
     borderRadius: 24,
     paddingHorizontal: 20,
     paddingVertical: 10,
     flexDirection: 'row',
     alignItems: 'center',
     gap: 8,
-    shadowColor: '#000',
-    shadowOpacity: 0.25,
-    shadowRadius: 8,
-    elevation: 10,
+    borderWidth: 1,
+    borderColor: '#38BDF8',
+    ...(Platform.OS === 'web' ? {
+      boxShadow: '0 8px 24px rgba(15, 30, 54, 0.35), inset 0 1px 0 rgba(255, 255, 255, 0.2)',
+    } as any : {}),
   },
   toastText: {
     color: '#fff',
     fontSize: 14,
-    fontWeight: '600',
+    fontWeight: '700',
   },
 
-  // HEADER BAR
+  // SKEUOMORPHIC HEADER BAR
   headerBar: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    backgroundColor: '#006A4E',
-    borderRadius: 14,
-    paddingHorizontal: 16,
+    backgroundColor: '#1c70b9',
+    borderRadius: 16,
+    paddingHorizontal: 18,
     paddingVertical: 14,
     marginBottom: 16,
     position: 'relative',
     overflow: 'hidden',
+    borderTopWidth: 1.5,
+    borderTopColor: '#60b0f4',
+    borderBottomWidth: 3.5,
+    borderBottomColor: '#124c7e',
+    ...(Platform.OS === 'web' ? {
+      backgroundImage: 'linear-gradient(135deg, #2592ed 0%, #1c70b9 52%, #12518e 100%)',
+      boxShadow: '0 8px 22px rgba(28, 112, 185, 0.38), inset 0 1px 0 rgba(255, 255, 255, 0.45)',
+    } as any : {}),
   },
-  headerDecorCurves: {
+  headerGlossSheen: {
     position: 'absolute',
-    top: -20,
-    right: -20,
-    width: 200,
-    height: 120,
-    borderBottomLeftRadius: 100,
-    borderTopLeftRadius: 100,
-    backgroundColor: 'rgba(255, 255, 255, 0.05)',
+    top: 0,
+    left: 0,
+    right: 0,
+    height: 18,
+    backgroundColor: 'rgba(255, 255, 255, 0.18)',
   },
   headerLeft: {
     flexDirection: 'row',
@@ -1411,20 +1422,58 @@ const styles = StyleSheet.create({
     gap: 12,
     zIndex: 2,
   },
-  backButton: {
-    padding: 6,
-    borderRadius: 8,
+  backButton3D: {
+    padding: 7,
+    borderRadius: 10,
     backgroundColor: 'rgba(255, 255, 255, 0.16)',
+    borderTopWidth: 1,
+    borderTopColor: 'rgba(255, 255, 255, 0.4)',
+    borderBottomWidth: 2,
+    borderBottomColor: 'rgba(0, 0, 0, 0.25)',
+    ...(Platform.OS === 'web' ? {
+      cursor: 'pointer',
+      boxShadow: '0 2px 6px rgba(0, 0, 0, 0.15)',
+    } as any : {}),
   },
   headerTitleRow: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: 10,
   },
+  titleIconBadge: {
+    width: 34,
+    height: 34,
+    borderRadius: 10,
+    backgroundColor: 'rgba(255, 255, 255, 0.2)',
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderTopWidth: 1,
+    borderTopColor: 'rgba(255, 255, 255, 0.45)',
+    borderBottomWidth: 2,
+    borderBottomColor: 'rgba(0, 0, 0, 0.2)',
+  },
   headerTitle: {
     color: '#fff',
-    fontSize: 20,
-    fontWeight: '700',
+    fontSize: 21,
+    fontWeight: '800',
+    letterSpacing: 0.3,
+    ...(Platform.OS === 'web' ? {
+      textShadow: '0 1px 2px rgba(0, 0, 0, 0.25)',
+    } as any : {}),
+  },
+  flashyHeaderTag: {
+    backgroundColor: '#38BDF8',
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+    borderRadius: 12,
+    marginLeft: 4,
+    borderWidth: 1,
+    borderColor: '#7DD3FC',
+  },
+  flashyHeaderTagText: {
+    color: '#0C4A7E',
+    fontSize: 11,
+    fontWeight: '800',
   },
   headerRight: {
     flexDirection: 'row',
@@ -1432,26 +1481,40 @@ const styles = StyleSheet.create({
     gap: 10,
     zIndex: 2,
   },
-  shortcutGuideBadge: {
-    paddingHorizontal: 10,
-    paddingVertical: 6,
-    borderRadius: 6,
-    backgroundColor: 'rgba(255, 255, 255, 0.16)',
-    borderWidth: 1,
-    borderColor: 'rgba(255, 255, 255, 0.25)',
+  shortcutGuideBadge3D: {
+    paddingHorizontal: 12,
+    paddingVertical: 7,
+    borderRadius: 10,
+    backgroundColor: 'rgba(255, 255, 255, 0.18)',
+    borderTopWidth: 1,
+    borderTopColor: 'rgba(255, 255, 255, 0.4)',
+    borderBottomWidth: 2,
+    borderBottomColor: 'rgba(0, 0, 0, 0.25)',
+    ...(Platform.OS === 'web' ? {
+      cursor: 'pointer',
+      boxShadow: '0 2px 6px rgba(0, 0, 0, 0.15)',
+    } as any : {}),
   },
   shortcutGuideBadgeText: {
     color: '#fff',
     fontSize: 12,
-    fontWeight: '700',
+    fontWeight: '800',
   },
-  iconCircleButton: {
+  iconCircleButton3D: {
     width: 38,
     height: 38,
     borderRadius: 19,
-    backgroundColor: 'rgba(255, 255, 255, 0.16)',
+    backgroundColor: 'rgba(255, 255, 255, 0.18)',
+    borderTopWidth: 1,
+    borderTopColor: 'rgba(255, 255, 255, 0.4)',
+    borderBottomWidth: 2,
+    borderBottomColor: 'rgba(0, 0, 0, 0.25)',
     alignItems: 'center',
     justifyContent: 'center',
+    ...(Platform.OS === 'web' ? {
+      cursor: 'pointer',
+      boxShadow: '0 2px 6px rgba(0, 0, 0, 0.15)',
+    } as any : {}),
   },
 
   // TWO COLUMN LAYOUT
@@ -1466,26 +1529,42 @@ const styles = StyleSheet.create({
     flex: 1,
   },
 
-  // CARD STYLING
-  card: {
-    backgroundColor: '#fff',
-    borderRadius: 14,
-    borderWidth: 1,
-    borderColor: '#E2E8F0',
-    padding: 16,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 1 },
-    shadowOpacity: 0.04,
-    shadowRadius: 3,
+  // SKEUOMORPHIC 3D CARDS
+  card3D: {
+    backgroundColor: '#FFFFFF',
+    borderRadius: 16,
+    borderWidth: 1.5,
+    borderColor: '#D8E7F5',
+    padding: 18,
+    ...(Platform.OS === 'web' ? {
+      boxShadow: '0 10px 28px -4px rgba(28, 112, 185, 0.09), 0 2px 6px rgba(0, 0, 0, 0.03), inset 0 1px 0 #FFFFFF',
+    } as any : {
+      elevation: 4,
+      shadowColor: '#1c70b9',
+      shadowOffset: { width: 0, height: 4 },
+      shadowOpacity: 0.1,
+      shadowRadius: 8,
+    }),
+  },
+  cardHeaderFlex: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    marginBottom: 14,
+  },
+  cardHeaderDot: {
+    width: 8,
+    height: 8,
+    borderRadius: 4,
   },
   cardHeaderTitle: {
     fontSize: 16,
-    fontWeight: '700',
-    color: '#0F2C20',
-    marginBottom: 14,
+    fontWeight: '800',
+    color: '#0F2B48',
+    letterSpacing: 0.2,
   },
 
-  // FORM GROUPS & INPUTS
+  // FORM GROUPS & DEBOSSED INPUTS
   formRow: {
     flexDirection: 'row',
     gap: 12,
@@ -1499,52 +1578,67 @@ const styles = StyleSheet.create({
   },
   fieldLabel: {
     fontSize: 13,
-    color: '#334155',
-    fontWeight: '600',
+    color: '#3A526E',
+    fontWeight: '700',
     marginBottom: 6,
   },
-  inputWithIcon: {
+  inputDebossed: {
     flexDirection: 'row',
     alignItems: 'center',
-    borderWidth: 1,
-    borderColor: '#CBD5E1',
-    borderRadius: 8,
-    backgroundColor: '#fff',
+    borderWidth: 1.5,
+    borderColor: '#CCE0F2',
+    borderRadius: 10,
+    backgroundColor: '#F8FAFD',
     paddingHorizontal: 10,
     height: 42,
+    ...(Platform.OS === 'web' ? {
+      boxShadow: 'inset 0 2px 4px rgba(28, 112, 185, 0.05)',
+    } as any : {}),
   },
-  inputFocused: {
-    borderColor: '#006A4E',
+  inputFocusedGlow: {
+    borderColor: '#1c70b9',
     borderWidth: 2,
-    ...(Platform.OS === 'web'
-      ? ({ boxShadow: '0 0 0 3px rgba(0, 106, 78, 0.15)' } as any)
-      : {}),
+    backgroundColor: '#FFFFFF',
+    ...(Platform.OS === 'web' ? {
+      boxShadow: '0 0 0 4px rgba(28, 112, 185, 0.22), inset 0 1px 2px rgba(28, 112, 185, 0.06)',
+    } as any : {}),
   },
-  inputInnerIcon: {
-    paddingLeft: 6,
+  tactileInnerBtn: {
+    padding: 6,
+    borderRadius: 6,
+    backgroundColor: '#EAF3FC',
     alignItems: 'center',
     justifyContent: 'center',
+    ...(Platform.OS === 'web' ? {
+      cursor: 'pointer',
+      boxShadow: '0 1px 3px rgba(28, 112, 185, 0.1)',
+    } as any : {}),
   },
   textInput: {
     flex: 1,
     fontSize: 14,
-    color: '#0F172A',
+    fontWeight: '600',
+    color: '#0F1E36',
     paddingVertical: 6,
     ...(Platform.OS === 'web' ? ({ outlineStyle: 'none' } as any) : {}),
   },
-  textareaWrapper: {
-    borderWidth: 1,
-    borderColor: '#CBD5E1',
-    borderRadius: 8,
-    backgroundColor: '#fff',
+  textareaDebossed: {
+    borderWidth: 1.5,
+    borderColor: '#CCE0F2',
+    borderRadius: 10,
+    backgroundColor: '#F8FAFD',
     padding: 8,
     height: 68,
     position: 'relative',
+    ...(Platform.OS === 'web' ? {
+      boxShadow: 'inset 0 2px 4px rgba(28, 112, 185, 0.05)',
+    } as any : {}),
   },
   textareaInput: {
     flex: 1,
     fontSize: 14,
-    color: '#0F172A',
+    fontWeight: '600',
+    color: '#0F1E36',
     textAlignVertical: 'top',
     ...(Platform.OS === 'web' ? ({ outlineStyle: 'none', resize: 'none' } as any) : {}),
   },
@@ -1563,21 +1657,25 @@ const styles = StyleSheet.create({
   },
 
   // DROPDOWNS
-  dropdownMenu: {
+  dropdownMenu3D: {
     position: 'absolute',
     top: 70,
     left: 0,
     right: 0,
     backgroundColor: '#fff',
-    borderRadius: 8,
-    borderWidth: 1,
-    borderColor: '#CBD5E1',
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.12,
-    shadowRadius: 8,
-    elevation: 10,
+    borderRadius: 12,
+    borderWidth: 1.5,
+    borderColor: '#BEE0FA',
+    shadowColor: '#1c70b9',
+    shadowOffset: { width: 0, height: 6 },
+    shadowOpacity: 0.15,
+    shadowRadius: 12,
+    elevation: 12,
     zIndex: 100,
+    overflow: 'hidden',
+    ...(Platform.OS === 'web' ? {
+      boxShadow: '0 12px 30px rgba(28, 112, 185, 0.18), inset 0 1px 0 #FFFFFF',
+    } as any : {}),
   },
   dropdownItem: {
     flexDirection: 'row',
@@ -1586,25 +1684,61 @@ const styles = StyleSheet.create({
     paddingHorizontal: 12,
     paddingVertical: 10,
     borderBottomWidth: 1,
-    borderBottomColor: '#F1F5F9',
+    borderBottomColor: '#F0F6FC',
   },
   dropdownItemActive: {
-    backgroundColor: '#EDF5F0',
+    backgroundColor: '#EBF4FE',
   },
   dropdownItemText: {
     fontSize: 14,
-    fontWeight: '600',
-    color: '#0F172A',
+    fontWeight: '700',
+    color: '#0F1E36',
   },
   dropdownItemSub: {
     fontSize: 12,
-    color: '#64748B',
+    color: '#5B728F',
     marginTop: 2,
   },
   dropdownItemDue: {
     fontSize: 13,
-    fontWeight: '700',
-    color: '#006A4E',
+    fontWeight: '800',
+    color: '#1c70b9',
+  },
+
+  // WIDGET CARD
+  flashyInfoBanner: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+    backgroundColor: '#EFF6FF',
+    borderRadius: 12,
+    padding: 12,
+    marginTop: 10,
+    borderWidth: 1.5,
+    borderColor: '#BFDBFE',
+    borderBottomWidth: 3,
+    borderBottomColor: '#93C5FD',
+    ...(Platform.OS === 'web' ? {
+      boxShadow: '0 3px 8px rgba(28, 112, 185, 0.08), inset 0 1px 0 #FFFFFF',
+    } as any : {}),
+  },
+  flashyInfoIcon: {
+    width: 36,
+    height: 36,
+    borderRadius: 10,
+    backgroundColor: '#DBEAFE',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  flashyInfoTitle: {
+    fontSize: 13,
+    fontWeight: '800',
+    color: '#1E40AF',
+  },
+  flashyInfoSub: {
+    fontSize: 12,
+    color: '#3B82F6',
+    marginTop: 2,
   },
 
   // PRODUCTS TABLE CARD
@@ -1618,120 +1752,145 @@ const styles = StyleSheet.create({
     justifyContent: 'space-between',
     marginBottom: 14,
   },
-  addProductBtn: {
+  addProductBtn3D: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: 6,
     borderWidth: 1.5,
-    borderColor: '#006A4E',
-    borderRadius: 8,
-    paddingHorizontal: 14,
+    borderColor: '#1c70b9',
+    borderRadius: 10,
+    paddingHorizontal: 16,
     paddingVertical: 8,
-    backgroundColor: '#fff',
+    backgroundColor: '#FFFFFF',
+    borderBottomWidth: 3,
+    borderBottomColor: '#124c7e',
+    ...(Platform.OS === 'web' ? {
+      cursor: 'pointer',
+      backgroundImage: 'linear-gradient(180deg, #FFFFFF 0%, #EFF6FC 100%)',
+      boxShadow: '0 4px 10px rgba(28, 112, 185, 0.16), inset 0 1px 0 #FFFFFF',
+    } as any : {}),
   },
   addProductBtnText: {
-    color: '#006A4E',
+    color: '#1c70b9',
     fontSize: 13,
-    fontWeight: '700',
+    fontWeight: '800',
   },
-  tableHeaderRow: {
+  tableHeaderRow3D: {
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: '#EBF3EE',
-    borderRadius: 8,
+    backgroundColor: '#E6F2FD',
+    borderRadius: 10,
     paddingVertical: 10,
     paddingHorizontal: 8,
     marginBottom: 8,
+    borderWidth: 1,
+    borderColor: '#CCE2F7',
+    borderBottomWidth: 2,
+    borderBottomColor: '#B6D7F6',
+    ...(Platform.OS === 'web' ? {
+      backgroundImage: 'linear-gradient(180deg, #EDF5FE 0%, #DFEFFD 100%)',
+    } as any : {}),
   },
   th: {
     fontSize: 13,
-    fontWeight: '700',
-    color: '#0F2C20',
+    fontWeight: '800',
+    color: '#0F3B63',
     paddingHorizontal: 4,
   },
   tableDataRow: {
     flexDirection: 'row',
     alignItems: 'center',
     borderBottomWidth: 1,
-    borderBottomColor: '#F1F5F9',
+    borderBottomColor: '#EDF5FC',
     paddingVertical: 8,
     paddingHorizontal: 8,
   },
   td: {
     paddingHorizontal: 4,
   },
-  cellText: {
-    fontSize: 14,
-    fontWeight: '600',
-    color: '#0F172A',
+  serialBadge: {
+    width: 28,
+    height: 28,
+    borderRadius: 7,
+    backgroundColor: '#EFF6FF',
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderWidth: 1,
+    borderColor: '#BFDBFE',
   },
-  tableInputWithIcon: {
+  serialText: {
+    fontSize: 13,
+    fontWeight: '800',
+    color: '#1c70b9',
+  },
+  tableInputDebossed: {
     flexDirection: 'row',
     alignItems: 'center',
-    borderWidth: 1,
-    borderColor: '#CBD5E1',
+    borderWidth: 1.5,
+    borderColor: '#CCE0F2',
     borderRadius: 8,
-    backgroundColor: '#fff',
+    backgroundColor: '#F8FAFD',
     paddingHorizontal: 8,
     height: 38,
+    ...(Platform.OS === 'web' ? {
+      boxShadow: 'inset 0 1px 3px rgba(28, 112, 185, 0.05)',
+    } as any : {}),
   },
   tableTextInputNoBorder: {
     flex: 1,
     height: 36,
     fontSize: 13,
-    color: '#0F172A',
+    fontWeight: '600',
+    color: '#0F1E36',
     ...(Platform.OS === 'web' ? ({ outlineStyle: 'none' } as any) : {}),
   },
   tableTextInput: {
-    borderWidth: 1,
-    borderColor: '#CBD5E1',
+    borderWidth: 1.5,
+    borderColor: '#CCE0F2',
     borderRadius: 8,
-    backgroundColor: '#fff',
+    backgroundColor: '#F8FAFD',
     height: 38,
     paddingHorizontal: 8,
     fontSize: 13,
-    color: '#0F172A',
+    fontWeight: '600',
+    color: '#0F1E36',
     ...(Platform.OS === 'web' ? ({ outlineStyle: 'none' } as any) : {}),
   },
   tableIconWrap: {
     paddingLeft: 4,
   },
-  itemDropdownMenu: {
-    position: 'absolute',
-    top: 42,
-    left: 4,
-    right: 4,
-    backgroundColor: '#fff',
+  tableTotalBox3D: {
+    backgroundColor: '#EFF6FF',
     borderRadius: 8,
-    borderWidth: 1,
-    borderColor: '#CBD5E1',
-    elevation: 8,
-    zIndex: 100,
-    shadowColor: '#000',
-    shadowOpacity: 0.12,
-    shadowRadius: 6,
-  },
-  tableTotalBox: {
-    backgroundColor: '#EEF2F0',
-    borderRadius: 6,
     paddingHorizontal: 12,
     height: 38,
     width: '100%',
     alignItems: 'center',
     justifyContent: 'center',
+    borderWidth: 1,
+    borderColor: '#BFDBFE',
+    borderBottomWidth: 2,
+    borderBottomColor: '#93C5FD',
   },
   tableTotalText: {
     fontSize: 13,
-    fontWeight: '700',
-    color: '#0F172A',
+    fontWeight: '800',
+    color: '#1c70b9',
   },
-  deleteRowBtn: {
+  deleteRowBtn3D: {
     width: 32,
     height: 32,
-    borderRadius: 6,
-    backgroundColor: '#FEE2E2',
+    borderRadius: 8,
+    backgroundColor: '#FFE4E6',
     alignItems: 'center',
     justifyContent: 'center',
+    borderWidth: 1,
+    borderColor: '#FECDD3',
+    borderBottomWidth: 2,
+    borderBottomColor: '#FDA4AF',
+    ...(Platform.OS === 'web' ? {
+      cursor: 'pointer',
+    } as any : {}),
   },
 
   // ADDITIONAL COSTS & CALCULATION SUMMARY
@@ -1741,58 +1900,87 @@ const styles = StyleSheet.create({
     justifyContent: 'space-between',
     marginBottom: 10,
   },
+  calcLabelRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+  },
+  calcDot: {
+    width: 8,
+    height: 8,
+    borderRadius: 4,
+  },
   calcLabel: {
     fontSize: 13,
-    color: '#334155',
-    fontWeight: '600',
+    color: '#3A526E',
+    fontWeight: '700',
   },
-  calcInputBox: {
+  calcInputDebossed: {
     width: 180,
     height: 38,
-    borderWidth: 1,
-    borderColor: '#CBD5E1',
+    borderWidth: 1.5,
+    borderColor: '#CCE0F2',
     borderRadius: 8,
-    backgroundColor: '#fff',
+    backgroundColor: '#F8FAFD',
     paddingHorizontal: 10,
     fontSize: 14,
-    fontWeight: '600',
-    color: '#0F172A',
+    fontWeight: '700',
+    color: '#0F1E36',
     textAlign: 'right',
     ...(Platform.OS === 'web' ? ({ outlineStyle: 'none' } as any) : {}),
   },
-  readOnlyCalcBox: {
+  readOnlySunkenBox: {
     width: 180,
     height: 38,
     borderRadius: 8,
-    backgroundColor: '#EEF2F0',
+    backgroundColor: '#EFF6FF',
+    borderWidth: 1,
+    borderColor: '#BFDBFE',
     alignItems: 'flex-end',
     justifyContent: 'center',
     paddingHorizontal: 10,
   },
-  readOnlyCalcText: {
+  readOnlySunkenText: {
     fontSize: 14,
-    fontWeight: '700',
-    color: '#0F172A',
+    fontWeight: '800',
+    color: '#1c70b9',
   },
-  grandTotalBanner: {
+
+  // FLASHY SKEUOMORPHIC GRAND TOTAL BANNER
+  grandTotalBanner3D: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    backgroundColor: '#D5F2DF',
-    borderRadius: 8,
-    paddingHorizontal: 16,
-    paddingVertical: 12,
-    marginTop: 8,
+    backgroundColor: '#E0F2FE',
+    borderRadius: 12,
+    paddingHorizontal: 18,
+    paddingVertical: 14,
+    marginTop: 10,
+    borderWidth: 1.5,
+    borderColor: '#7DD3FC',
+    borderBottomWidth: 3.5,
+    borderBottomColor: '#38BDF8',
+    ...(Platform.OS === 'web' ? {
+      backgroundImage: 'linear-gradient(135deg, #E0F2FE 0%, #BAE6FD 50%, #A5D8FD 100%)',
+      boxShadow: '0 6px 18px rgba(28, 112, 185, 0.18), inset 0 1px 1px #FFFFFF',
+    } as any : {}),
   },
   grandTotalLabel: {
     fontSize: 15,
-    fontWeight: '700',
-    color: '#065F46',
+    fontWeight: '800',
+    color: '#034575',
+  },
+  grandTotalSub: {
+    fontSize: 11,
+    fontWeight: '600',
+    color: '#0284C7',
+    marginTop: 2,
   },
   grandTotalValue: {
-    fontSize: 20,
-    fontWeight: '800',
-    color: '#065F46',
+    fontSize: 22,
+    fontWeight: '900',
+    color: '#034575',
+    letterSpacing: 0.5,
   },
 
   // FOOTER ACTIONS
@@ -1800,64 +1988,87 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    marginTop: 20,
+    marginTop: 22,
   },
   footerLeftButtons: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: 12,
   },
-  cancelOutlineBtn: {
+  cancelButton3D: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: 6,
-    borderWidth: 1,
+    borderWidth: 1.5,
     borderColor: '#CBD5E1',
-    borderRadius: 8,
-    paddingHorizontal: 18,
-    paddingVertical: 10,
-    backgroundColor: '#fff',
+    borderRadius: 10,
+    paddingHorizontal: 20,
+    paddingVertical: 11,
+    backgroundColor: '#FFFFFF',
+    borderBottomWidth: 3,
+    borderBottomColor: '#94A3B8',
+    ...(Platform.OS === 'web' ? {
+      cursor: 'pointer',
+      boxShadow: '0 3px 8px rgba(0, 0, 0, 0.05), inset 0 1px 0 #FFFFFF',
+    } as any : {}),
   },
-  cancelOutlineBtnText: {
+  cancelButton3DText: {
     color: '#334155',
     fontSize: 14,
-    fontWeight: '600',
+    fontWeight: '700',
   },
-  draftOutlineBtn: {
+  draftButton3D: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: 6,
-    borderWidth: 1,
-    borderColor: '#CBD5E1',
-    borderRadius: 8,
-    paddingHorizontal: 18,
-    paddingVertical: 10,
-    backgroundColor: '#fff',
+    borderWidth: 1.5,
+    borderColor: '#93C5FD',
+    borderRadius: 10,
+    paddingHorizontal: 20,
+    paddingVertical: 11,
+    backgroundColor: '#FFFFFF',
+    borderBottomWidth: 3,
+    borderBottomColor: '#3B82F6',
+    ...(Platform.OS === 'web' ? {
+      cursor: 'pointer',
+      backgroundImage: 'linear-gradient(180deg, #FFFFFF 0%, #F4F9FD 100%)',
+      boxShadow: '0 3px 8px rgba(28, 112, 185, 0.1), inset 0 1px 0 #FFFFFF',
+    } as any : {}),
   },
-  draftOutlineBtnText: {
-    color: '#334155',
+  draftButton3DText: {
+    color: '#1c70b9',
     fontSize: 14,
-    fontWeight: '600',
+    fontWeight: '700',
   },
-  completeBtn: {
+  completeButton3D: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: 8,
-    backgroundColor: '#006A4E',
-    borderRadius: 8,
-    paddingHorizontal: 26,
-    paddingVertical: 11,
+    backgroundColor: '#1c70b9',
+    borderRadius: 10,
+    paddingHorizontal: 28,
+    paddingVertical: 12,
+    borderTopWidth: 1.5,
+    borderTopColor: '#6cb8f7',
+    borderBottomWidth: 3.5,
+    borderBottomColor: '#0c3a64',
+    ...(Platform.OS === 'web' ? {
+      cursor: 'pointer',
+      backgroundImage: 'linear-gradient(180deg, #2c93ea 0%, #1c70b9 52%, #145591 100%)',
+      boxShadow: '0 8px 22px rgba(28, 112, 185, 0.42), inset 0 1px 1px rgba(255, 255, 255, 0.5)',
+    } as any : {}),
   },
-  completeBtnText: {
+  completeButton3DText: {
     color: '#fff',
-    fontSize: 14,
-    fontWeight: '700',
+    fontSize: 15,
+    fontWeight: '800',
+    letterSpacing: 0.3,
   },
 
   // SHORTCUTS MODAL
   modalOverlay: {
     flex: 1,
-    backgroundColor: 'rgba(0, 0, 0, 0.5)',
+    backgroundColor: 'rgba(15, 30, 54, 0.55)',
     alignItems: 'center',
     justifyContent: 'center',
     padding: 16,
@@ -1868,23 +2079,30 @@ const styles = StyleSheet.create({
     backgroundColor: '#fff',
     borderRadius: 16,
     overflow: 'hidden',
-    shadowColor: '#000',
-    shadowOpacity: 0.2,
-    shadowRadius: 10,
-    elevation: 8,
+    shadowColor: '#1c70b9',
+    shadowOpacity: 0.25,
+    shadowRadius: 16,
+    elevation: 10,
+    borderWidth: 1.5,
+    borderColor: '#BEE0FA',
   },
-  modalHeader: {
+  modalHeader3D: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    backgroundColor: '#006A4E',
+    backgroundColor: '#1c70b9',
     paddingHorizontal: 16,
     paddingVertical: 14,
+    borderBottomWidth: 3,
+    borderBottomColor: '#124c7e',
+    ...(Platform.OS === 'web' ? {
+      backgroundImage: 'linear-gradient(135deg, #2592ed 0%, #1c70b9 52%, #12518e 100%)',
+    } as any : {}),
   },
   modalTitle: {
     color: '#fff',
     fontSize: 16,
-    fontWeight: '700',
+    fontWeight: '800',
   },
   shortcutItem: {
     flexDirection: 'row',
@@ -1892,26 +2110,29 @@ const styles = StyleSheet.create({
     gap: 12,
     paddingVertical: 8,
     borderBottomWidth: 1,
-    borderBottomColor: '#F1F5F9',
+    borderBottomColor: '#F0F6FC',
   },
   keyBadge: {
     minWidth: 110,
-    backgroundColor: '#F1F5F9',
-    borderWidth: 1,
-    borderColor: '#CBD5E1',
-    borderRadius: 6,
+    backgroundColor: '#F0F6FC',
+    borderWidth: 1.5,
+    borderColor: '#CCE0F2',
+    borderBottomWidth: 2.5,
+    borderBottomColor: '#B6D7F6',
+    borderRadius: 7,
     paddingHorizontal: 8,
     paddingVertical: 4,
     alignItems: 'center',
   },
   keyBadgeText: {
     fontSize: 12,
-    fontWeight: '700',
-    color: '#0F172A',
+    fontWeight: '800',
+    color: '#1c70b9',
   },
   shortcutDesc: {
     flex: 1,
     fontSize: 13,
-    color: '#334155',
+    color: '#3A526E',
+    fontWeight: '600',
   },
 });

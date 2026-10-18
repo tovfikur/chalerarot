@@ -36,7 +36,7 @@ function UnitChips({ value, onPick }: { value: BagUnit; onPick: (u: BagUnit) => 
   return (
     <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginVertical: 6 }}>
       {opts.map(u => (
-        <TouchableOpacity key={u} onPress={() => onPick(u)} style={{ paddingHorizontal: 14, minHeight: 44, justifyContent: 'center', borderRadius: 22, backgroundColor: value === u ? color.primary : '#E8EFE9' }}>
+        <TouchableOpacity key={u} onPress={() => onPick(u)} style={{ paddingHorizontal: 14, minHeight: 44, justifyContent: 'center', borderRadius: 22, backgroundColor: value === u ? color.primary : color.primaryLight }}>
           <Text style={{ color: value === u ? '#fff' : color.text, fontSize: fs, fontWeight: value === u ? '700' : '400' }}>{label(u)}</Text>
         </TouchableOpacity>
       ))}
@@ -1564,7 +1564,7 @@ function FilterModal({ init, onClose, onApply }: { init: AcctFilter; onClose: ()
         <SectionHead icon={icons.calendar}>{t('timeRange')}</SectionHead>
         <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginBottom: 12 }}>
           {quickChips.map(q => (
-            <TouchableOpacity key={q.id} onPress={() => quick(q.id)} style={{ minHeight: 44, justifyContent: 'center', paddingHorizontal: 14, borderRadius: 12, backgroundColor: '#E8EFE9' }}>
+            <TouchableOpacity key={q.id} onPress={() => quick(q.id)} style={{ minHeight: 44, justifyContent: 'center', paddingHorizontal: 14, borderRadius: 12, backgroundColor: color.primaryLight }}>
               <Text style={{ fontSize: 14, fontWeight: '600', color: color.primary }}>{q.label}</Text>
             </TouchableOpacity>
           ))}
@@ -1799,7 +1799,7 @@ export function ExpenseModal({ init, onClose, onSave, onTrash }: {
         <Muted>{t('expenseType')}</Muted>
         <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginVertical: 6 }}>
           {EXPENSE_CATS.map(c => (
-            <TouchableOpacity key={c} onPress={() => setCat(c)} style={{ paddingHorizontal: 14, minHeight: 44, justifyContent: 'center', borderRadius: 22, backgroundColor: cat === c ? color.primary : '#E8EFE9' }}>
+            <TouchableOpacity key={c} onPress={() => setCat(c)} style={{ paddingHorizontal: 14, minHeight: 44, justifyContent: 'center', borderRadius: 22, backgroundColor: cat === c ? color.primary : color.primaryLight }}>
               <Text style={{ color: cat === c ? '#fff' : color.text, fontSize: 15, fontWeight: cat === c ? '700' : '400' }}>{t(exKey(c))}</Text>
             </TouchableOpacity>
           ))}
@@ -1882,7 +1882,7 @@ export function MoneyTransferModal({ onClose }: { onClose: () => void }) {
         <Muted>{t('fromAccount')}</Muted>
         <View style={{ marginVertical: 6 }}>
           {active.map(a => (
-            <TouchableOpacity key={a.id} onPress={() => setFromId(a.id)} style={{ flexDirection: 'row', alignItems: 'center', gap: 8, minHeight: 48, paddingHorizontal: 12, borderRadius: 12, marginBottom: 6, backgroundColor: fromId === a.id ? '#E8EFE9' : '#fff', borderWidth: 1.5, borderColor: fromId === a.id ? color.primary : color.line }}>
+            <TouchableOpacity key={a.id} onPress={() => setFromId(a.id)} style={{ flexDirection: 'row', alignItems: 'center', gap: 8, minHeight: 48, paddingHorizontal: 12, borderRadius: 12, marginBottom: 6, backgroundColor: fromId === a.id ? color.primaryLight : '#fff', borderWidth: 1.5, borderColor: fromId === a.id ? color.primary : color.line }}>
               <AppIcon name={methodIcon(a.type)} size={20} iconColor={color.primary} />
               <Text style={{ flex: 1, fontSize: 16, fontWeight: '600', color: color.text }}>{a.name}</Text>
               <Text style={{ fontSize: 15, fontWeight: '700', color: color.primary }}>{m(balanceOf(a.id))}</Text>
@@ -1894,7 +1894,7 @@ export function MoneyTransferModal({ onClose }: { onClose: () => void }) {
         <Muted>{t('toAccount')}</Muted>
         <View style={{ marginVertical: 6 }}>
           {active.filter(a => a.id !== fromId).map(a => (
-            <TouchableOpacity key={a.id} onPress={() => setToId(a.id)} style={{ flexDirection: 'row', alignItems: 'center', gap: 8, minHeight: 48, paddingHorizontal: 12, borderRadius: 12, marginBottom: 6, backgroundColor: toId === a.id ? '#E8EFE9' : '#fff', borderWidth: 1.5, borderColor: toId === a.id ? color.primary : color.line }}>
+            <TouchableOpacity key={a.id} onPress={() => setToId(a.id)} style={{ flexDirection: 'row', alignItems: 'center', gap: 8, minHeight: 48, paddingHorizontal: 12, borderRadius: 12, marginBottom: 6, backgroundColor: toId === a.id ? color.primaryLight : '#fff', borderWidth: 1.5, borderColor: toId === a.id ? color.primary : color.line }}>
               <AppIcon name={methodIcon(a.type)} size={20} iconColor={color.primary} />
               <Text style={{ flex: 1, fontSize: 16, fontWeight: '600', color: color.text }}>{a.name}</Text>
               <Text style={{ fontSize: 15, fontWeight: '700', color: color.primary }}>{m(balanceOf(a.id))}</Text>
@@ -2080,7 +2080,7 @@ function AccountFormModal({ id, onClose }: { id?: string; onClose: () => void })
         <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginVertical: 8 }}>
           {ACCOUNT_TYPES.map(ty => (
             <TouchableOpacity key={ty} onPress={() => setType(ty)}
-              style={{ paddingHorizontal: 14, minHeight: 44, justifyContent: 'center', borderRadius: 22, backgroundColor: type === ty ? color.primary : '#E8EFE9' }}>
+              style={{ paddingHorizontal: 14, minHeight: 44, justifyContent: 'center', borderRadius: 22, backgroundColor: type === ty ? color.primary : color.primaryLight }}>
               <Text style={{ color: type === ty ? '#fff' : color.text, fontSize: 15, fontWeight: type === ty ? '700' : '400' }}>{methodName(ty, t)}</Text>
             </TouchableOpacity>
           ))}
@@ -3084,7 +3084,7 @@ function MiniChips({ options, value, onPick }: { options: { id: string; label: s
   return (
     <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginVertical: 6 }}>
       {options.map(o => (
-        <TouchableOpacity key={o.id} onPress={() => onPick(o.id)} style={{ paddingHorizontal: 14, minHeight: 44, justifyContent: 'center', borderRadius: 22, backgroundColor: value === o.id ? color.primary : '#E8EFE9' }}>
+        <TouchableOpacity key={o.id} onPress={() => onPick(o.id)} style={{ paddingHorizontal: 14, minHeight: 44, justifyContent: 'center', borderRadius: 22, backgroundColor: value === o.id ? color.primary : color.primaryLight }}>
           <Text style={{ color: value === o.id ? '#fff' : color.text, fontSize: 15, fontWeight: value === o.id ? '700' : '400' }}>{o.label}</Text>
         </TouchableOpacity>
       ))}

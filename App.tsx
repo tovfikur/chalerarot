@@ -264,7 +264,20 @@ function Shell() {
   );
   const header = (
     <View style={{ position: 'relative', zIndex: 50 }}>
-      <View style={{ padding: 14, backgroundColor: color.primary, flexDirection: 'row', alignItems: 'center' }}>
+      <View style={{
+        padding: 14,
+        backgroundColor: color.primary,
+        borderBottomWidth: 3,
+        borderBottomColor: '#124c7e',
+        borderTopWidth: 1,
+        borderTopColor: '#5faef2',
+        ...(Platform.OS === 'web' ? {
+          backgroundImage: 'linear-gradient(135deg, #258fe8 0%, #1c70b9 52%, #135591 100%)',
+          boxShadow: '0 4px 14px rgba(28, 112, 185, 0.3), inset 0 1px 0 rgba(255,255,255,0.4)',
+        } as any : {}),
+        flexDirection: 'row',
+        alignItems: 'center',
+      }}>
         {qOpen ? (
           <View style={{ flex: 1, flexDirection: 'row', alignItems: 'center', gap: 4 }}>
             <TouchableOpacity onPress={closeSearch} style={{ minHeight: 44, minWidth: 44, alignItems: 'center', justifyContent: 'center' }}>
@@ -355,12 +368,30 @@ function Shell() {
     return (
       <SafeAreaView style={{ flex: 1, backgroundColor: color.bg, paddingTop: StatusBar.currentHeight }}>
         <View style={{ flex: 1, flexDirection: 'row' }}>
-          <View style={{ width: 248, backgroundColor: '#fff', borderRightWidth: 1, borderRightColor: color.line, paddingVertical: 12, paddingHorizontal: 10 }}>
-            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10, paddingHorizontal: 8, paddingVertical: 12 }}>
-              <View style={{ height: 40, width: 40, borderRadius: 12, backgroundColor: color.primary, alignItems: 'center', justifyContent: 'center' }}>
+          <View style={{ width: 248, backgroundColor: '#FFFFFF', borderRightWidth: 1.5, borderRightColor: '#D8E7F5', paddingVertical: 14, paddingHorizontal: 12 }}>
+            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 12, paddingHorizontal: 8, paddingVertical: 12, marginBottom: 8 }}>
+              <View style={{
+                height: 42,
+                width: 42,
+                borderRadius: 12,
+                backgroundColor: color.primary,
+                alignItems: 'center',
+                justifyContent: 'center',
+                borderBottomWidth: 3,
+                borderBottomColor: '#124c7e',
+                borderTopWidth: 1,
+                borderTopColor: '#5faef2',
+                ...(Platform.OS === 'web' ? {
+                  backgroundImage: 'linear-gradient(135deg, #2b91e8 0%, #1c70b9 55%, #145994 100%)',
+                  boxShadow: '0 4px 12px rgba(28, 112, 185, 0.35), inset 0 1px 1px rgba(255,255,255,0.45)',
+                } as any : {}),
+              }}>
                 <AppIcon name={icons.stock} size={22} iconColor="#fff" />
               </View>
-              <Text style={{ fontSize: 17, fontWeight: '700', color: color.text }}>চালের আড়ৎ</Text>
+              <View>
+                <Text style={{ fontSize: 18, fontWeight: '800', color: '#0F1E36', letterSpacing: 0.3 }}>চালের আড়ৎ</Text>
+                <Text style={{ fontSize: 11, fontWeight: '600', color: '#1c70b9' }}>স্মার্ট ম্যানেজমেন্ট</Text>
+              </View>
             </View>
             {sidebar.map(x => {
               const on = sideActive(route, x.r);
@@ -368,10 +399,27 @@ function Shell() {
                 <TouchableOpacity
                   key={x.r}
                   onPress={() => setRoute(x.r)}
-                  style={{ flexDirection: 'row', alignItems: 'center', gap: 12, minHeight: SIDE_ROW_H, paddingHorizontal: 12, paddingVertical: 0, borderRadius: 12, backgroundColor: on ? '#E8EFE9' : 'transparent', marginVertical: SIDE_ROW_GAP }}
+                  style={{
+                    flexDirection: 'row',
+                    alignItems: 'center',
+                    gap: 12,
+                    minHeight: SIDE_ROW_H,
+                    paddingHorizontal: 12,
+                    borderRadius: 12,
+                    backgroundColor: on ? '#E0F0FE' : 'transparent',
+                    borderWidth: on ? 1.5 : 0,
+                    borderColor: on ? '#BEE0FA' : 'transparent',
+                    borderLeftWidth: on ? 4 : 0,
+                    borderLeftColor: on ? color.primary : 'transparent',
+                    marginVertical: SIDE_ROW_GAP,
+                    ...(Platform.OS === 'web' && on ? {
+                      backgroundImage: 'linear-gradient(135deg, #E6F3FE 0%, #D8ECFD 100%)',
+                      boxShadow: '0 2px 8px rgba(28, 112, 185, 0.12), inset 0 1px 0 #FFFFFF',
+                    } as any : {}),
+                  }}
                 >
-                  <AppIcon name={x.icon} size={22} iconColor={on ? color.primary : color.muted} />
-                  <Text style={{ fontSize: 14, color: on ? color.primary : color.text, fontWeight: on ? '700' : '400' }}>{t(x.k)}</Text>
+                  <AppIcon name={x.icon} size={22} iconColor={on ? color.primary : '#5A7391'} />
+                  <Text style={{ fontSize: 14, color: on ? color.primary : '#1E293B', fontWeight: on ? '700' : '500' }}>{t(x.k)}</Text>
                 </TouchableOpacity>
               );
             })}

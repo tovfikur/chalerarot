@@ -10,7 +10,22 @@ import { CONTENT_MAX, contentPadding, useBreakpoint, useFs } from './responsive'
 
 type IconName = React.ComponentProps<typeof MaterialCommunityIcons>['name'];
 
-export const color = { bg: '#F1F5F2', card: '#fff', primary: '#006A4E', text: '#0F172A', muted: '#64748B', red: '#EF4444', line: '#E2E8E4' };
+export const color = {
+  bg: '#F0F6FC', // Ultra-light luminous icy azure pearl background
+  card: '#FFFFFF',
+  primary: '#1c70b9', // Vibrant Royal Azure Blue
+  primaryDark: '#135591',
+  primaryLight: '#E0F0FE', // Light flashy sky tint
+  primaryGlow: 'rgba(28, 112, 185, 0.25)',
+  text: '#0F1E36', // Crisp slate navy
+  muted: '#5B728F', // Refined slate steel
+  red: '#EF4444',
+  green: '#10B981',
+  amber: '#F59E0B',
+  purple: '#8B5CF6',
+  cyan: '#06B6D4',
+  line: '#D2E3F3', // Soft crisp divider
+};
 
 // Central number localization (display only — state/API stay numeric).
 // bn-BD digit output is produced with an explicit map so it works even
@@ -41,7 +56,7 @@ export const SectionHead = ({ icon, children }: { icon?: IconName; children: Rea
   const fs = useFs(20, 18);
   return (
     <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, marginBottom: 8 }}>
-      {icon ? <MaterialCommunityIcons name={icon} size={22} color={color.text} /> : null}
+      {icon ? <MaterialCommunityIcons name={icon} size={22} color={color.primary} /> : null}
       <Text style={[s.title, { marginBottom: 0, fontSize: fs, lineHeight: fs + 10 }]}>{children}</Text>
     </View>
   );
@@ -53,7 +68,7 @@ export const Muted = ({ children }: { children: ReactNode }) => {
 export const Btn = ({ label, onPress, kind = 'primary', icon }: { label: string; onPress: () => void; kind?: 'primary' | 'ghost' | 'danger'; icon?: IconName }) => {
   const fs = useFs(17, 15);
   return (
-    <TouchableOpacity onPress={onPress} style={[s.btn, kind === 'ghost' && s.ghost, kind === 'danger' && { backgroundColor: color.red }]}>
+    <TouchableOpacity onPress={onPress} style={[s.btn, kind === 'ghost' && s.ghost, kind === 'danger' && s.dangerBtn]}>
       <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
         {icon ? <MaterialCommunityIcons name={icon} size={20} color={kind === 'ghost' ? color.primary : '#fff'} /> : null}
         <Text style={[s.btnT, kind === 'ghost' && { color: color.primary }, { fontSize: fs }]}>{label}</Text>
@@ -347,14 +362,95 @@ export const Screen = ({ children, maxWidth = CONTENT_MAX, scrollRef, onScrollY 
 };
 
 const s = StyleSheet.create({
-  card: { backgroundColor: color.card, borderRadius: 16, padding: 14, marginBottom: 12, borderWidth: 1, borderColor: color.line },
+  card: {
+    backgroundColor: color.card,
+    borderRadius: 16,
+    padding: 16,
+    marginBottom: 14,
+    borderWidth: 1.5,
+    borderColor: '#D8E7F5',
+    ...(Platform.OS === 'web' ? {
+      boxShadow: '0 8px 24px rgba(28, 112, 185, 0.08), 0 2px 6px rgba(0, 0, 0, 0.03), inset 0 1px 0 #FFFFFF',
+    } as any : {
+      elevation: 3,
+      shadowColor: '#1c70b9',
+      shadowOffset: { width: 0, height: 4 },
+      shadowOpacity: 0.1,
+      shadowRadius: 8,
+    }),
+  },
   title: { fontSize: 20, fontWeight: '700', color: color.text, marginBottom: 8, lineHeight: 30 },
   muted: { fontSize: 14, color: color.muted, lineHeight: 22 },
-  btn: { backgroundColor: color.primary, borderRadius: 14, minHeight: 52, alignItems: 'center', justifyContent: 'center', paddingHorizontal: 16, marginVertical: 4 },
-  ghost: { backgroundColor: '#fff', borderWidth: 1.5, borderColor: color.primary },
-  btnT: { color: '#fff', fontSize: 17, fontWeight: '600' },
-  input: { borderWidth: 1, borderColor: color.line, borderRadius: 12, minHeight: 48, paddingHorizontal: 12, fontSize: 17, backgroundColor: '#fff', color: color.text },
-  chip: { paddingHorizontal: 16, minHeight: 44, justifyContent: 'center', borderRadius: 22, backgroundColor: '#E8EFE9', marginRight: 8 },
+  btn: {
+    backgroundColor: color.primary,
+    borderRadius: 14,
+    minHeight: 50,
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingHorizontal: 18,
+    marginVertical: 4,
+    borderBottomWidth: 3.5,
+    borderBottomColor: '#124e82',
+    borderTopWidth: 1,
+    borderTopColor: '#5faef2',
+    ...(Platform.OS === 'web' ? {
+      backgroundImage: 'linear-gradient(180deg, #2b91e8 0%, #1c70b9 52%, #145994 100%)',
+      boxShadow: '0 6px 16px rgba(28, 112, 185, 0.35), inset 0 1px 1px rgba(255, 255, 255, 0.45)',
+      cursor: 'pointer',
+    } as any : {}),
+  },
+  ghost: {
+    backgroundColor: '#fff',
+    borderWidth: 1.5,
+    borderColor: '#B9D7F2',
+    borderBottomWidth: 3,
+    borderBottomColor: '#1c70b9',
+    ...(Platform.OS === 'web' ? {
+      boxShadow: '0 3px 10px rgba(28, 112, 185, 0.12), inset 0 1px 0 #FFFFFF',
+      cursor: 'pointer',
+    } as any : {}),
+  },
+  dangerBtn: {
+    backgroundColor: color.red,
+    borderBottomWidth: 3.5,
+    borderBottomColor: '#991B1B',
+    borderTopWidth: 1,
+    borderTopColor: '#FCA5A5',
+    ...(Platform.OS === 'web' ? {
+      backgroundImage: 'linear-gradient(180deg, #F43F5E 0%, #E11D48 52%, #BE123C 100%)',
+      boxShadow: '0 6px 16px rgba(225, 29, 72, 0.35), inset 0 1px 1px rgba(255, 255, 255, 0.45)',
+      cursor: 'pointer',
+    } as any : {}),
+  },
+  btnT: { color: '#fff', fontSize: 17, fontWeight: '700' },
+  input: {
+    borderWidth: 1.5,
+    borderColor: '#CCE0F2',
+    borderRadius: 12,
+    minHeight: 46,
+    paddingHorizontal: 12,
+    fontSize: 16,
+    backgroundColor: '#F8FAFD',
+    color: color.text,
+    ...(Platform.OS === 'web' ? {
+      boxShadow: 'inset 0 2px 4px rgba(28, 112, 185, 0.05)',
+      outlineStyle: 'none',
+    } as any : {}),
+  },
+  chip: {
+    paddingHorizontal: 16,
+    minHeight: 42,
+    justifyContent: 'center',
+    borderRadius: 21,
+    backgroundColor: '#E4F1FD',
+    borderWidth: 1,
+    borderColor: '#CCE2F7',
+    marginRight: 8,
+    ...(Platform.OS === 'web' ? {
+      boxShadow: '0 2px 5px rgba(28, 112, 185, 0.08), inset 0 1px 0 #FFFFFF',
+      cursor: 'pointer',
+    } as any : {}),
+  },
   row: { flexDirection: 'row', alignItems: 'center', paddingVertical: 10, borderBottomWidth: 1, borderBottomColor: color.line },
   rowT: { fontSize: 16, fontWeight: '600', color: color.text, lineHeight: 24 },
 });
