@@ -377,7 +377,7 @@ function Shell() {
             })}
           </View>
           <View style={{ flex: 1 }}>
-            {(!isDesktop || (route !== 'home' && route !== 'stock' && route !== 'expense' && route !== 'purchase' && route !== 'sale')) && header}
+            {(!isDesktop || (route !== 'home' && route !== 'accounts' && route !== 'stock' && route !== 'expense' && route !== 'purchase' && route !== 'sale')) && header}
             <View style={{ flex: 1 }}>{body}</View>
             {bellList}
       {retView ? <ReturnModal id={retView} onClose={() => setRetView(null)} /> : null}

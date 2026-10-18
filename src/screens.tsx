@@ -1883,7 +1883,7 @@ function DateField({ label, value, onChange, clearable, allowPast = true, minDat
   );
 }
 
-function ExpenseModal({ init, onClose, onSave, onTrash }: {
+export function ExpenseModal({ init, onClose, onSave, onTrash }: {
   init: Expense | null;
   onClose: () => void;
   onSave: (v: { id?: string; category: string; customName?: string; amount: number; accountId: string; date: string; note?: string }) => Promise<void>;
@@ -1950,7 +1950,7 @@ function ExpenseModal({ init, onClose, onSave, onTrash }: {
  * OUT on one account + IN on the other under ONE transfer reference. Total
  * money never changes and no sale / expense / profit is touched.
  */
-function MoneyTransferModal({ onClose }: { onClose: () => void }) {
+export function MoneyTransferModal({ onClose }: { onClose: () => void }) {
   const { t, lang, moneyAccounts, transferMoney } = useApp();
   const m = useMoney(); const fd = useDateStr();
   const active = moneyAccounts.filter(a => a.active);
@@ -2718,7 +2718,7 @@ export function ReceivableModal({ id, onClose }: { id: string; onClose: () => vo
   );
 }
 
-function PayableModal({ id, onClose }: { id: string; onClose: () => void }) {
+export function PayableModal({ id, onClose }: { id: string; onClose: () => void }) {
   const { t } = useApp(); const m = useMoney(); const fd = useDateStr();
   const [d, setD] = useState<PayDetail | null>(null);
   const [err, setErr] = useState<string | null>(null);
@@ -2954,7 +2954,7 @@ function useKpiReport(kind: KpiKind, period: KpiPeriod, fin: PeriodFinance | nul
  * fixed footer, so long lists scroll instead of stretching the page, and the
  * total plus the actions stay reachable without scrolling.
  */
-function KpiDetailModal({ kind, period, fin, kpiTotal, collectTotal, dueTotal, payTotal, onClose }: {
+export function KpiDetailModal({ kind, period, fin, kpiTotal, collectTotal, dueTotal, payTotal, onClose }: {
   kind: KpiKind; period: KpiPeriod; fin: PeriodFinance | null;
   kpiTotal: number; collectTotal: number; dueTotal: number; payTotal: number;
   onClose: () => void;
