@@ -14,7 +14,8 @@ import { printReport, printedAtStamp, type ReportDoc, type ReportRow } from './r
 import { TradeDashboardForm } from './screens/TradeDashboardForm';
 import { StockDashboard } from './screens/StockDashboard';
 import { ExpenseDashboard } from './screens/ExpenseDashboard';
-export { TradeDashboardForm, StockDashboard, ExpenseDashboard };
+import { HomeDashboard } from './screens/HomeDashboard';
+export { TradeDashboardForm, StockDashboard, ExpenseDashboard, HomeDashboard };
 
 export type Nav = (r: string) => void;
 const num = (v: string) => parseNum(v);
@@ -85,7 +86,7 @@ function QtyInput({ unit, value, onChange }: { unit: BagUnit; value: string; onC
   );
 }
 
-export function Home() {
+export function Home({ go }: { go?: (r: string) => void } = {}) {
   const { t, lang, stats, customers, sales, cTx, expenses, returns, financeToday } = useApp();
   const m = useMoney(); const n = useNum(); const fd = useDateStr(); const s = stats();
   const [view, setView] = useState<null | 'sale' | 'due' | 'collect' | 'profit' | 'cogs' | 'pexp'>(null);
@@ -284,7 +285,15 @@ export function Home() {
   };
   return (
     <Screen>
-      {view ? detail() : (<View>{dash}<View style={{ marginTop: 14 }}><QuickSale /></View></View>)}
+      {view ? detail() : (
+        <HomeDashboard
+          go={go}
+          onOpenInvoice={(id) => setInv(id)}
+          onOpenRecv={(id) => setRc(id)}
+          onOpenReturn={(id) => setRetV(id)}
+          onDrillDown={(v) => setView(v)}
+        />
+      )}
       {inv ? <InvoiceModal kind="sale" id={inv} onClose={() => setInv(null)} /> : null}
       {rc ? <ReceivableModal id={rc} onClose={() => setRc(null)} /> : null}
       {retV ? <ReturnModal id={retV} onClose={() => setRetV(null)} /> : null}

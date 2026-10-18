@@ -149,7 +149,7 @@ function Shell() {
     );
   }
   const body = {
-    home: <Home />, sale: <Trade key="s" mode="sale" />, purchase: <Trade key="p" mode="purchase" />, accounts: <Accounts go={setRoute} focus={focus} onFocusDone={() => setFocus(null)} />, more: <More go={setRoute} />,
+    home: <Home go={setRoute} />, sale: <Trade key="s" mode="sale" />, purchase: <Trade key="p" mode="purchase" />, accounts: <Accounts go={setRoute} focus={focus} onFocusDone={() => setFocus(null)} />, more: <More go={setRoute} />,
     products: <Products />, customers: <Parties kind="c" focus={partyFocus?.kind === 'c' ? partyFocus.id : null} onFocusDone={() => setPartyFocus(null)} onReturn={(k, id) => openReturnFlow(k, id)} />, vendors: <Parties kind="v" focus={partyFocus?.kind === 'v' ? partyFocus.id : null} onFocusDone={() => setPartyFocus(null)} onReturn={(k, id) => openReturnFlow(k, id)} />, stock: <StockDashboard />, expense: <ExpenseDashboard />, collect: <Money key="c" kind="c" done={home} />, pay: <Money key="v" kind="v" done={home} />, trash: <Trash />,
     return: <ReturnHome focus={returnFocus} onFocusDone={() => setReturnFocus(null)} />,
     'return-sale': <ReturnHome key="rs" initialKind="sale" focus={returnFocus} onFocusDone={() => setReturnFocus(null)} />,
@@ -377,7 +377,7 @@ function Shell() {
             })}
           </View>
           <View style={{ flex: 1 }}>
-            {(!isDesktop || (route !== 'stock' && route !== 'expense' && route !== 'purchase' && route !== 'sale')) && header}
+            {(!isDesktop || (route !== 'home' && route !== 'stock' && route !== 'expense' && route !== 'purchase' && route !== 'sale')) && header}
             <View style={{ flex: 1 }}>{body}</View>
             {bellList}
       {retView ? <ReturnModal id={retView} onClose={() => setRetView(null)} /> : null}
