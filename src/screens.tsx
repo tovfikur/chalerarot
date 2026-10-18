@@ -15,7 +15,8 @@ import { TradeDashboardForm } from './screens/TradeDashboardForm';
 import { StockDashboard } from './screens/StockDashboard';
 import { ExpenseDashboard } from './screens/ExpenseDashboard';
 import { HomeDashboard } from './screens/HomeDashboard';
-export { TradeDashboardForm, StockDashboard, ExpenseDashboard, HomeDashboard };
+import { AccountsDashboard } from './screens/AccountsDashboard';
+export { TradeDashboardForm, StockDashboard, ExpenseDashboard, HomeDashboard, AccountsDashboard };
 
 export type Nav = (r: string) => void;
 const num = (v: string) => parseNum(v);
@@ -1533,135 +1534,7 @@ const presetRange = (id: 'today' | 'last7' | 'thisMonth' | 'last3m' | 'thisYear'
 };
 
 export function Accounts({ go, focus, onFocusDone }: { go?: Nav; focus?: { kind: 'c' | 'v'; id: string } | null; onFocusDone?: () => void }) {
-  const { t, lang, stats, customers, vendors, bal, expenses, saveExpense, deleteExpense, cTx, moneyBalances } = useApp();
-  const m = useMoney(); const n = useNum(); const s = stats(); const fd = useDateStr();
-  const [transferOpen, setTransferOpen] = useState(false);
-  const [kpi, setKpi] = useState<KpiKind | null>(null);
-  const due = customers.map(c => ({ c, b: bal('c', c.id).balance })).filter(x => x.b > 0);
-  const pay = vendors.map(c => ({ c, b: bal('v', c.id).balance })).filter(x => x.b > 0);
-  const [flt, setFlt] = useState<AcctFilter>(() => { const d = today(); return { from: d, to: d }; });
-  const [fltOpen, setFltOpen] = useState(false);
-  // Inclusive string compare on canonical YYYY-MM-DD business dates (no TZ).
-  const inPeriod = (d: string) => d >= flt.from && d <= flt.to;
-  // Money collection is not a profit figure, so it stays local to the period.
-  const fCollect = cTx.filter(x => x.kind === 'payment' && inPeriod(x.date)).reduce((a, x) => a + x.amount, 0);
-  // Sales / COGS / Gross / Expenses / Net Profit come from the ONE canonical
-  // backend service for this exact range (any From..To).
-  const finKey = `${flt.from}|${flt.to}`;
-  const [finFor, setFinFor] = useState('');
-  const { loadFinance, financePeriod } = useApp();
-  useEffect(() => {
-    let on = true;
-    loadFinance('range', flt.from, flt.to).then(() => { if (on) setFinFor(finKey); }).catch(() => { if (on) setFinFor(''); });
-    return () => { on = false; };
-  }, [finKey]);
-  const f: PeriodFinance | null = finFor === finKey ? financePeriod : null;
-  const fSale = f?.netSales ?? 0;
-  const fExp = f?.expense ?? 0;
-  const fProfit = f?.netProfit ?? 0;
-  const isToday = flt.from === today() && flt.to === today();
-  const monName = (mo: number) => t(MON_KEYS[Math.min(12, Math.max(1, mo)) - 1]);
-  const fmtD = (ds: string) => {
-    const [y, mo, d] = ds.split('-').map(Number);
-    const s = lang === 'bn' ? `${pad2n(d)} ${monName(mo)} ${n(y)}` : `${monName(mo)} ${d}, ${n(y)}`;
-    return lang === 'bn' ? toBnDigits(s) : s;
-  };
-  const fltLabel = flt.from === flt.to ? fmtD(flt.from) : `${fmtD(flt.from)} – ${fmtD(flt.to)}`;
-  const [rc, setRc] = useState<string | null>(null);
-  const [vp, setVp] = useState<string | null>(null);
-  useEffect(() => {
-    if (focus) {
-      if (focus.kind === 'c') { setRc(focus.id); setTab('due'); }
-      else { setVp(focus.id); setTab('pay'); }
-      onFocusDone?.();
-    }
-  }, [focus]);
-  const [tab, setTab] = useState<'due' | 'pay' | 'expense'>('due');
-  const [eq, setEq] = useState('');
-  const [ef, setEf] = useState<Expense | null | undefined>(undefined);
-  const exLabel = (e: Expense) => (e.category === 'other' && e.customName ? e.customName : t(exKey(e.category)));
-  const q = eq.trim().toLowerCase();
-  const exListed = [...expenses]
-    .filter(e => !q || t(exKey(e.category)).toLowerCase().includes(q) || (e.customName ?? '').toLowerCase().includes(q) || (e.note ?? '').toLowerCase().includes(q))
-    .sort((a, b) => (a.date < b.date ? 1 : a.date > b.date ? -1 : 0));
-  const todayExpTotal = exListed.filter(e => e.date === today()).reduce((a, e) => a + e.amount, 0);
-  return (
-    <Screen>
-      {/* Current money is always "right now" and is deliberately not affected
-          by the day/month/year filter below. */}
-      <MoneyBalanceCard balances={moneyBalances} />
-      <Card>
-        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
-          <View style={{ flex: 1 }}><SectionHead icon={icons.calc}>{t('accounts')}</SectionHead></View>
-          <TouchableOpacity onPress={() => setFltOpen(true)} style={{ flexDirection: 'row', alignItems: 'center', gap: 6, minHeight: 44, paddingHorizontal: 12, borderRadius: 12, backgroundColor: '#fff', borderWidth: 1.5, borderColor: color.primary }}>
-            <AppIcon name={icons.filter} size={20} iconColor={color.primary} />
-            <Text style={{ fontSize: 14, fontWeight: '600', color: color.primary }}>{fltLabel}</Text>
-          </TouchableOpacity>
-        </View>
-        <RGrid mobile={2} tablet={3} desktop={6}>
-          <KpiTile label={isToday ? t('todaySale') : t('fSale')} value={m(fSale)} onPress={() => setKpi('sales')} />
-          <KpiTile label={isToday ? t('todayCollect') : t('fCollect')} value={m(fCollect)} onPress={() => setKpi('collect')} />
-          <KpiTile label={t('cogs')} value={m(f?.cogs ?? 0)} neg onPress={() => setKpi('cogs')} />
-          <KpiTile label={isToday ? t('todayExpense') : t('expense')} value={m(fExp)} neg onPress={() => setKpi('expense')} />
-          <KpiTile label={isToday ? t('todayProfit') : t('netProfitLabel')} value={m(fProfit)} neg={fProfit < 0} onPress={() => setKpi('profit')} />
-          <KpiTile label={t('totalDue')} value={m(s.due)} onPress={() => setKpi('recv')} />
-          <KpiTile label={t('totalPayable')} value={m(s.payable)} neg onPress={() => setKpi('pay')} />
-        </RGrid>
-      </Card>
-      {fltOpen ? <FilterModal init={flt} onClose={() => setFltOpen(false)} onApply={f => { setFlt(f); setFltOpen(false); }} /> : null}
-      <Card>
-        <SectionHead icon={icons.profit}>{t('netProfitLabel')}</SectionHead>
-        {f ? <ProfitBreakdown f={f} /> : <Muted>{t('wait')}</Muted>}
-      </Card>
-      {go && <View style={{ marginVertical: 4 }}><Btn kind="ghost" icon={icons.collect} label={t('collect')} onPress={() => go('collect')} /><Btn kind="ghost" icon={icons.pay} label={t('pay')} onPress={() => go('pay')} /><Btn kind="ghost" icon={icons.transfer} label={t('transferMoney')} onPress={() => setTransferOpen(true)} /><Btn kind="ghost" icon={icons.add} label={t('addExpense')} onPress={() => setEf(null)} /></View>}
-      <View style={{ flexDirection: 'row', gap: 8, marginBottom: 10 }}>
-        <View style={{ flex: 1 }}><Btn kind={tab === 'due' ? 'primary' : 'ghost'} label={t('toReceive')} onPress={() => setTab('due')} /></View>
-        <View style={{ flex: 1 }}><Btn kind={tab === 'pay' ? 'primary' : 'ghost'} label={t('toPay')} onPress={() => setTab('pay')} /></View>
-        <View style={{ flex: 1 }}><Btn kind={tab === 'expense' ? 'primary' : 'ghost'} icon={icons.calc} label={t('expense')} onPress={() => setTab('expense')} /></View>
-      </View>
-      {tab === 'due' ? (
-        <Card><SectionHead icon={icons.collect}>{t('toReceive')}</SectionHead>{due.length ? due.map(x => <DueRow key={x.c.id} icon={icons.customers} name={x.c.name} sub={x.c.next ? fd(x.c.next) : ''} amount={m(x.b)} neg onPress={() => setRc(x.c.id)} />) : <Empty />}</Card>
-      ) : tab === 'pay' ? (
-        <Card><SectionHead icon={icons.pay}>{t('toPay')}</SectionHead>{pay.length ? pay.map(x => <DueRow key={x.c.id} icon={icons.vendors} name={x.c.name} sub={x.c.next ? fd(x.c.next) : ''} amount={m(x.b)} neg onPress={() => setVp(x.c.id)} />) : <Empty />}</Card>
-      ) : (
-        <View>
-          <SearchToggle query={eq} setQuery={setEq} placeholder={t('expenseHistory')} />
-          <Card>
-            <SectionHead icon={icons.calc}>{t('expenseHistory')}</SectionHead>
-            <Row left={t('todayExpense')} right={m(todayExpTotal)} neg={todayExpTotal > 0} />
-            {exListed.length ? exListed.map(e => (
-              <TouchableOpacity key={e.id} onPress={() => setEf(e)}>
-                <Row left={exLabel(e)} sub={`${e.method ? `${methodName(e.method, t)} • ` : ''}${fd(e.date)}${e.note ? ` • ${e.note}` : ''}`} right={m(e.amount)} neg />
-              </TouchableOpacity>
-            )) : <Empty />}
-          </Card>
-        </View>
-      )}
-      {kpi ? (
-        <KpiDetailModal
-          kind={kpi}
-          period={{ label: fltLabel, inPeriod, isCurrent: isToday }}
-          fin={f}
-          kpiTotal={fSale}
-          collectTotal={fCollect}
-          dueTotal={s.due}
-          payTotal={s.payable}
-          onClose={() => setKpi(null)}
-        />
-      ) : null}
-      {transferOpen ? <MoneyTransferModal onClose={() => setTransferOpen(false)} /> : null}
-      {rc ? <ReceivableModal id={rc} onClose={() => setRc(null)} /> : null}
-      {vp ? <PayableModal id={vp} onClose={() => setVp(null)} /> : null}
-      {ef !== undefined ? (
-        <ExpenseModal
-          init={ef}
-          onClose={() => setEf(undefined)}
-          onSave={async v => { await saveExpense(v); setEf(undefined); }}
-          onTrash={async id => { await deleteExpense(id); setEf(undefined); }}
-        />
-      ) : null}
-    </Screen>
-  );
+  return <AccountsDashboard go={go} focus={focus} onFocusDone={onFocusDone} />;
 }
 
 function FilterModal({ init, onClose, onApply }: { init: AcctFilter; onClose: () => void; onApply: (f: AcctFilter) => void }) {
