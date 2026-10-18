@@ -21,21 +21,21 @@ const tabs: { r: string; k: Key; icon: IconName }[] = [
 // Products, Accounts, Settings. Customers / Vendors / Stock / Trash /
 // Receive / Pay stay reachable from the More (Settings) screen, global search
 // and the Accounts screen - no feature was removed.
-const sidebar: { r: string; k: Key; icon: IconName }[] = [
-  { r: 'home', k: 'home', icon: icons.home },
-  { r: 'purchase', k: 'purchase', icon: icons.purchase },
-  { r: 'return-purchase', k: 'purchaseReturn', icon: icons.retPurchase },
-  { r: 'vendors', k: 'vendors', icon: icons.vendors },
-  { r: 'products', k: 'products', icon: icons.products },
-  { r: 'sale', k: 'sale', icon: icons.sale },
-  { r: 'return-sale', k: 'saleReturn', icon: icons.retSale },
-  { r: 'customers', k: 'customers', icon: icons.customers },
-  { r: 'stock', k: 'stockDashboard', icon: icons.stock },
-  { r: 'expense', k: 'expenseDashboard', icon: icons.expense },
-  { r: 'accounts', k: 'accountsLabel', icon: icons.accounts },
-  { r: 'bank', k: 'bankCash', icon: icons.bankCash },
-  { r: 'more', k: 'office', icon: icons.office },
-  { r: 'trash', k: 'trash', icon: icons.del },
+const sidebar: { r: string; k: Key; icon: IconName; color: string; bg: string }[] = [
+  { r: 'home', k: 'home', icon: icons.home, color: '#2563EB', bg: '#EFF6FF' },
+  { r: 'purchase', k: 'purchase', icon: icons.purchase, color: '#0284C7', bg: '#F0F9FF' },
+  { r: 'return-purchase', k: 'purchaseReturn', icon: icons.retPurchase, color: '#EA580C', bg: '#FFF7ED' },
+  { r: 'vendors', k: 'vendors', icon: icons.vendors, color: '#8B5CF6', bg: '#F5F3FF' },
+  { r: 'products', k: 'products', icon: icons.products, color: '#059669', bg: '#ECFDF5' },
+  { r: 'sale', k: 'sale', icon: icons.sale, color: '#0D9488', bg: '#F0FDFA' },
+  { r: 'return-sale', k: 'saleReturn', icon: icons.retSale, color: '#E11D48', bg: '#FFF1F2' },
+  { r: 'customers', k: 'customers', icon: icons.customers, color: '#0284C7', bg: '#F0F9FF' },
+  { r: 'stock', k: 'stockDashboard', icon: icons.stock, color: '#D97706', bg: '#FFFBEB' },
+  { r: 'expense', k: 'expenseDashboard', icon: icons.expense, color: '#C026D3', bg: '#FDF4FF' },
+  { r: 'accounts', k: 'accountsLabel', icon: icons.accounts, color: '#3B82F6', bg: '#EFF6FF' },
+  { r: 'bank', k: 'bankCash', icon: icons.bankCash, color: '#16A34A', bg: '#F0FDF4' },
+  { r: 'more', k: 'office', icon: icons.office, color: '#6366F1', bg: '#EEF2FF' },
+  { r: 'trash', k: 'trash', icon: icons.del, color: '#DC2626', bg: '#FEF2F2' },
 ];
 // Desktop-only sidebar density. Pointer input, so rows can be tighter than the
 // 48px mobile touch target: 42px row + 2px gap keeps every label readable and
@@ -402,24 +402,59 @@ function Shell() {
                   style={{
                     flexDirection: 'row',
                     alignItems: 'center',
-                    gap: 12,
+                    gap: 10,
                     minHeight: SIDE_ROW_H,
-                    paddingHorizontal: 12,
+                    paddingHorizontal: 10,
+                    paddingVertical: 2,
                     borderRadius: 12,
-                    backgroundColor: on ? '#E0F0FE' : 'transparent',
+                    backgroundColor: on ? '#FFFFFF' : 'transparent',
                     borderWidth: on ? 1.5 : 0,
-                    borderColor: on ? '#BEE0FA' : 'transparent',
+                    borderColor: on ? '#BFDBFE' : 'transparent',
                     borderLeftWidth: on ? 4 : 0,
-                    borderLeftColor: on ? color.primary : 'transparent',
+                    borderLeftColor: on ? x.color : 'transparent',
+                    borderBottomWidth: on ? 2.5 : 0,
+                    borderBottomColor: on ? '#93C5FD' : 'transparent',
                     marginVertical: SIDE_ROW_GAP,
-                    ...(Platform.OS === 'web' && on ? {
-                      backgroundImage: 'linear-gradient(135deg, #E6F3FE 0%, #D8ECFD 100%)',
-                      boxShadow: '0 2px 8px rgba(28, 112, 185, 0.12), inset 0 1px 0 #FFFFFF',
+                    ...(Platform.OS === 'web' ? {
+                      cursor: 'pointer',
+                      transition: 'all 0.25s cubic-bezier(0.34, 1.56, 0.64, 1)',
+                      ...(on ? {
+                        transform: 'translateY(-2px) scale(1.02)',
+                        boxShadow: `0 6px 16px -2px ${x.color}33, 0 2px 6px rgba(0,0,0,0.04), inset 0 1px 0 #FFFFFF`,
+                        backgroundImage: `linear-gradient(135deg, #FFFFFF 0%, ${x.bg} 100%)`,
+                      } : {
+                        transform: 'translateY(0) scale(1)',
+                      }),
                     } as any : {}),
                   }}
                 >
-                  <AppIcon name={x.icon} size={22} iconColor={on ? color.primary : '#5A7391'} />
-                  <Text style={{ fontSize: 14, color: on ? color.primary : '#1E293B', fontWeight: on ? '700' : '500' }}>{t(x.k)}</Text>
+                  <View style={{
+                    width: 28,
+                    height: 28,
+                    borderRadius: 8,
+                    backgroundColor: x.bg,
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    borderWidth: 1,
+                    borderColor: on ? x.color : '#E2E8F0',
+                    borderBottomWidth: on ? 2 : 1,
+                    borderBottomColor: on ? x.color : '#CBD5E1',
+                    ...(Platform.OS === 'web' && on ? {
+                      boxShadow: `0 2px 5px ${x.color}40, inset 0 1px 0 #FFFFFF`,
+                      transform: 'scale(1.08)',
+                      transition: 'transform 0.25s cubic-bezier(0.34, 1.56, 0.64, 1)',
+                    } as any : {}),
+                  }}>
+                    <AppIcon name={x.icon} size={18} iconColor={x.color} />
+                  </View>
+                  <Text style={{
+                    fontSize: 14,
+                    color: on ? '#0F1E36' : '#475569',
+                    fontWeight: on ? '800' : '600',
+                    letterSpacing: on ? 0.2 : 0,
+                  }}>
+                    {t(x.k)}
+                  </Text>
                 </TouchableOpacity>
               );
             })}

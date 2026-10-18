@@ -71,11 +71,9 @@ export function TradeDashboardForm({ mode, onDone }: TradeDashboardFormProps) {
   const [activeItemDropdownIdx, setActiveItemDropdownIdx] = useState<number | null>(null);
   const [itemHighlightIdx, setItemHighlightIdx] = useState(0);
 
-  // Additional costs (Direct, Transport, Landing, Other)
-  const [directCost, setDirectCost] = useState('0');
+  // Additional costs (Transport, Landing)
   const [transportCost, setTransportCost] = useState('500');
   const [landingCost, setLandingCost] = useState('500');
-  const [otherCost, setOtherCost] = useState('200');
 
   // Payments (Cash, Bank)
   const [cashPaid, setCashPaid] = useState('3000');
@@ -136,11 +134,9 @@ export function TradeDashboardForm({ mode, onDone }: TradeDashboardFormProps) {
     }, 0);
   }, [items]);
 
-  const numDirect = parseNum(directCost);
   const numTransport = parseNum(transportCost);
   const numLanding = parseNum(landingCost);
-  const numOther = parseNum(otherCost);
-  const totalAdditionalCosts = numDirect + numTransport + numLanding + numOther;
+  const totalAdditionalCosts = numTransport + numLanding;
 
   const numCash = parseNum(cashPaid);
   const numBank = parseNum(bankPaid);
@@ -247,10 +243,8 @@ export function TradeDashboardForm({ mode, onDone }: TradeDashboardFormProps) {
       seq.push(`qty_${idx}`);
       seq.push(`rate_${idx}`);
     });
-    seq.push('directCost');
     seq.push('transportCost');
     seq.push('landingCost');
-    seq.push('otherCost');
     seq.push('cashPaid');
     seq.push('bankPaid');
     seq.push('completeBtn');
@@ -281,10 +275,8 @@ export function TradeDashboardForm({ mode, onDone }: TradeDashboardFormProps) {
       billDate,
       dueDate,
       items,
-      directCost,
       transportCost,
       landingCost,
-      otherCost,
       cashPaid,
       bankPaid,
       savedAt: new Date().toISOString(),
@@ -300,8 +292,8 @@ export function TradeDashboardForm({ mode, onDone }: TradeDashboardFormProps) {
     }
   }, [
     mode, orderNo, memoNo, selectedPartyId, partyCode, partyName, partyMobile,
-    partyAddress, billDate, dueDate, items, directCost, transportCost,
-    landingCost, otherCost, cashPaid, bankPaid
+    partyAddress, billDate, dueDate, items, transportCost,
+    landingCost, cashPaid, bankPaid
   ]);
 
   // Submission handler
@@ -379,16 +371,6 @@ export function TradeDashboardForm({ mode, onDone }: TradeDashboardFormProps) {
           note: `${isSale ? 'বিক্রয়' : 'ক্রয়'} #${orderNo} ল্যান্ডিং খরচ`,
         }).catch(() => {});
       }
-      if (numOther > 0 && chosenAccountId) {
-        await saveExpense({
-          category: 'other',
-          customName: 'অন্যান্য খরচ',
-          amount: numOther,
-          accountId: chosenAccountId,
-          date: todayISO,
-          note: `${isSale ? 'বিক্রয়' : 'ক্রয়'} #${orderNo} অন্যান্য খরচ`,
-        }).catch(() => {});
-      }
 
       if (Platform.OS === 'web' && typeof localStorage !== 'undefined') {
         localStorage.removeItem(`${DRAFT_STORAGE_KEY_PREFIX}${mode}`);
@@ -405,7 +387,7 @@ export function TradeDashboardForm({ mode, onDone }: TradeDashboardFormProps) {
   }, [
     items, isSale, selectedPartyId, parties, moneyAccounts, numBank, products,
     totalPaid, dueDate, billDate, sale, purchase, numTransport, orderNo,
-    numLanding, numOther, mode, memoNo, totalProductValue, saveExpense, t
+    numLanding, mode, memoNo, totalProductValue, saveExpense, t
   ]);
 
   // Global Keyboard Shortcuts Listener
@@ -493,9 +475,6 @@ export function TradeDashboardForm({ mode, onDone }: TradeDashboardFormProps) {
                 <AppIcon name={isSale ? icons.sale : icons.purchase} size={22} iconColor="#fff" />
               </View>
               <Text style={styles.headerTitle}>{isSale ? 'নতুন বিক্রয়' : 'নতুন ক্রয়'}</Text>
-              <View style={styles.flashyHeaderTag}>
-                <Text style={styles.flashyHeaderTagText}>সক্রিয় মোড</Text>
-              </View>
             </View>
           </View>
 
@@ -812,11 +791,17 @@ export function TradeDashboardForm({ mode, onDone }: TradeDashboardFormProps) {
 
             <TouchableOpacity
               onPress={() => addNewRow(true)}
-              style={styles.addProductBtn3D}
+              style={styles.addProductBtnModern}
+              activeOpacity={0.85}
               accessibilityLabel="পণ্য যোগ করুন (Alt+A)"
             >
-              <AppIcon name={icons.add} size={18} iconColor="#1c70b9" />
-              <Text style={styles.addProductBtnText}>+ পণ্য যোগ করুন</Text>
+              <View style={styles.addIconCircle}>
+                <AppIcon name={icons.plus} size={15} iconColor="#FFFFFF" />
+              </View>
+              <Text style={styles.addProductBtnText}>পণ্য যোগ করুন</Text>
+              <View style={styles.shortcutKeyBadge}>
+                <Text style={styles.shortcutKeyText}>Alt+A</Text>
+              </View>
             </TouchableOpacity>
           </View>
 
@@ -998,8 +983,8 @@ export function TradeDashboardForm({ mode, onDone }: TradeDashboardFormProps) {
                         if (row.name.trim() || parseNum(row.qty) > 0) {
                           addNewRow(true);
                         } else {
-                          inputRefs.current['directCost']?.focus();
-                          setFocusedField('directCost');
+                          inputRefs.current['transportCost']?.focus();
+                          setFocusedField('transportCost');
                         }
                       } else {
                         inputRefs.current[`code_${rowIdx + 1}`]?.focus();
@@ -1039,6 +1024,22 @@ export function TradeDashboardForm({ mode, onDone }: TradeDashboardFormProps) {
               </View>
             );
           })}
+
+          {/* Quick Add Row at bottom of table */}
+          <TouchableOpacity
+            onPress={() => addNewRow(true)}
+            style={styles.tableBottomAddBtn}
+            activeOpacity={0.8}
+            accessibilityLabel="নতুন চালের সারি যোগ করুন (Alt+A)"
+          >
+            <View style={styles.tableBottomAddCircle}>
+              <AppIcon name={icons.plus} size={14} iconColor="#15803D" />
+            </View>
+            <Text style={styles.tableBottomAddText}>+ নতুন পণ্যের সারি যোগ করুন</Text>
+            <View style={styles.tableBottomShortcutBadge}>
+              <Text style={styles.tableBottomShortcutText}>Alt+A</Text>
+            </View>
+          </TouchableOpacity>
         </View>
 
         {/* ROW 3: TWO COLUMNS (অতিরিক্ত খরচ & হিসাব বিবরণ) */}
@@ -1048,28 +1049,6 @@ export function TradeDashboardForm({ mode, onDone }: TradeDashboardFormProps) {
             <View style={styles.cardHeaderFlex}>
               <View style={[styles.cardHeaderDot, { backgroundColor: '#F59E0B' }]} />
               <Text style={styles.cardHeaderTitle}>অতিরিক্ত খরচ</Text>
-            </View>
-
-            {/* সরাসরি খরচ (৳) */}
-            <View style={styles.calcRow}>
-              <View style={styles.calcLabelRow}>
-                <View style={[styles.calcDot, { backgroundColor: '#F59E0B' }]} />
-                <Text style={styles.calcLabel}>সরাসরি খরচ (৳)</Text>
-              </View>
-              <TextInput
-                ref={el => (inputRefs.current['directCost'] = el)}
-                value={directCost}
-                onChangeText={setDirectCost}
-                onFocus={() => setFocusedField('directCost')}
-                onSubmitEditing={() => focusNextField('directCost')}
-                style={[
-                  styles.calcInputDebossed,
-                  isInputFocused('directCost') && styles.inputFocusedGlow,
-                ]}
-                placeholder="0"
-                keyboardType="numeric"
-                returnKeyType="next"
-              />
             </View>
 
             {/* পরিবহন খরচ (৳) */}
@@ -1111,28 +1090,6 @@ export function TradeDashboardForm({ mode, onDone }: TradeDashboardFormProps) {
                   isInputFocused('landingCost') && styles.inputFocusedGlow,
                 ]}
                 placeholder="500"
-                keyboardType="numeric"
-                returnKeyType="next"
-              />
-            </View>
-
-            {/* অন্যান্য খরচ (৳) */}
-            <View style={styles.calcRow}>
-              <View style={styles.calcLabelRow}>
-                <View style={[styles.calcDot, { backgroundColor: '#8B5CF6' }]} />
-                <Text style={styles.calcLabel}>অন্যান্য খরচ (৳)</Text>
-              </View>
-              <TextInput
-                ref={el => (inputRefs.current['otherCost'] = el)}
-                value={otherCost}
-                onChangeText={setOtherCost}
-                onFocus={() => setFocusedField('otherCost')}
-                onSubmitEditing={() => focusNextField('otherCost')}
-                style={[
-                  styles.calcInputDebossed,
-                  isInputFocused('otherCost') && styles.inputFocusedGlow,
-                ]}
-                placeholder="200"
                 keyboardType="numeric"
                 returnKeyType="next"
               />
@@ -1752,28 +1709,92 @@ const styles = StyleSheet.create({
     justifyContent: 'space-between',
     marginBottom: 14,
   },
-  addProductBtn3D: {
+  addProductBtnModern: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 6,
-    borderWidth: 1.5,
-    borderColor: '#1c70b9',
+    gap: 8,
     borderRadius: 10,
     paddingHorizontal: 16,
-    paddingVertical: 8,
-    backgroundColor: '#FFFFFF',
-    borderBottomWidth: 3,
-    borderBottomColor: '#124c7e',
+    paddingVertical: 9,
+    backgroundColor: '#15803D',
+    borderWidth: 1,
+    borderColor: '#166534',
     ...(Platform.OS === 'web' ? {
       cursor: 'pointer',
-      backgroundImage: 'linear-gradient(180deg, #FFFFFF 0%, #EFF6FC 100%)',
-      boxShadow: '0 4px 10px rgba(28, 112, 185, 0.16), inset 0 1px 0 #FFFFFF',
-    } as any : {}),
+      backgroundImage: 'linear-gradient(135deg, #16A34A 0%, #15803D 100%)',
+      boxShadow: '0 3px 8px rgba(21, 128, 61, 0.28), inset 0 1px 0 rgba(255, 255, 255, 0.22)',
+    } as any : {
+      elevation: 2,
+    }),
+  },
+  addIconCircle: {
+    width: 22,
+    height: 22,
+    borderRadius: 11,
+    backgroundColor: 'rgba(255, 255, 255, 0.22)',
+    alignItems: 'center',
+    justifyContent: 'center',
   },
   addProductBtnText: {
-    color: '#1c70b9',
+    color: '#FFFFFF',
+    fontSize: 13.5,
+    fontWeight: '700',
+    letterSpacing: 0.2,
+  },
+  shortcutKeyBadge: {
+    backgroundColor: 'rgba(0, 0, 0, 0.22)',
+    paddingHorizontal: 7,
+    paddingVertical: 2,
+    borderRadius: 6,
+    marginLeft: 2,
+  },
+  shortcutKeyText: {
+    color: '#DCFCE7',
+    fontSize: 10.5,
+    fontWeight: '700',
+    fontFamily: Platform.OS === 'web' ? 'monospace' : undefined,
+  },
+  tableBottomAddBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 8,
+    marginTop: 10,
+    paddingVertical: 10,
+    paddingHorizontal: 14,
+    borderRadius: 8,
+    borderWidth: 1.5,
+    borderColor: '#BBF7D0',
+    borderStyle: 'dashed',
+    backgroundColor: '#F0FDF4',
+    ...(Platform.OS === 'web' ? {
+      cursor: 'pointer',
+    } as any : {}),
+  },
+  tableBottomAddCircle: {
+    width: 20,
+    height: 20,
+    borderRadius: 10,
+    backgroundColor: '#DCFCE7',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  tableBottomAddText: {
+    color: '#15803D',
     fontSize: 13,
-    fontWeight: '800',
+    fontWeight: '600',
+  },
+  tableBottomShortcutBadge: {
+    backgroundColor: '#DCFCE7',
+    paddingHorizontal: 6,
+    paddingVertical: 2,
+    borderRadius: 4,
+  },
+  tableBottomShortcutText: {
+    color: '#166534',
+    fontSize: 10.5,
+    fontWeight: '700',
+    fontFamily: Platform.OS === 'web' ? 'monospace' : undefined,
   },
   tableHeaderRow3D: {
     flexDirection: 'row',
