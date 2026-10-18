@@ -1,0 +1,31 @@
+# Node & dependencies
+node_modules/
+*/node_modules/
+
+# Build artifacts
+dist/
+build/
+web-build/
+backend/dist/
+
+# Environment files
+.env
+.env.*
+!.env.example
+backend/.env
+backend/.env.*
+!backend/.env.example
+
+# Expo
+.expo/
+.expo-shared/
+
+# Logs
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# System Files
+.DS_Store
+Thumbs.db

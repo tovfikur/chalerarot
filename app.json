@@ -1,0 +1,10 @@
+{
+  "expo": {
+    "name": "Chaler Aroot",
+    "slug": "chal-arot",
+    "version": "1.0.0",
+    "orientation": "portrait",
+    "primaryColor": "#1B7F4B",
+    "main": "index.js"
+  }
+}

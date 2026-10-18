@@ -1,0 +1,382 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model Product {
+  id           String   @id @default(cuid())
+  name         String
+  // `cost` is the running WEIGHTED AVERAGE cost per KG (AVCO) of the stock on
+  // hand. It is never used to re-value old documents.
+  cost         Float    @default(0) // per KG
+  price        Float    @default(0) // per KG
+  openingQtyKg Float    @default(0)
+  // Frozen opening valuation: decided once when opening stock is set and never
+  // recalculated from a later cost.
+  openingUnitCost Float @default(0) // per KG used to value the opening stock
+  openingValue    Float @default(0) // openingQtyKg * openingUnitCost
+  qtyKg        Float    @default(0) // single real stock, always KG (sellable bucket)
+  stockValue   Float    @default(0) // value of the sellable bucket
+  damagedQtyKg Float    @default(0) // damaged stock, never sellable
+  damagedValue Float    @default(0) // value of the damaged bucket, kept apart
+  smallBagKg   Float    @default(25)
+  mediumBagKg  Float    @default(40)
+  largeBagKg   Float    @default(50)
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+  deletedAt    DateTime?
+
+  saleItems     SaleItem[]
+  purchaseItems PurchaseItem[]
+  movements     StockMovement[]
+  returnItems   ProductReturnItem[]
+
+  @@index([name])
+  @@index([deletedAt])
+}
+
+model Customer {
+  id         String   @id @default(cuid())
+  name       String
+  mobile     String   @default("")
+  address    String?
+  openingDue Float    @default(0)
+  nextDate   String?
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+  deletedAt  DateTime?
+
+  sales    Sale[]
+  payments CustomerPayment[]
+
+  @@index([name])
+  @@index([mobile])
+  @@index([deletedAt])
+}
+
+model Vendor {
+  id             String   @id @default(cuid())
+  name           String
+  mobile         String   @default("")
+  address        String?
+  openingPayable Float    @default(0)
+  nextDate   String?
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+  deletedAt  DateTime?
+
+  purchases Purchase[]
+  payments  VendorPayment[]
+
+  @@index([name])
+  @@index([mobile])
+  @@index([deletedAt])
+}
+
+model Sale {
+  id         String   @id @default(cuid())
+  customerId String?
+  customer   Customer? @relation(fields: [customerId], references: [id], onDelete: Restrict)
+  date       String // YYYY-MM-DD
+  discount   Float    @default(0)
+  total      Float
+  paid       Float    @default(0)
+  due        Float    @default(0)
+  profit     Float    @default(0)
+  nextDate   String?
+  invoiceNo  String?  @unique
+  createdAt  DateTime @default(now())
+
+  items SaleItem[]
+  returns ProductReturn[]
+
+  @@index([customerId])
+  @@index([date])
+}
+
+model SaleItem {
+  id         String  @id @default(cuid())
+  saleId     String
+  sale       Sale    @relation(fields: [saleId], references: [id], onDelete: Cascade)
+  productId  String
+  product    Product @relation(fields: [productId], references: [id], onDelete: Restrict)
+  unit       String  @default("kg") // kg | small | medium | large | ton
+  enteredQty Float
+  qtyKg      Float
+  rate       Float // selling price per KG
+  // Immutable historical cost snapshot: weighted average cost of the stock at
+  // the moment this line was sold. Never recomputed from Product.cost.
+  unitCost   Float   @default(0) // per KG at sale time
+  cogs       Float   @default(0) // qtyKg * unitCost
+
+  @@index([saleId])
+  @@index([productId])
+}
+
+model Purchase {
+  id       String  @id @default(cuid())
+  vendorId String
+  vendor   Vendor  @relation(fields: [vendorId], references: [id], onDelete: Restrict)
+  date     String // YYYY-MM-DD
+  total    Float
+  paid     Float   @default(0)
+  due      Float   @default(0)
+  nextDate String?
+  invoiceNo String? @unique
+  createdAt DateTime @default(now())
+
+  items PurchaseItem[]
+  returns ProductReturn[]
+
+  @@index([vendorId])
+  @@index([date])
+}
+
+model PurchaseItem {
+  id         String   @id @default(cuid())
+  purchaseId String
+  purchase   Purchase @relation(fields: [purchaseId], references: [id], onDelete: Cascade)
+  productId  String
+  product    Product  @relation(fields: [productId], references: [id], onDelete: Restrict)
+  unit       String   @default("kg")
+  enteredQty Float
+  qtyKg      Float
+  rate       Float // per KG
+
+  @@index([purchaseId])
+  @@index([productId])
+}
+
+model CustomerPayment {
+  id         String   @id @default(cuid())
+  customerId String? // null = cash payment without customer
+  customer   Customer? @relation(fields: [customerId], references: [id], onDelete: Restrict)
+  saleId     String?
+  returnId   String?
+  amount     Float
+  date       String // YYYY-MM-DD
+  note       String?
+  nextDate   String?
+  createdAt  DateTime @default(now())
+
+  @@index([customerId])
+  @@index([date])
+}
+
+model VendorPayment {
+  id         String   @id @default(cuid())
+  vendorId   String
+  vendor     Vendor   @relation(fields: [vendorId], references: [id], onDelete: Restrict)
+  purchaseId String?
+  returnId   String?
+  amount     Float
+  date       String // YYYY-MM-DD
+  note       String?
+  nextDate   String?
+  createdAt  DateTime @default(now())
+
+  @@index([vendorId])
+  @@index([date])
+}
+
+// Dated inventory audit trail. Every inventory change writes one immutable row
+// carrying the KG quantity AND its value impact, so any past date can be
+// reconstructed without reading the Product's current cost.
+model StockMovement {
+  id        String  @id @default(cuid())
+  productId String
+  product   Product @relation(fields: [productId], references: [id], onDelete: Cascade)
+  type      String // OPENING | PURCHASE | SALE | SRETURN | SRETURN_DMG | PRETURN | PRETURN_DMG | ADJUSTMENT | REVALUE
+  bucket    String  @default("sellable") // sellable | damaged
+  qtyKg     Float // signed within the bucket: +in, -out
+  unitCost  Float  @default(0) // per KG used to value this movement (historical)
+  value     Float  @default(0) // signed inventory value impact
+  date      String // YYYY-MM-DD
+  refId     String?
+  createdAt DateTime @default(now())
+
+  @@index([productId])
+  @@index([date])
+  @@index([bucket, date])
+}
+
+model Expense {
+  id         String   @id @default(cuid())
+  category   String // salary | rent | ... | other
+  customName String?
+  amount     Float
+  date       String // YYYY-MM-DD
+  note       String?
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+  deletedAt  DateTime?
+
+  @@index([date])
+  @@index([deletedAt])
+  @@index([category])
+}
+
+// One row per payment method holding the manually entered starting balance.
+// Opening balances are pure baseline: they never touch sales, due, profit or
+// expense reporting.
+// A real money account the shop owns (Main Cash, BRAC Bank, bKash Merchant...).
+// MoneyAccount is the only place an account's opening balance lives; the
+// current balance is always derived from it plus the MoneyMovement ledger.
+model MoneyAccount {
+  id             String   @id @default(cuid())
+  name           String
+  type           String   @default("cash") // cash | bank | bkash | nagad | rocket
+  /// Old single-row-per-method key (cash|bkash|nagad|bank), kept so legacy
+  /// rows and old payloads stay traceable after the migration.
+  legacyMethod   String?  @unique
+  openingBalance Float    @default(0)
+  openingDate    String? // dated opening baseline (YYYY-MM-DD)
+  bankName       String?
+  accountNumber  String?
+  branch         String?
+  mobileNumber   String?
+  note           String?
+  active         Boolean  @default(true) // archived, never deleted
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  movements    MoneyMovement[]
+  outTransfers MoneyTransfer[] @relation("TransferFromAccount")
+  inTransfers  MoneyTransfer[] @relation("TransferToAccount")
+
+  @@index([type])
+  @@index([active])
+}
+
+// One business event: moving money from one method to another. It owns exactly
+// two MoneyMovement rows (OUT on the from account, IN on the to account), so a
+// transfer is never mistaken for an expense or a collection.
+model MoneyTransfer {
+  id         String   @id @default(cuid())
+  transferNo String   @unique // TRF-2026-000001
+  fromMethod String // legacy type of the source account
+  toMethod   String // legacy type of the destination account
+  fromAccountId String?
+  fromAccount   MoneyAccount? @relation("TransferFromAccount", fields: [fromAccountId], references: [id], onDelete: Restrict)
+  toAccountId   String?
+  toAccount     MoneyAccount? @relation("TransferToAccount", fields: [toAccountId], references: [id], onDelete: Restrict)
+  amount     Float
+  date       String // YYYY-MM-DD
+  note       String?
+  createdAt  DateTime @default(now())
+
+  movements MoneyMovement[]
+
+  @@index([date])
+}
+
+// Canonical ledger of every actual money in/out event. This is the ONLY source
+// used to compute method balances, so a sale is never counted twice (its
+// `paid` field and its linked payment row describe the same single event).
+model MoneyMovement {
+  id         String   @id @default(cuid())
+  method     String // cash | bkash | nagad | bank
+  direction  String // in | out
+  amount     Float
+  date       String // YYYY-MM-DD
+  sourceType String // sale | purchase | customerPayment | vendorPayment | expense | saleReturn | purchaseReturn | transferOut | transferIn | opening | openingAdjust
+  sourceId   String
+  // The concrete account the money moved through. `method` stays as the
+  // account TYPE label for legacy rows and quick grouping.
+  moneyAccountId String?
+  moneyAccount   MoneyAccount? @relation(fields: [moneyAccountId], references: [id], onDelete: Restrict)
+  transferId String? // set on both sides of a transfer
+  transfer   MoneyTransfer? @relation(fields: [transferId], references: [id], onDelete: Cascade)
+  note       String?
+  active     Boolean  @default(true) // false when the source was trashed
+  createdAt  DateTime @default(now())
+
+  @@unique([sourceType, sourceId])
+  @@index([method])
+  @@index([date])
+  @@index([transferId])
+  @@index([moneyAccountId, date])
+}
+
+model Notification {
+  id        String   @id @default(cuid())
+  refType   String // sale | purchase
+  refId     String
+  occasion  String // tomorrow | today
+  dueDate   String // YYYY-MM-DD the reminder is about
+  partyKind String // c | v
+  partyId   String
+  partyName String
+  amount    Float // remaining at last computation
+  read      Boolean  @default(false)
+  createdAt DateTime @default(now())
+
+  @@unique([refType, refId, occasion, dueDate])
+  @@index([read])
+  @@index([partyId])
+}
+
+// Yearly invoice counters. Incremented with a single atomic upsert so
+// concurrent transactions never receive the same number.
+model Sequence {
+  key  String @id // e.g. SAL:2026
+  last Int    @default(0)
+}
+
+model ProductReturn {
+  id          String   @id @default(cuid())
+  returnNo    String?  @unique // SRN-2026-000001 | PRN-2026-000001
+  kind        String // sale | purchase
+  saleId      String?
+  sale        Sale?     @relation(fields: [saleId], references: [id], onDelete: Restrict)
+  purchaseId  String?
+  purchase    Purchase? @relation(fields: [purchaseId], references: [id], onDelete: Restrict)
+  customerId  String?
+  vendorId    String?
+  date        String // YYYY-MM-DD (return date)
+  totalAmount Float    @default(0)
+  profitImpact Float   @default(0) // sales returns reduce profit by this
+  settlement  String   @default("credit") // credit | refund
+  refundAmount Float   @default(0)
+  note       String?
+  createdAt DateTime @default(now())
+
+  items ProductReturnItem[]
+
+  @@index([kind])
+  @@index([saleId])
+  @@index([purchaseId])
+  @@index([date])
+}
+
+model ProductReturnItem {
+  id            String        @id @default(cuid())
+  returnId      String
+  ret           ProductReturn @relation(fields: [returnId], references: [id], onDelete: Cascade)
+  saleItemId    String?
+  purchaseItemId String?
+  productId     String
+  product       Product       @relation(fields: [productId], references: [id], onDelete: Restrict)
+  unit          String        @default("kg") // kg | small | medium | large | ton | others
+  enteredQty    Float
+  qtyKg         Float
+  goodKg        Float         @default(0)
+  damagedKg     Float         @default(0)
+  condition     String        @default("good") // good | damaged | partial
+  damageReason  String?
+  note          String?
+  rate          Float // original transaction rate per KG (revenue or credit side)
+  amount        Float // return value for this line
+  // Historical cost basis. For a sales return this is the ORIGINAL SALE LINE's
+  // cost, never the product's current cost.
+  unitCost      Float  @default(0) // per KG
+  cogs          Float  @default(0) // sellable COGS reversed (goodKg * unitCost)
+  damagedValue  Float  @default(0) // value placed in the damaged bucket (damagedKg * unitCost)
+
+  @@index([returnId])
+  @@index([productId])
+}
