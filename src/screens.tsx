@@ -102,17 +102,16 @@ export function Home() {
     if (!id || id === 'cash') return t('cashSale');
     return customers.find(c => c.id === id)?.name ?? t('cashSale');
   };
-  const Stat = ({ l, v, icon, onPress }: { l: string; v: number; icon: React.ComponentProps<typeof AppIcon>['name']; onPress: () => void }) => {
-    const fs = useFs(26, 21);
+  const Stat = ({ l, v, icon, iconColor, iconBg, onPress }: { l: string; v: number; icon: React.ComponentProps<typeof AppIcon>['name']; iconColor: string; iconBg: string; onPress: () => void }) => {
     return (
-      <TouchableOpacity onPress={onPress} activeOpacity={0.7} style={{ flex: 1, minWidth: '46%' }}>
-        <Card style={{ marginBottom: 0 }}>
-          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
-            <AppIcon name={icon} size={20} iconColor={color.muted} />
-            <Muted>{l}</Muted>
-          </View>
-          <Text style={{ fontSize: fs, fontWeight: '700', color: color.primary }}>{m(v)}</Text>
-        </Card>
+      <TouchableOpacity onPress={onPress} activeOpacity={0.8} style={{ flex: 1, minWidth: 220, backgroundColor: '#fff', borderRadius: 12, padding: 16, borderWidth: 1, borderColor: '#E2E8E4', flexDirection: 'row', alignItems: 'center', gap: 14 }}>
+        <View style={{ width: 50, height: 50, borderRadius: 25, backgroundColor: iconBg, alignItems: 'center', justifyContent: 'center' }}>
+          <AppIcon name={icon} size={24} iconColor={iconColor} />
+        </View>
+        <View style={{ flex: 1 }}>
+          <Text style={{ fontSize: 13, color: '#64748B', fontWeight: '500', marginBottom: 4 }}>{l}</Text>
+          <Text style={{ fontSize: 20, fontWeight: '700', color: '#0F172A' }}>{m(v)}</Text>
+        </View>
       </TouchableOpacity>
     );
   };
@@ -125,12 +124,12 @@ export function Home() {
     </View>
   );
   const dash = (
-    <RGrid mobile={2} tablet={4} desktop={4}>
-      <Stat l={t('todaySale')} v={s.todaySale} icon={icons.sale} onPress={() => setView('sale')} />
-      <Stat l={t('todayDue')} v={s.todayDue} icon={icons.collect} onPress={() => setView('due')} />
-      <Stat l={t('todayCollect')} v={s.todayCollect} icon={icons.collect} onPress={() => setView('collect')} />
-      <Stat l={t('todayProfit')} v={s.todayProfit} icon={icons.profit} onPress={() => setView('profit')} />
-    </RGrid>
+    <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 12, marginBottom: 14 }}>
+      <Stat l={t('todaySale')} v={s.todaySale} icon={icons.sale} iconColor="#1B7F4B" iconBg="#E8F5E9" onPress={() => setView('sale')} />
+      <Stat l={t('todayDue')} v={s.todayDue} icon={icons.collect} iconColor="#DC2626" iconBg="#FEE2E2" onPress={() => setView('due')} />
+      <Stat l={t('todayCollect')} v={s.todayCollect} icon={icons.collect} iconColor="#2563EB" iconBg="#EFF6FF" onPress={() => setView('collect')} />
+      <Stat l={t('todayProfit')} v={s.todayProfit} icon={icons.profit} iconColor="#D97706" iconBg="#FEF3C7" onPress={() => setView('profit')} />
+    </View>
   );
   const detail = () => {
     if (view === 'sale') {
@@ -722,11 +721,37 @@ function TxnHistory({ kind, onNew, focus, onFocusDone }: {
         {chip(t('statusPaid'), status === 'paid', () => setStatus(status === 'paid' ? 'all' : 'paid'))}
         {chip(t('statusDue'), status === 'due', () => setStatus(status === 'due' ? 'all' : 'due'))}
       </View>
-      <Card>
-        <Row left={t('total')} right={m(sums.total)} />
-        <Row left={t('paid')} right={m(sums.paid)} />
-        <Row left={t('due')} right={m(sums.due)} neg={sums.due > 0} />
-      </Card>
+      <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 12, marginBottom: 14 }}>
+        <View style={{ flex: 1, minWidth: 200, backgroundColor: '#fff', borderRadius: 12, padding: 14, borderWidth: 1, borderColor: '#E2E8E4', flexDirection: 'row', alignItems: 'center', gap: 12 }}>
+          <View style={{ width: 44, height: 44, borderRadius: 22, backgroundColor: '#E8F5E9', alignItems: 'center', justifyContent: 'center' }}>
+            <AppIcon name={icons.calc} size={22} iconColor="#1B7F4B" />
+          </View>
+          <View style={{ flex: 1 }}>
+            <Text style={{ fontSize: 13, color: '#64748B', fontWeight: '500' }}>{t('total')}</Text>
+            <Text style={{ fontSize: 18, fontWeight: '700', color: '#0F172A' }}>{m(sums.total)}</Text>
+          </View>
+        </View>
+
+        <View style={{ flex: 1, minWidth: 200, backgroundColor: '#fff', borderRadius: 12, padding: 14, borderWidth: 1, borderColor: '#E2E8E4', flexDirection: 'row', alignItems: 'center', gap: 12 }}>
+          <View style={{ width: 44, height: 44, borderRadius: 22, backgroundColor: '#EFF6FF', alignItems: 'center', justifyContent: 'center' }}>
+            <AppIcon name={icons.collect} size={22} iconColor="#2563EB" />
+          </View>
+          <View style={{ flex: 1 }}>
+            <Text style={{ fontSize: 13, color: '#64748B', fontWeight: '500' }}>{t('paid')}</Text>
+            <Text style={{ fontSize: 18, fontWeight: '700', color: '#1B7F4B' }}>{m(sums.paid)}</Text>
+          </View>
+        </View>
+
+        <View style={{ flex: 1, minWidth: 200, backgroundColor: '#fff', borderRadius: 12, padding: 14, borderWidth: 1, borderColor: '#E2E8E4', flexDirection: 'row', alignItems: 'center', gap: 12 }}>
+          <View style={{ width: 44, height: 44, borderRadius: 22, backgroundColor: '#FEE2E2', alignItems: 'center', justifyContent: 'center' }}>
+            <AppIcon name={icons.pay} size={22} iconColor="#DC2626" />
+          </View>
+          <View style={{ flex: 1 }}>
+            <Text style={{ fontSize: 13, color: '#64748B', fontWeight: '500' }}>{t('due')}</Text>
+            <Text style={{ fontSize: 18, fontWeight: '700', color: sums.due > 0 ? '#DC2626' : '#1B7F4B' }}>{m(sums.due)}</Text>
+          </View>
+        </View>
+      </View>
       {isDesktop ? (
         <ListTable<TxnRow>
           columns={columns}
@@ -1170,6 +1195,45 @@ export function Parties({ kind, focus, onFocusDone, onReturn }: { kind: 'c' | 'v
   }
   return <Screen scrollRef={scrollRef} onScrollY={onScrollY}>
     <ListPageHeader title={isC ? t('customers') : t('vendors')} addLabel={t('add')} onAdd={() => open()} />
+    {/* Top Summary Cards */}
+    {(() => {
+      const totalParties = list.length;
+      const totalDueBal = list.reduce((sum, p) => sum + Math.max(0, bal(kind, p.id).balance), 0);
+      const activeCount = list.filter(p => bal(kind, p.id).balance > 0).length;
+      return (
+        <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 12, marginBottom: 14 }}>
+          <View style={{ flex: 1, minWidth: 200, backgroundColor: '#fff', borderRadius: 12, padding: 14, borderWidth: 1, borderColor: '#E2E8E4', flexDirection: 'row', alignItems: 'center', gap: 12 }}>
+            <View style={{ width: 44, height: 44, borderRadius: 22, backgroundColor: '#E8F5E9', alignItems: 'center', justifyContent: 'center' }}>
+              <AppIcon name={isC ? icons.customers : icons.vendors} size={22} iconColor="#1B7F4B" />
+            </View>
+            <View style={{ flex: 1 }}>
+              <Text style={{ fontSize: 13, color: '#64748B', fontWeight: '500' }}>{isC ? 'মোট কাস্টমার' : 'মোট সরবরাহকারী'}</Text>
+              <Text style={{ fontSize: 18, fontWeight: '700', color: '#0F172A' }}>{totalParties} জন</Text>
+            </View>
+          </View>
+
+          <View style={{ flex: 1, minWidth: 200, backgroundColor: '#fff', borderRadius: 12, padding: 14, borderWidth: 1, borderColor: '#E2E8E4', flexDirection: 'row', alignItems: 'center', gap: 12 }}>
+            <View style={{ width: 44, height: 44, borderRadius: 22, backgroundColor: '#FEE2E2', alignItems: 'center', justifyContent: 'center' }}>
+              <AppIcon name={icons.collect} size={22} iconColor="#DC2626" />
+            </View>
+            <View style={{ flex: 1 }}>
+              <Text style={{ fontSize: 13, color: '#64748B', fontWeight: '500' }}>{isC ? 'মোট বাকি' : 'মোট প্রদেয়'}</Text>
+              <Text style={{ fontSize: 18, fontWeight: '700', color: '#DC2626' }}>{m(totalDueBal)}</Text>
+            </View>
+          </View>
+
+          <View style={{ flex: 1, minWidth: 200, backgroundColor: '#fff', borderRadius: 12, padding: 14, borderWidth: 1, borderColor: '#E2E8E4', flexDirection: 'row', alignItems: 'center', gap: 12 }}>
+            <View style={{ width: 44, height: 44, borderRadius: 22, backgroundColor: '#EFF6FF', alignItems: 'center', justifyContent: 'center' }}>
+              <AppIcon name={icons.calc} size={22} iconColor="#2563EB" />
+            </View>
+            <View style={{ flex: 1 }}>
+              <Text style={{ fontSize: 13, color: '#64748B', fontWeight: '500' }}>বাকি থাকা একাউন্ট</Text>
+              <Text style={{ fontSize: 18, fontWeight: '700', color: '#0F172A' }}>{activeCount} টি</Text>
+            </View>
+          </View>
+        </View>
+      );
+    })()}
     <SearchDropdown
       items={list}
       query={pq}
