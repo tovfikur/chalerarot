@@ -329,7 +329,7 @@ export function TradeDashboardForm({ mode, onDone }: TradeDashboardFormProps) {
       setTimeout(() => {
         inputRefs.current[`code_${newIdx}`]?.focus();
         setFocusedField(`code_${newIdx}`);
-      }, 60);
+      }, 50);
     }
   }, [items.length]);
 
@@ -341,6 +341,53 @@ export function TradeDashboardForm({ mode, onDone }: TradeDashboardFormProps) {
     }
     setItems(prev => prev.filter((_, i) => i !== idx));
   }, [items.length]);
+
+  // Keyboard navigation sequence
+  const getNavSequence = useCallback((): string[] => {
+    const seq: string[] = [];
+    if (isSale) seq.push('orderNo');
+    seq.push('memoNo');
+    seq.push('partyCode');
+    seq.push('partyName');
+    seq.push('partyMobile');
+    seq.push('partyAddress');
+    seq.push('billDate');
+    seq.push('dueDate');
+
+    items.forEach((_, idx) => {
+      seq.push(`code_${idx}`);
+      seq.push(`qty_${idx}`);
+      if (isSale) {
+        seq.push(`purchaseRate_${idx}`);
+      }
+      seq.push(`rate_${idx}`);
+    });
+
+    return seq;
+  }, [isSale, items]);
+
+  const focusNextField = useCallback((currentKey: string) => {
+    const seq = getNavSequence();
+    const currentIdx = seq.indexOf(currentKey);
+    if (currentIdx >= 0 && currentIdx < seq.length - 1) {
+      const nextKey = seq[currentIdx + 1];
+      inputRefs.current[nextKey]?.focus();
+      setFocusedField(nextKey);
+    } else if (currentKey.startsWith('rate_')) {
+      // If pressing Enter on the last rate field, automatically add a new product row and focus it!
+      addNewRow(true);
+    }
+  }, [getNavSequence, addNewRow]);
+
+  const focusPrevField = useCallback((currentKey: string) => {
+    const seq = getNavSequence();
+    const currentIdx = seq.indexOf(currentKey);
+    if (currentIdx > 0) {
+      const prevKey = seq[currentIdx - 1];
+      inputRefs.current[prevKey]?.focus();
+      setFocusedField(prevKey);
+    }
+  }, [getNavSequence]);
 
   // Save Draft to localStorage
   const handleSaveDraft = useCallback(() => {
@@ -505,25 +552,69 @@ export function TradeDashboardForm({ mode, onDone }: TradeDashboardFormProps) {
     if (Platform.OS !== 'web' || typeof window === 'undefined') return;
 
     const handleGlobalKeyDown = (e: KeyboardEvent) => {
+      // 1. ESC: Close modals / dropdowns or return
       if (e.key === 'Escape') {
         if (showShortcutsHelp) {
           setShowShortcutsHelp(false);
+          e.preventDefault();
+          return;
+        }
+        if (reviewSplitOpen) {
+          setReviewSplitOpen(false);
+          e.preventDefault();
           return;
         }
         if (partyDropdownOpen) {
           setPartyDropdownOpen(false);
+          e.preventDefault();
           return;
         }
         if (activeItemDropdownIdx !== null) {
           setActiveItemDropdownIdx(null);
+          e.preventDefault();
           return;
         }
+      }
+
+      // 2. F1: Toggle shortcuts help guide
+      if (e.key === 'F1') {
+        e.preventDefault();
+        setShowShortcutsHelp(prev => !prev);
+        return;
+      }
+
+      // 3. Ctrl+S or F8: Confirm & Open Split Review / Complete
+      if ((e.ctrlKey && e.key.toLowerCase() === 's') || e.key === 'F8') {
+        e.preventDefault();
+        if (reviewSplitOpen) {
+          executeTransaction();
+        } else {
+          handleOpenConfirm();
+        }
+        return;
+      }
+
+      // 4. Ctrl+D or F9: Save Draft
+      if ((e.ctrlKey && e.key.toLowerCase() === 'd') || e.key === 'F9') {
+        e.preventDefault();
+        handleSaveDraft();
+        return;
+      }
+
+      // 5. Alt+A or Insert: Add new product row
+      if ((e.altKey && e.key.toLowerCase() === 'a') || e.key === 'Insert') {
+        e.preventDefault();
+        addNewRow(true);
+        return;
       }
     };
 
     window.addEventListener('keydown', handleGlobalKeyDown);
     return () => window.removeEventListener('keydown', handleGlobalKeyDown);
-  }, [showShortcutsHelp, partyDropdownOpen, activeItemDropdownIdx]);
+  }, [
+    showShortcutsHelp, reviewSplitOpen, partyDropdownOpen, activeItemDropdownIdx,
+    executeTransaction, handleOpenConfirm, handleSaveDraft, addNewRow
+  ]);
 
   const isInputFocused = (key: string) => focusedField === key;
 
@@ -946,8 +1037,18 @@ export function TradeDashboardForm({ mode, onDone }: TradeDashboardFormProps) {
                         setFocusedField(`code_${rowIdx}`);
                         setActiveItemDropdownIdx(rowIdx);
                       }}
+                      onSubmitEditing={() => {
+                        setActiveItemDropdownIdx(null);
+                        focusNextField(`code_${rowIdx}`);
+                      }}
+                      onKeyPress={(e: any) => {
+                        if (e.nativeEvent.key === 'Escape') {
+                          setActiveItemDropdownIdx(null);
+                        }
+                      }}
                       style={styles.tableTextInputNoBorder}
                       placeholder={lang === 'bn' ? 'কোড (১, ২...)' : 'Code (1, 2...)'}
+                      returnKeyType="next"
                     />
                     <TouchableOpacity
                       onPress={() => setActiveItemDropdownIdx(activeItemDropdownIdx === rowIdx ? null : rowIdx)}
@@ -970,7 +1071,10 @@ export function TradeDashboardForm({ mode, onDone }: TradeDashboardFormProps) {
                           return (
                             <TouchableOpacity
                               key={p.id}
-                              onPress={() => onSelectProduct(rowIdx, p, pIdx)}
+                              onPress={() => {
+                                onSelectProduct(rowIdx, p, pIdx);
+                                focusNextField(`code_${rowIdx}`);
+                              }}
                               style={styles.dropdownItem}
                             >
                               <View style={{ flex: 1 }}>
@@ -1019,7 +1123,7 @@ export function TradeDashboardForm({ mode, onDone }: TradeDashboardFormProps) {
                   <TouchableOpacity
                     onPress={() => handleUnitChange(rowIdx, (row.unit || 'medium') === 'medium' ? 'kg' : 'medium')}
                     style={styles.unitToggleBtn}
-                    accessibilityLabel="একক পরিবর্তন করুন"
+                    accessibilityLabel="একক পরিবর্তন করুন (Space / Click)"
                   >
                     <Text style={styles.unitToggleText}>
                       {(row.unit || 'medium') === 'kg' ? 'কেজি' : 'বস্তা'}
@@ -1043,6 +1147,7 @@ export function TradeDashboardForm({ mode, onDone }: TradeDashboardFormProps) {
                       });
                     }}
                     onFocus={() => setFocusedField(`qty_${rowIdx}`)}
+                    onSubmitEditing={() => focusNextField(`qty_${rowIdx}`)}
                     style={[
                       styles.tableTextInput,
                       { textAlign: 'center' },
@@ -1050,6 +1155,7 @@ export function TradeDashboardForm({ mode, onDone }: TradeDashboardFormProps) {
                     ]}
                     placeholder="1"
                     keyboardType="numeric"
+                    returnKeyType="next"
                   />
                 </View>
 
@@ -1067,6 +1173,7 @@ export function TradeDashboardForm({ mode, onDone }: TradeDashboardFormProps) {
                         });
                       }}
                       onFocus={() => setFocusedField(`purchaseRate_${rowIdx}`)}
+                      onSubmitEditing={() => focusNextField(`purchaseRate_${rowIdx}`)}
                       style={[
                         styles.tableTextInput,
                         { textAlign: 'center', borderColor: '#F59E0B', backgroundColor: '#FFFDF7' },
@@ -1074,6 +1181,7 @@ export function TradeDashboardForm({ mode, onDone }: TradeDashboardFormProps) {
                       ]}
                       placeholder={String(basePurchaseRate || 0)}
                       keyboardType="numeric"
+                      returnKeyType="next"
                     />
                     {rowProduct ? (
                       <Text style={styles.baseAvgHintText} numberOfLines={1}>
@@ -1096,6 +1204,7 @@ export function TradeDashboardForm({ mode, onDone }: TradeDashboardFormProps) {
                       });
                     }}
                     onFocus={() => setFocusedField(`rate_${rowIdx}`)}
+                    onSubmitEditing={() => focusNextField(`rate_${rowIdx}`)}
                     style={[
                       styles.tableTextInput,
                       { textAlign: 'center' },
@@ -1103,6 +1212,7 @@ export function TradeDashboardForm({ mode, onDone }: TradeDashboardFormProps) {
                     ]}
                     placeholder={isSale ? "3000" : "2500"}
                     keyboardType="numeric"
+                    returnKeyType="next"
                   />
                 </View>
 
@@ -1339,21 +1449,27 @@ export function TradeDashboardForm({ mode, onDone }: TradeDashboardFormProps) {
                           <View style={{ flex: 1 }}>
                             <Text style={{ fontSize: 12, color: '#64748B', marginBottom: 2 }}>ক্যাশ (৳)</Text>
                             <TextInput
+                              ref={el => (inputRefs.current['modal_cashPaid'] = el)}
                               value={cashPaid}
                               onChangeText={setCashPaid}
                               keyboardType="numeric"
                               placeholder="0"
+                              onSubmitEditing={() => inputRefs.current['modal_bankPaid']?.focus()}
                               style={{ borderWidth: 1.5, borderColor: '#CBD5E1', borderRadius: 8, paddingHorizontal: 8, height: 38, fontSize: 14, backgroundColor: '#F8FAFC' }}
+                              returnKeyType="next"
                             />
                           </View>
                           <View style={{ flex: 1 }}>
                             <Text style={{ fontSize: 12, color: '#64748B', marginBottom: 2 }}>ব্যাংক (৳)</Text>
                             <TextInput
+                              ref={el => (inputRefs.current['modal_bankPaid'] = el)}
                               value={bankPaid}
                               onChangeText={setBankPaid}
                               keyboardType="numeric"
                               placeholder="0"
+                              onSubmitEditing={executeTransaction}
                               style={{ borderWidth: 1.5, borderColor: '#CBD5E1', borderRadius: 8, paddingHorizontal: 8, height: 38, fontSize: 14, backgroundColor: '#F8FAFC' }}
+                              returnKeyType="done"
                             />
                           </View>
                         </View>
@@ -1366,21 +1482,27 @@ export function TradeDashboardForm({ mode, onDone }: TradeDashboardFormProps) {
                           <View style={{ flex: 1 }}>
                             <Text style={{ fontSize: 12, color: '#64748B', marginBottom: 2 }}>পরিবহন (৳)</Text>
                             <TextInput
+                              ref={el => (inputRefs.current['modal_transportCost'] = el)}
                               value={transportCost}
                               onChangeText={setTransportCost}
                               keyboardType="numeric"
                               placeholder="0"
+                              onSubmitEditing={() => inputRefs.current['modal_landingCost']?.focus()}
                               style={{ borderWidth: 1.5, borderColor: '#CBD5E1', borderRadius: 8, paddingHorizontal: 8, height: 38, fontSize: 14, backgroundColor: '#F8FAFC' }}
+                              returnKeyType="next"
                             />
                           </View>
                           <View style={{ flex: 1 }}>
                             <Text style={{ fontSize: 12, color: '#64748B', marginBottom: 2 }}>ল্যান্ডিং (৳)</Text>
                             <TextInput
+                              ref={el => (inputRefs.current['modal_landingCost'] = el)}
                               value={landingCost}
                               onChangeText={setLandingCost}
                               keyboardType="numeric"
                               placeholder="0"
+                              onSubmitEditing={executeTransaction}
                               style={{ borderWidth: 1.5, borderColor: '#CBD5E1', borderRadius: 8, paddingHorizontal: 8, height: 38, fontSize: 14, backgroundColor: '#F8FAFC' }}
+                              returnKeyType="done"
                             />
                           </View>
                         </View>
