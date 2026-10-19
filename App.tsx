@@ -360,28 +360,75 @@ function Shell() {
       <SafeAreaView style={{ flex: 1, backgroundColor: color.bg, paddingTop: StatusBar.currentHeight }}>
         <View style={{ flex: 1, flexDirection: 'row' }}>
           <View style={{ width: 248, backgroundColor: '#FFFFFF', borderRightWidth: 1.5, borderRightColor: '#D8E7F5', paddingVertical: 14, paddingHorizontal: 12 }}>
-            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 12, paddingHorizontal: 8, paddingVertical: 12, marginBottom: 8 }}>
-              <View style={{
-                height: 42,
-                width: 42,
-                borderRadius: 12,
-                backgroundColor: color.primary,
-                alignItems: 'center',
-                justifyContent: 'center',
-                borderBottomWidth: 3,
-                borderBottomColor: '#124c7e',
-                borderTopWidth: 1,
-                borderTopColor: '#5faef2',
-                ...(Platform.OS === 'web' ? {
-                  backgroundImage: 'linear-gradient(135deg, #2b91e8 0%, #1c70b9 55%, #145994 100%)',
-                  boxShadow: '0 4px 12px rgba(28, 112, 185, 0.35), inset 0 1px 1px rgba(255,255,255,0.45)',
-                } as any : {}),
-              }}>
-                <AppIcon name={icons.stock} size={22} iconColor="#fff" />
+            <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 6, paddingVertical: 10, marginBottom: 8 }}>
+              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10 }}>
+                <View style={{
+                  height: 38,
+                  width: 38,
+                  borderRadius: 10,
+                  backgroundColor: color.primary,
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  borderBottomWidth: 2.5,
+                  borderBottomColor: '#124c7e',
+                  borderTopWidth: 1,
+                  borderTopColor: '#5faef2',
+                  ...(Platform.OS === 'web' ? {
+                    backgroundImage: 'linear-gradient(135deg, #2b91e8 0%, #1c70b9 55%, #145994 100%)',
+                    boxShadow: '0 4px 12px rgba(28, 112, 185, 0.35)',
+                  } as any : {}),
+                }}>
+                  <AppIcon name={icons.stock} size={20} iconColor="#fff" />
+                </View>
+                <View>
+                  <Text style={{ fontSize: 16, fontWeight: '800', color: '#0F1E36', letterSpacing: 0.3 }}>চালের আড়ৎ</Text>
+                  <Text style={{ fontSize: 10.5, fontWeight: '600', color: '#1c70b9' }}>স্মার্ট ম্যানেজমেন্ট</Text>
+                </View>
               </View>
-              <View>
-                <Text style={{ fontSize: 18, fontWeight: '800', color: '#0F1E36', letterSpacing: 0.3 }}>চালের আড়ৎ</Text>
-                <Text style={{ fontSize: 11, fontWeight: '600', color: '#1c70b9' }}>স্মার্ট ম্যানেজমেন্ট</Text>
+
+              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+                <TouchableOpacity
+                  onPress={() => setQOpen(true)}
+                  style={{
+                    width: 32,
+                    height: 32,
+                    borderRadius: 8,
+                    backgroundColor: '#F1F5F9',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    borderWidth: 1,
+                    borderColor: '#CBD5E1',
+                    ...(Platform.OS === 'web' ? ({ cursor: 'pointer' } as any) : {}),
+                  }}
+                  accessibilityLabel="অনুসন্ধান"
+                >
+                  <AppIcon name={icons.search} size={16} iconColor="#1c70b9" />
+                </TouchableOpacity>
+
+                <TouchableOpacity
+                  onPress={() => setBellOpen(true)}
+                  style={{
+                    width: 32,
+                    height: 32,
+                    borderRadius: 8,
+                    backgroundColor: '#F1F5F9',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    borderWidth: 1,
+                    borderColor: '#CBD5E1',
+                    ...(Platform.OS === 'web' ? ({ cursor: 'pointer' } as any) : {}),
+                  }}
+                  accessibilityLabel="নোটিফিকেশন"
+                >
+                  <View>
+                    <AppIcon name={icons.bell} size={16} iconColor="#1c70b9" />
+                    {notifs.length ? (
+                      <View style={{ position: 'absolute', top: -5, right: -6, backgroundColor: '#C62828', borderRadius: 6, minWidth: 14, minHeight: 14, alignItems: 'center', justifyContent: 'center', paddingHorizontal: 2 }}>
+                        <Text style={{ color: '#fff', fontSize: 9, fontWeight: '700' }}>{notifs.length > 9 ? '9+' : String(notifs.length)}</Text>
+                      </View>
+                    ) : null}
+                  </View>
+                </TouchableOpacity>
               </View>
             </View>
             {sidebar.map(x => {
@@ -451,7 +498,7 @@ function Shell() {
             })}
           </View>
           <View style={{ flex: 1 }}>
-            {(!isDesktop || (route !== 'home' && route !== 'accounts' && route !== 'stock' && route !== 'expense' && route !== 'purchase' && route !== 'sale')) && header}
+            {qOpen ? header : null}
             <View style={{ flex: 1 }}>{body}</View>
             {bellList}
       {retView ? <ReturnModal id={retView} onClose={() => setRetView(null)} /> : null}

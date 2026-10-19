@@ -2024,7 +2024,7 @@ function TransferHistory({ limit = 8 }: { limit?: number }) {
  * profit, receivable, payable or inventory value.
  */
 export function BankCash() {
-  const { t, moneyAccounts, moneyTransfers } = useApp();
+  const { t, lang, moneyAccounts, moneyTransfers } = useApp();
   const m = useMoney();
   const [addOpen, setAddOpen] = useState(false);
   const [editId, setEditId] = useState<string | null>(null);
