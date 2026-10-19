@@ -1,11 +1,11 @@
 import React, { ReactNode, useState, useMemo } from 'react';
-import { View, Text, TextInput, TouchableOpacity, Pressable, ScrollView, StyleSheet, useWindowDimensions } from 'react-native';
+import { View, Text, TextInput, TouchableOpacity, Pressable, ScrollView, StyleSheet, useWindowDimensions, Platform } from 'react-native';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
 import { useApp } from './store';
 import type { Key } from './i18n';
 import { MONEY_METHODS, type AccountType, type MoneyAccountRow, type MoneyMethod } from './api';
 import { toBnDigits } from './bn';
-import { icons } from './icons';
+import { AppIcon, icons } from './icons';
 import { CONTENT_MAX, contentPadding, useBreakpoint, useFs } from './responsive';
 
 type IconName = React.ComponentProps<typeof MaterialCommunityIcons>['name'];
@@ -201,19 +201,94 @@ export const Row = ({ left, right, sub, neg, icon }: { left: string; right?: str
   );
 };
 export const Empty = () => { const { t } = useApp(); return <Text style={[s.muted, { textAlign: 'center', padding: 24 }]}>{t('empty')}</Text>; };
-// List page header shared by Products / Customers / Vendors.
-// Mobile+tablet: full-width Add button. Desktop: title left + compact Add top-right.
-export const ListPageHeader = ({ title, addLabel, onAdd }: { title: string; addLabel: string; onAdd: () => void }) => {
-  const { isDesktop } = useBreakpoint();
-  if (!isDesktop) return <Btn icon="plus" label={addLabel} onPress={onAdd} />;
+// Executive Skeuomorphic Page Header (shared across all pages)
+export const PageHeader = ({
+  title,
+  subtitle,
+  icon,
+  liveTag,
+  onBack,
+  actions,
+}: {
+  title: string;
+  subtitle?: string;
+  icon?: any;
+  liveTag?: string;
+  onBack?: () => void;
+  actions?: ReactNode;
+}) => {
   return (
-    <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 12, marginBottom: 10 }}>
-      <Text style={{ fontSize: 19, fontWeight: '700', color: color.text }}>{title}</Text>
-      <TouchableOpacity onPress={onAdd} style={{ flexDirection: 'row', alignItems: 'center', gap: 8, backgroundColor: color.primary, borderRadius: 14, minHeight: 48, paddingHorizontal: 18 }}>
-        <MaterialCommunityIcons name="plus" size={20} color="#fff" />
-        <Text style={{ color: '#fff', fontSize: 15, fontWeight: '600' }}>{addLabel}</Text>
-      </TouchableOpacity>
+    <View style={s.pageHeaderBar}>
+      <View style={s.pageHeaderGloss} pointerEvents="none" />
+      <View style={s.pageHeaderLeft}>
+        {onBack ? (
+          <TouchableOpacity onPress={onBack} style={s.pageHeaderBackBtn} accessibilityLabel="Back">
+            <AppIcon name={icons.back} size={20} iconColor="#FFFFFF" />
+          </TouchableOpacity>
+        ) : null}
+        {icon ? (
+          <View style={s.pageHeaderIconBadge}>
+            <AppIcon name={icon} size={22} iconColor="#FFFFFF" />
+          </View>
+        ) : null}
+        <View style={{ flexShrink: 1 }}>
+          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+            <Text style={s.pageHeaderTitle}>{title}</Text>
+            {liveTag ? (
+              <View style={s.pageHeaderLiveTag}>
+                <View style={s.pageHeaderLiveDot} />
+                <Text style={s.pageHeaderLiveText}>{liveTag}</Text>
+              </View>
+            ) : null}
+          </View>
+          {subtitle ? <Text style={s.pageHeaderSub}>{subtitle}</Text> : null}
+        </View>
+      </View>
+      {actions ? <View style={s.pageHeaderRight}>{actions}</View> : null}
     </View>
+  );
+};
+
+// List page header shared by Customers / Vendors / Bank / Trash etc.
+export const ListPageHeader = ({
+  title,
+  subtitle,
+  icon = icons.customers,
+  addLabel,
+  onAdd,
+  badge = 'সক্রিয়',
+  extraActions,
+}: {
+  title: string;
+  subtitle?: string;
+  icon?: any;
+  addLabel?: string;
+  onAdd?: () => void;
+  badge?: string;
+  extraActions?: ReactNode;
+}) => {
+  return (
+    <PageHeader
+      title={title}
+      subtitle={subtitle}
+      icon={icon}
+      liveTag={badge}
+      actions={
+        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+          {extraActions}
+          {onAdd && addLabel ? (
+            <TouchableOpacity
+              onPress={onAdd}
+              style={s.pageHeaderAddBtn}
+              activeOpacity={0.85}
+            >
+              <AppIcon name={icons.plus} size={18} iconColor="#FFFFFF" />
+              <Text style={s.pageHeaderAddBtnText}>{addLabel}</Text>
+            </TouchableOpacity>
+          ) : null}
+        </View>
+      }
+    />
   );
 };
 export type TableColumn<T> = {
@@ -456,4 +531,129 @@ const s = StyleSheet.create({
   },
   row: { flexDirection: 'row', alignItems: 'center', paddingVertical: 10, borderBottomWidth: 1, borderBottomColor: color.line },
   rowT: { fontSize: 16, fontWeight: '600', color: color.text, lineHeight: 24 },
+  pageHeaderBar: {
+    backgroundColor: '#1c70b9',
+    borderRadius: 16,
+    paddingHorizontal: 18,
+    paddingVertical: 14,
+    marginBottom: 16,
+    borderTopWidth: 1.5,
+    borderTopColor: '#60b0f4',
+    borderBottomWidth: 3.5,
+    borderBottomColor: '#124c7e',
+    overflow: 'hidden',
+    position: 'relative',
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    flexWrap: 'wrap',
+    gap: 12,
+    ...(Platform.OS === 'web' ? {
+      backgroundImage: 'linear-gradient(135deg, #2592ed 0%, #1c70b9 52%, #12518e 100%)',
+      boxShadow: '0 8px 22px rgba(28, 112, 185, 0.38), inset 0 1px 0 rgba(255, 255, 255, 0.45)',
+    } as any : {
+      elevation: 4,
+    }),
+  },
+  pageHeaderGloss: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    height: 18,
+    backgroundColor: 'rgba(255, 255, 255, 0.18)',
+  },
+  pageHeaderLeft: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+    zIndex: 2,
+    flex: 1,
+    minWidth: 240,
+  },
+  pageHeaderBackBtn: {
+    width: 36,
+    height: 36,
+    borderRadius: 10,
+    backgroundColor: 'rgba(255, 255, 255, 0.18)',
+    borderTopWidth: 1,
+    borderTopColor: 'rgba(255, 255, 255, 0.4)',
+    borderBottomWidth: 2,
+    borderBottomColor: 'rgba(0, 0, 0, 0.25)',
+    alignItems: 'center',
+    justifyContent: 'center',
+    ...(Platform.OS === 'web' ? ({ cursor: 'pointer' } as any) : {}),
+  },
+  pageHeaderIconBadge: {
+    width: 40,
+    height: 40,
+    borderRadius: 12,
+    backgroundColor: 'rgba(255, 255, 255, 0.2)',
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderTopWidth: 1,
+    borderTopColor: 'rgba(255, 255, 255, 0.45)',
+    borderBottomWidth: 2,
+    borderBottomColor: 'rgba(0, 0, 0, 0.2)',
+  },
+  pageHeaderTitle: {
+    color: '#FFFFFF',
+    fontSize: 20,
+    fontWeight: '800',
+    letterSpacing: 0.3,
+  },
+  pageHeaderLiveTag: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 5,
+    backgroundColor: 'rgba(255, 255, 255, 0.2)',
+    paddingHorizontal: 8,
+    paddingVertical: 2,
+    borderRadius: 10,
+    borderWidth: 1,
+    borderColor: 'rgba(255, 255, 255, 0.35)',
+  },
+  pageHeaderLiveDot: {
+    width: 6,
+    height: 6,
+    borderRadius: 3,
+    backgroundColor: '#86EFAC',
+  },
+  pageHeaderLiveText: {
+    color: '#FFFFFF',
+    fontSize: 11,
+    fontWeight: '800',
+  },
+  pageHeaderSub: {
+    color: '#DCEBFA',
+    fontSize: 12.5,
+    fontWeight: '500',
+    marginTop: 2,
+  },
+  pageHeaderRight: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+    zIndex: 2,
+    flexWrap: 'wrap',
+  },
+  pageHeaderAddBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    backgroundColor: 'rgba(255, 255, 255, 0.2)',
+    paddingHorizontal: 14,
+    paddingVertical: 9,
+    borderRadius: 10,
+    borderTopWidth: 1,
+    borderTopColor: 'rgba(255, 255, 255, 0.45)',
+    borderBottomWidth: 2,
+    borderBottomColor: 'rgba(0, 0, 0, 0.25)',
+    ...(Platform.OS === 'web' ? ({ cursor: 'pointer' } as any) : {}),
+  },
+  pageHeaderAddBtnText: {
+    color: '#FFFFFF',
+    fontSize: 13,
+    fontWeight: '800',
+  },
 });

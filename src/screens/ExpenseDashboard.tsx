@@ -530,139 +530,143 @@ export function ExpenseDashboard({ go }: ExpenseDashboardProps = {}) {
   return (
     <ScrollView style={styles.screenBg} contentContainerStyle={styles.scrollContent}>
       {/* 1. EXECUTIVE HEADER BANNER */}
-      <View style={styles.headerBanner}>
-        <View style={styles.headerTopRow}>
-          <View style={styles.headerLeftGroup}>
-            <View style={styles.brandIconBox}>
-              <AppIcon name={icons.expense} size={28} iconColor="#DC2626" />
-            </View>
-            <View>
-              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
-                <Text style={styles.headerMainTitle}>
-                  {lang === 'bn' ? 'খরচ ও ব্যয় ব্যবস্থাপনা' : 'Expense & Cost Management'}
-                </Text>
-                <View style={styles.liveStatusPill}>
-                  <View style={styles.liveDot} />
-                  <Text style={styles.liveStatusText}>
-                    {lang === 'bn' ? 'লাইভ সিঙ্ক' : 'Live Sync'}
-                  </Text>
-                </View>
-              </View>
-              <Text style={styles.headerSubTitle}>
-                {lang === 'bn'
-                  ? 'দোকান পরিচালনা, পরিবহন, লেবার ও আনুষঙ্গিক খরচের সম্পূর্ণ খতিয়ান'
-                  : 'Complete ledger for shop operations, freight, labor, and overhead costs'}
-              </Text>
-            </View>
+      {/* 1. SKEUOMORPHIC HEADER BAR - Royal Blue #1c70b9 */}
+      <View style={styles.headerBar}>
+        <View style={styles.headerGlossSheen} pointerEvents="none" />
+        <View style={styles.headerLeft}>
+          <View style={styles.titleIconBadge}>
+            <AppIcon name={icons.expense} size={22} iconColor="#FFFFFF" />
           </View>
-
-          {/* Action Toolbar */}
-          <View style={styles.headerActionToolbar}>
-            <TouchableOpacity
-              style={[styles.headerActionButton, { backgroundColor: '#DC2626' }]}
-              onPress={handleOpenAdd}
-            >
-              <AppIcon name={icons.add} size={18} iconColor="#FFFFFF" />
-              <Text style={styles.headerActionTextWhite}>
-                {lang === 'bn' ? 'নতুন খরচ যোগ করুন' : 'Add Expense'}
+          <View>
+            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+              <Text style={styles.headerTitle}>
+                {lang === 'bn' ? 'খরচ ও ব্যয় ব্যবস্থাপনা' : 'Expense & Cost Management'}
               </Text>
-            </TouchableOpacity>
-
-            <TouchableOpacity
-              style={styles.headerActionGhostButton}
-              onPress={handlePrintAudit}
-            >
-              <AppIcon name={icons.print} size={18} iconColor="#0F172A" />
-              <Text style={styles.headerActionGhostText}>
-                {lang === 'bn' ? 'প্রিন্ট রিপোর্ট' : 'Print Audit'}
-              </Text>
-            </TouchableOpacity>
-
-            <TouchableOpacity
-              style={styles.headerActionGhostButton}
-              onPress={() => setTransferModalOpen(true)}
-            >
-              <AppIcon name={icons.transfer} size={18} iconColor="#0F172A" />
-              <Text style={styles.headerActionGhostText}>
-                {lang === 'bn' ? 'ফান্ড ট্রান্সফার' : 'Transfer'}
-              </Text>
-            </TouchableOpacity>
-
-            {go && (
-              <TouchableOpacity
-                style={styles.headerActionGhostButton}
-                onPress={() => go('accounts')}
-              >
-                <AppIcon name={icons.accounts} size={18} iconColor="#0F172A" />
-                <Text style={styles.headerActionGhostText}>
-                  {lang === 'bn' ? 'হিসাব ড্যাশবোর্ড' : 'Accounts'}
+              <View style={styles.liveTag}>
+                <View style={styles.liveDot} />
+                <Text style={styles.liveTagText}>
+                  {lang === 'bn' ? 'লাইভ সিঙ্ক' : 'Live Sync'}
                 </Text>
-              </TouchableOpacity>
-            )}
+              </View>
+            </View>
+            <Text style={styles.headerSub}>
+              {lang === 'bn'
+                ? 'দোকান পরিচালনা, পরিবহন, লেবার ও আনুষঙ্গিক খরচের সম্পূর্ণ খতিয়ান'
+                : 'Complete ledger for shop operations, freight, labor, and overhead costs'}
+            </Text>
           </View>
         </View>
 
-        {/* Period Preset Filter Ribbon */}
-        <View style={styles.periodRibbon}>
-          <View style={styles.presetButtonsRow}>
-            {(['today', 'last7', 'thisMonth', 'last3m', 'thisYear'] as const).map(p => {
-              const active = fltPreset === p;
-              const label =
-                p === 'today'
-                  ? (lang === 'bn' ? 'আজ' : 'Today')
-                  : p === 'last7'
-                  ? (lang === 'bn' ? 'গত ৭ দিন' : 'Last 7 Days')
-                  : p === 'thisMonth'
-                  ? (lang === 'bn' ? 'এই মাস' : 'This Month')
-                  : p === 'last3m'
-                  ? (lang === 'bn' ? 'শেষ ৩ মাস' : 'Last 3 Months')
-                  : (lang === 'bn' ? 'চলতি বছর' : 'This Year');
-              return (
-                <TouchableOpacity
-                  key={p}
-                  style={[styles.presetChip, active && styles.presetChipActive]}
-                  onPress={() => handleSelectPreset(p)}
-                >
-                  <Text style={[styles.presetChipText, active && styles.presetChipTextActive]}>
-                    {label}
-                  </Text>
-                </TouchableOpacity>
-              );
-            })}
+        {/* Action Toolbar */}
+        <View style={styles.headerRight}>
+          <TouchableOpacity
+            style={styles.headerActionBtnWhite}
+            onPress={handleOpenAdd}
+            activeOpacity={0.85}
+          >
+            <AppIcon name={icons.add} size={16} iconColor="#1c70b9" />
+            <Text style={styles.headerActionBtnWhiteText}>
+              {lang === 'bn' ? 'নতুন খরচ' : 'Add Expense'}
+            </Text>
+          </TouchableOpacity>
 
+          <TouchableOpacity
+            style={styles.headerActionBtnTranslucent}
+            onPress={handlePrintAudit}
+            activeOpacity={0.85}
+          >
+            <AppIcon name={icons.print} size={16} iconColor="#FFFFFF" />
+            <Text style={styles.headerActionBtnTranslucentText}>
+              {lang === 'bn' ? 'প্রিন্ট রিপোর্ট' : 'Print Audit'}
+            </Text>
+          </TouchableOpacity>
+
+          <TouchableOpacity
+            style={styles.headerActionBtnTranslucent}
+            onPress={() => setTransferModalOpen(true)}
+            activeOpacity={0.85}
+          >
+            <AppIcon name={icons.transfer} size={16} iconColor="#FFFFFF" />
+            <Text style={styles.headerActionBtnTranslucentText}>
+              {lang === 'bn' ? 'ফান্ড ট্রান্সফার' : 'Transfer'}
+            </Text>
+          </TouchableOpacity>
+
+          {go && (
             <TouchableOpacity
-              style={[
-                styles.presetChip,
-                fltPreset === 'custom' && styles.presetChipActive,
-                { flexDirection: 'row', alignItems: 'center', gap: 6 },
-              ]}
-              onPress={() => setFltModalOpen(true)}
+              style={styles.headerActionBtnTranslucent}
+              onPress={() => go('accounts')}
+              activeOpacity={0.85}
             >
-              <AppIcon
-                name={icons.calendar}
-                size={16}
-                iconColor={fltPreset === 'custom' ? '#DC2626' : '#0F172A'}
-              />
-              <Text
-                style={[
-                  styles.presetChipText,
-                  fltPreset === 'custom' && styles.presetChipTextActive,
-                ]}
-              >
-                {formatPeriodLabel(flt.from, flt.to)}
+              <AppIcon name={icons.accounts} size={16} iconColor="#FFFFFF" />
+              <Text style={styles.headerActionBtnTranslucentText}>
+                {lang === 'bn' ? 'হিসাব ড্যাশবোর্ড' : 'Accounts'}
               </Text>
             </TouchableOpacity>
-          </View>
+          )}
+        </View>
+      </View>
 
-          {/* Quick Expense Metric Banner */}
-          <View style={styles.ratioBannerPill}>
-            <Text style={styles.ratioPillLabel}>
-              {lang === 'bn' ? 'বিক্রয়ের তুলনায় ব্যয়:' : 'Exp/Sales Ratio:'}
+      {/* Period Preset Filter Card */}
+      <View style={styles.periodCard}>
+        <View style={styles.presetButtonsRow}>
+          {(['today', 'last7', 'thisMonth', 'last3m', 'thisYear'] as const).map(p => {
+            const active = fltPreset === p;
+            const label =
+              p === 'today'
+                ? (lang === 'bn' ? 'আজ' : 'Today')
+                : p === 'last7'
+                ? (lang === 'bn' ? 'গত ৭ দিন' : 'Last 7 Days')
+                : p === 'thisMonth'
+                ? (lang === 'bn' ? 'এই মাস' : 'This Month')
+                : p === 'last3m'
+                ? (lang === 'bn' ? 'শেষ ৩ মাস' : 'Last 3 Months')
+                : (lang === 'bn' ? 'চলতি বছর' : 'This Year');
+            return (
+              <TouchableOpacity
+                key={p}
+                style={[styles.presetChip, active && styles.presetChipActive]}
+                onPress={() => handleSelectPreset(p)}
+              >
+                <Text style={[styles.presetChipText, active && styles.presetChipTextActive]}>
+                  {label}
+                </Text>
+              </TouchableOpacity>
+            );
+          })}
+
+          <TouchableOpacity
+            style={[
+              styles.presetChip,
+              fltPreset === 'custom' && styles.presetChipActive,
+              { flexDirection: 'row', alignItems: 'center', gap: 6 },
+            ]}
+            onPress={() => setFltModalOpen(true)}
+          >
+            <AppIcon
+              name={icons.calendar}
+              size={16}
+              iconColor={fltPreset === 'custom' ? '#1c70b9' : '#0F172A'}
+            />
+            <Text
+              style={[
+                styles.presetChipText,
+                fltPreset === 'custom' && styles.presetChipTextActive,
+              ]}
+            >
+              {formatPeriodLabel(flt.from, flt.to)}
             </Text>
-            <Text style={styles.ratioPillValue}>
-              {expenseRatioOfSales}%
-            </Text>
-          </View>
+          </TouchableOpacity>
+        </View>
+
+        {/* Quick Expense Metric Banner */}
+        <View style={styles.ratioBannerPill}>
+          <Text style={styles.ratioPillLabel}>
+            {lang === 'bn' ? 'বিক্রয়ের তুলনায় ব্যয়:' : 'Exp/Sales Ratio:'}
+          </Text>
+          <Text style={styles.ratioPillValue}>
+            {expenseRatioOfSales}%
+          </Text>
         </View>
       </View>
 
@@ -1452,121 +1456,149 @@ const styles = StyleSheet.create({
     paddingBottom: 60,
   },
 
-  // 1. Header Banner
-  headerBanner: {
-    backgroundColor: '#FFFFFF',
+  // 1. Header Bar
+  headerBar: {
+    backgroundColor: '#1c70b9',
     borderRadius: 16,
-    padding: 20,
+    paddingHorizontal: 18,
+    paddingVertical: 14,
+    marginBottom: 16,
+    borderTopWidth: 1.5,
+    borderTopColor: '#60b0f4',
+    borderBottomWidth: 3.5,
+    borderBottomColor: '#124c7e',
+    overflow: 'hidden',
+    position: 'relative',
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    flexWrap: 'wrap',
+    gap: 12,
+    ...(Platform.OS === 'web' ? {
+      backgroundImage: 'linear-gradient(135deg, #2592ed 0%, #1c70b9 52%, #12518e 100%)',
+      boxShadow: '0 8px 22px rgba(28, 112, 185, 0.38), inset 0 1px 0 rgba(255, 255, 255, 0.45)',
+    } as any : {
+      elevation: 4,
+    }),
+  },
+  headerGlossSheen: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    height: 18,
+    backgroundColor: 'rgba(255, 255, 255, 0.18)',
+  },
+  headerLeft: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+    zIndex: 2,
+    flex: 1,
+    minWidth: 260,
+  },
+  titleIconBadge: {
+    width: 40,
+    height: 40,
+    borderRadius: 12,
+    backgroundColor: 'rgba(255, 255, 255, 0.2)',
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderTopWidth: 1,
+    borderTopColor: 'rgba(255, 255, 255, 0.45)',
+    borderBottomWidth: 2,
+    borderBottomColor: 'rgba(0, 0, 0, 0.2)',
+  },
+  headerTitle: {
+    color: '#FFFFFF',
+    fontSize: 20,
+    fontWeight: '800',
+    letterSpacing: 0.3,
+  },
+  liveTag: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 5,
+    backgroundColor: 'rgba(255, 255, 255, 0.2)',
+    paddingHorizontal: 8,
+    paddingVertical: 2,
+    borderRadius: 10,
+    borderWidth: 1,
+    borderColor: 'rgba(255, 255, 255, 0.35)',
+  },
+  liveDot: {
+    width: 6,
+    height: 6,
+    borderRadius: 3,
+    backgroundColor: '#86EFAC',
+  },
+  liveTagText: {
+    color: '#FFFFFF',
+    fontSize: 11,
+    fontWeight: '800',
+  },
+  headerSub: {
+    color: '#DCEBFA',
+    fontSize: 12.5,
+    fontWeight: '500',
+    marginTop: 2,
+  },
+  headerRight: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    zIndex: 2,
+    flexWrap: 'wrap',
+  },
+  headerActionBtnWhite: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    backgroundColor: '#FFFFFF',
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    borderRadius: 10,
+    borderTopWidth: 1,
+    borderTopColor: '#FFFFFF',
+    borderBottomWidth: 2,
+    borderBottomColor: 'rgba(0, 0, 0, 0.25)',
+    ...(Platform.OS === 'web' ? ({ cursor: 'pointer' } as any) : {}),
+  },
+  headerActionBtnWhiteText: {
+    color: '#1c70b9',
+    fontSize: 13,
+    fontWeight: '800',
+  },
+  headerActionBtnTranslucent: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    backgroundColor: 'rgba(255, 255, 255, 0.2)',
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    borderRadius: 10,
+    borderTopWidth: 1,
+    borderTopColor: 'rgba(255, 255, 255, 0.45)',
+    borderBottomWidth: 2,
+    borderBottomColor: 'rgba(0, 0, 0, 0.25)',
+    ...(Platform.OS === 'web' ? ({ cursor: 'pointer' } as any) : {}),
+  },
+  headerActionBtnTranslucentText: {
+    color: '#FFFFFF',
+    fontSize: 13,
+    fontWeight: '800',
+  },
+  periodCard: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    backgroundColor: '#FFFFFF',
+    borderRadius: 12,
+    padding: 12,
     marginBottom: 16,
     borderWidth: 1,
     borderColor: '#E2E8F0',
-    shadowColor: '#0F172A',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.05,
-    shadowRadius: 8,
-  },
-  headerTopRow: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    gap: 16,
-    borderBottomWidth: 1,
-    borderBottomColor: '#F1F5F9',
-    paddingBottom: 16,
-  },
-  headerLeftGroup: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 14,
-    flex: 1,
-    minWidth: 280,
-  },
-  brandIconBox: {
-    width: 52,
-    height: 52,
-    borderRadius: 14,
-    backgroundColor: '#FEE2E2',
-    alignItems: 'center',
-    justifyContent: 'center',
-    borderWidth: 1.5,
-    borderColor: '#FECACA',
-  },
-  headerMainTitle: {
-    fontSize: 22,
-    fontWeight: '800',
-    color: '#0F172A',
-  },
-  liveStatusPill: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 6,
-    backgroundColor: '#ECFDF5',
-    paddingHorizontal: 8,
-    paddingVertical: 3,
-    borderRadius: 12,
-    borderWidth: 1,
-    borderColor: '#10B981',
-  },
-  liveDot: {
-    width: 7,
-    height: 7,
-    borderRadius: 4,
-    backgroundColor: '#10B981',
-  },
-  liveStatusText: {
-    fontSize: 11,
-    fontWeight: '700',
-    color: '#065F46',
-  },
-  headerSubTitle: {
-    fontSize: 13,
-    color: '#64748B',
-    marginTop: 3,
-  },
-  headerActionToolbar: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    alignItems: 'center',
-    gap: 8,
-  },
-  headerActionButton: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 6,
-    paddingHorizontal: 16,
-    paddingVertical: 9,
-    borderRadius: 10,
-  },
-  headerActionTextWhite: {
-    color: '#FFFFFF',
-    fontSize: 13,
-    fontWeight: '700',
-  },
-  headerActionGhostButton: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 6,
-    paddingHorizontal: 14,
-    paddingVertical: 9,
-    borderRadius: 10,
-    backgroundColor: '#F1F5F9',
-    borderWidth: 1,
-    borderColor: '#CBD5E1',
-  },
-  headerActionGhostText: {
-    color: '#0F172A',
-    fontSize: 13,
-    fontWeight: '700',
-  },
-
-  // Period Ribbon
-  periodRibbon: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    paddingTop: 14,
     gap: 12,
   },
   presetButtonsRow: {

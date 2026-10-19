@@ -2,7 +2,7 @@ import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react'
 import { View, Text, TextInput, Alert, TouchableOpacity, Pressable, Modal, ActivityIndicator, ScrollView, Share } from 'react-native';
 import { useApp, today, Party, Product, type PeriodFinance } from './store';
 import { BagUnit, CartLine, kgPerUnit, toKg, lineTotal } from './bags';
-import { Card, Title, Muted, Btn, Field, Chips, Row, Empty, Screen, SectionHead, ListPageHeader, ListTable, type TableColumn, type TableSort, AccountPicker, ACCOUNT_TYPES, methodIcon, methodName, useMoney, useNum, useDateStr, color } from './ui';
+import { Card, Title, Muted, Btn, Field, Chips, Row, Empty, Screen, SectionHead, PageHeader, ListPageHeader, ListTable, type TableColumn, type TableSort, AccountPicker, ACCOUNT_TYPES, methodIcon, methodName, useMoney, useNum, useDateStr, color } from './ui';
 import { AppIcon, icons } from './icons';
 import { RGrid, TwoPanel, FormGrid, useFs, useBreakpoint } from './responsive';
 import { SearchToggle, SearchableSelect, SearchDropdown, NoResult, matchProduct, matchParty } from './search';
@@ -1249,7 +1249,14 @@ export function Parties({ kind, focus, onFocusDone, onReturn }: { kind: 'c' | 'v
     </Screen>;
   }
   return <Screen scrollRef={scrollRef} onScrollY={onScrollY}>
-    <ListPageHeader title={isC ? t('customers') : t('vendors')} addLabel={t('add')} onAdd={() => open()} />
+      <ListPageHeader
+      title={isC ? t('customers') : t('vendors')}
+      subtitle={isC ? (lang === 'bn' ? 'খরিদ্দারদের তালিকা, বাকি খতিয়ান ও লেনদেন হিসাব' : 'Customer directory, receivables & history') : (lang === 'bn' ? 'চালের মহাজন ও সরবরাহকারীদের তালিকা ও দেনা হিসাব' : 'Vendor directory, payables & history')}
+      icon={isC ? icons.customers : icons.vendors}
+      badge={lang === 'bn' ? 'সক্রিয়' : 'Active'}
+      addLabel={isC ? (lang === 'bn' ? 'নতুন কাস্টমার' : 'New Customer') : (lang === 'bn' ? 'নতুন মহাজন' : 'New Vendor')}
+      onAdd={() => open()}
+    />
     {/* Top Summary Cards */}
     {(() => {
       const totalParties = list.length;
@@ -2063,55 +2070,62 @@ export function BankCash() {
 
   return (
     <Screen>
-      <Card><SectionHead icon={icons.accounts}>{t('bankCash')}</SectionHead></Card>
+      <PageHeader
+        title={t('bankCash')}
+        subtitle={lang === 'bn' ? 'দোকানের নগদ ক্যাশ বাক্স ও ব্যাংক একাউন্টের লাইভ ব্যালেন্স ও তহবিল' : 'Live balances of cash drawers and bank accounts'}
+        icon={icons.accounts}
+        liveTag={lang === 'bn' ? 'তহবিল' : 'Reserves'}
+        actions={
+          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+            <TouchableOpacity
+              onPress={() => setTransferOpen(true)}
+              style={{
+                flexDirection: 'row',
+                alignItems: 'center',
+                gap: 6,
+                backgroundColor: 'rgba(255, 255, 255, 0.2)',
+                paddingHorizontal: 14,
+                paddingVertical: 9,
+                borderRadius: 10,
+                borderTopWidth: 1,
+                borderTopColor: 'rgba(255, 255, 255, 0.45)',
+                borderBottomWidth: 2,
+                borderBottomColor: 'rgba(0, 0, 0, 0.25)',
+                ...(Platform.OS === 'web' ? ({ cursor: 'pointer' } as any) : {}),
+              }}
+              activeOpacity={0.85}
+            >
+              <AppIcon name={icons.transfer} size={16} iconColor="#FFFFFF" />
+              <Text style={{ color: '#FFFFFF', fontSize: 13, fontWeight: '800' }}>{t('transferMoney')}</Text>
+            </TouchableOpacity>
+            <TouchableOpacity
+              onPress={() => setAddOpen(true)}
+              style={{
+                flexDirection: 'row',
+                alignItems: 'center',
+                gap: 6,
+                backgroundColor: '#FFFFFF',
+                paddingHorizontal: 14,
+                paddingVertical: 9,
+                borderRadius: 10,
+                borderTopWidth: 1,
+                borderTopColor: '#FFFFFF',
+                borderBottomWidth: 2,
+                borderBottomColor: 'rgba(0, 0, 0, 0.25)',
+                ...(Platform.OS === 'web' ? ({ cursor: 'pointer' } as any) : {}),
+              }}
+              activeOpacity={0.85}
+            >
+              <AppIcon name={icons.plus} size={16} iconColor="#1c70b9" />
+              <Text style={{ color: '#1c70b9', fontSize: 13, fontWeight: '800' }}>{t('addAccount')}</Text>
+            </TouchableOpacity>
+          </View>
+        }
+      />
       <Card>
         <Muted>{t('totalMoneyLabel')}</Muted>
         <Text style={{ fontSize: 32, fontWeight: '800', color: '#1E3A8A', marginTop: 4 }}>{m(total)}</Text>
       </Card>
-      {/* Prominent High-Visibility Action Buttons */}
-      <View style={{ flexDirection: 'row', gap: 12, marginBottom: 14 }}>
-        <TouchableOpacity
-          onPress={() => setAddOpen(true)}
-          style={{
-            flex: 1,
-            backgroundColor: '#2563EB',
-            borderRadius: 14,
-            minHeight: 50,
-            alignItems: 'center',
-            justifyContent: 'center',
-            paddingHorizontal: 16,
-            flexDirection: 'row',
-            gap: 8,
-            borderBottomWidth: 3,
-            borderBottomColor: '#1D4ED8',
-            cursor: 'pointer' as any,
-          }}
-        >
-          <AppIcon name={icons.add} size={22} iconColor="#FFFFFF" />
-          <Text style={{ color: '#FFFFFF', fontSize: 16, fontWeight: '700' }}>{t('addAccount')}</Text>
-        </TouchableOpacity>
-
-        <TouchableOpacity
-          onPress={() => setTransferOpen(true)}
-          style={{
-            flex: 1,
-            backgroundColor: '#0F172A',
-            borderRadius: 14,
-            minHeight: 50,
-            alignItems: 'center',
-            justifyContent: 'center',
-            paddingHorizontal: 16,
-            flexDirection: 'row',
-            gap: 8,
-            borderBottomWidth: 3,
-            borderBottomColor: '#020617',
-            cursor: 'pointer' as any,
-          }}
-        >
-          <AppIcon name={icons.transfer} size={22} iconColor="#FFFFFF" />
-          <Text style={{ color: '#FFFFFF', fontSize: 16, fontWeight: '700' }}>{t('transferMoney')}</Text>
-        </TouchableOpacity>
-      </View>
       <View style={{ flexDirection: 'row', gap: 8, marginBottom: 12 }}>
         {chip(t('activeAccountsTab'), !showArchived, () => setShowArchived(false))}
         {archived.length ? chip(`${t('inactiveAccountsTab')} (${archived.length})`, showArchived, () => setShowArchived(true)) : null}
@@ -3113,10 +3127,37 @@ export function Trash() {
   }]);
   return (
     <Screen>
-      <Card>
-        <SectionHead icon={icons.del}>{t('trash')}</SectionHead>
-        {expired.length ? <Btn kind="danger" icon={icons.del} label={t('purgeExpired')} onPress={purgeAll} /> : null}
-      </Card>
+      <PageHeader
+        title={t('trash')}
+        subtitle={lang === 'bn' ? 'মুছে ফেলা এন্ট্রি ও ৩০ দিনের রিসাইকেল বিন' : 'Deleted records and 30-day recycle bin'}
+        icon={icons.del}
+        liveTag={lang === 'bn' ? 'রিসাইকেল' : 'Recycle'}
+        actions={
+          expired.length ? (
+            <TouchableOpacity
+              onPress={purgeAll}
+              style={{
+                flexDirection: 'row',
+                alignItems: 'center',
+                gap: 6,
+                backgroundColor: 'rgba(239, 68, 68, 0.85)',
+                paddingHorizontal: 14,
+                paddingVertical: 9,
+                borderRadius: 10,
+                borderTopWidth: 1,
+                borderTopColor: 'rgba(255, 255, 255, 0.45)',
+                borderBottomWidth: 2,
+                borderBottomColor: 'rgba(0, 0, 0, 0.25)',
+                ...(Platform.OS === 'web' ? ({ cursor: 'pointer' } as any) : {}),
+              }}
+              activeOpacity={0.85}
+            >
+              <AppIcon name={icons.del} size={16} iconColor="#FFFFFF" />
+              <Text style={{ color: '#FFFFFF', fontSize: 13, fontWeight: '800' }}>{t('purgeExpired')}</Text>
+            </TouchableOpacity>
+          ) : null
+        }
+      />
       <Chips
         items={[{ id: 'all', name: t('all') }, { id: 'product', name: t('products') }, { id: 'customer', name: t('customers') }, { id: 'vendor', name: t('vendors') }, { id: 'expense', name: t('expense') }]}
         value={f}

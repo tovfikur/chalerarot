@@ -116,22 +116,33 @@ export function StockDashboard() {
 
   return (
     <ScrollView style={styles.container} contentContainerStyle={styles.contentContainer}>
-      {/* Top Header Banner */}
+      {/* Top Header Banner - Consistent Royal Blue Executive Skeuomorphic Theme */}
       <View style={styles.headerBar}>
+        <View style={styles.headerGlossSheen} pointerEvents="none" />
         <View style={styles.headerLeft}>
-          <AppIcon name={icons.stock} size={24} iconColor="#fff" />
-          <Text style={styles.headerTitle}>মজুদ পণ্য</Text>
+          <View style={styles.titleIconBadge}>
+            <AppIcon name={icons.stock} size={22} iconColor="#fff" />
+          </View>
+          <View>
+            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+              <Text style={styles.headerTitle}>মজুদ পণ্য ও গুদাম স্টক</Text>
+              <View style={styles.liveTag}>
+                <View style={styles.liveDot} />
+                <Text style={styles.liveTagText}>সক্রিয়</Text>
+              </View>
+            </View>
+            <Text style={styles.headerSub}>পাইকারি চালের মজুদ, ফিজিক্যাল ও ট্রানজিট স্টক</Text>
+          </View>
         </View>
         <View style={styles.headerRight}>
-          <TouchableOpacity style={styles.iconCircleButton}>
-            <AppIcon name={icons.search} size={20} iconColor="#fff" />
+          <TouchableOpacity
+            onPress={() => setModalOpen(true)}
+            style={styles.headerAddBtn}
+            activeOpacity={0.85}
+          >
+            <AppIcon name={icons.plus} size={18} iconColor="#FFFFFF" />
+            <Text style={styles.headerAddBtnText}>নতুন পণ্য</Text>
           </TouchableOpacity>
-          <TouchableOpacity style={styles.iconCircleButton}>
-            <AppIcon name={icons.bell} size={20} iconColor="#fff" />
-          </TouchableOpacity>
-          <View style={styles.avatarCircle}>
-            <Text style={styles.avatarText}>SR</Text>
-          </View>
         </View>
       </View>
 
@@ -574,49 +585,106 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    backgroundColor: '#006A4E',
-    borderRadius: 14,
-    paddingHorizontal: 16,
+    backgroundColor: '#1c70b9',
+    borderRadius: 16,
+    paddingHorizontal: 18,
     paddingVertical: 14,
     marginBottom: 16,
+    position: 'relative',
+    overflow: 'hidden',
+    borderTopWidth: 1.5,
+    borderTopColor: '#60b0f4',
+    borderBottomWidth: 3.5,
+    borderBottomColor: '#124c7e',
+    ...(Platform.OS === 'web' ? {
+      backgroundImage: 'linear-gradient(135deg, #2592ed 0%, #1c70b9 52%, #12518e 100%)',
+      boxShadow: '0 8px 22px rgba(28, 112, 185, 0.38), inset 0 1px 0 rgba(255, 255, 255, 0.45)',
+    } as any : {}),
+  },
+  headerGlossSheen: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    height: 18,
+    backgroundColor: 'rgba(255, 255, 255, 0.18)',
   },
   headerLeft: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: 12,
+    zIndex: 2,
+  },
+  titleIconBadge: {
+    width: 40,
+    height: 40,
+    borderRadius: 12,
+    backgroundColor: 'rgba(255, 255, 255, 0.2)',
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderTopWidth: 1,
+    borderTopColor: 'rgba(255, 255, 255, 0.45)',
+    borderBottomWidth: 2,
+    borderBottomColor: 'rgba(0, 0, 0, 0.2)',
   },
   headerTitle: {
     color: '#fff',
-    fontSize: 18,
-    fontWeight: '700',
+    fontSize: 20,
+    fontWeight: '800',
+    letterSpacing: 0.3,
+  },
+  liveTag: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 5,
+    backgroundColor: 'rgba(255, 255, 255, 0.2)',
+    paddingHorizontal: 8,
+    paddingVertical: 2,
+    borderRadius: 10,
+    borderWidth: 1,
+    borderColor: 'rgba(255, 255, 255, 0.35)',
+  },
+  liveDot: {
+    width: 6,
+    height: 6,
+    borderRadius: 3,
+    backgroundColor: '#86EFAC',
+  },
+  liveTagText: {
+    color: '#FFFFFF',
+    fontSize: 11,
+    fontWeight: '800',
+  },
+  headerSub: {
+    color: '#DCEBFA',
+    fontSize: 12.5,
+    fontWeight: '500',
+    marginTop: 2,
   },
   headerRight: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: 10,
+    zIndex: 2,
   },
-  iconCircleButton: {
-    width: 36,
-    height: 36,
-    borderRadius: 18,
-    backgroundColor: 'rgba(255, 255, 255, 0.15)',
+  headerAddBtn: {
+    flexDirection: 'row',
     alignItems: 'center',
-    justifyContent: 'center',
+    gap: 6,
+    backgroundColor: 'rgba(255, 255, 255, 0.2)',
+    paddingHorizontal: 14,
+    paddingVertical: 9,
+    borderRadius: 10,
+    borderTopWidth: 1,
+    borderTopColor: 'rgba(255, 255, 255, 0.45)',
+    borderBottomWidth: 2,
+    borderBottomColor: 'rgba(0, 0, 0, 0.25)',
+    ...(Platform.OS === 'web' ? ({ cursor: 'pointer' } as any) : {}),
   },
-  avatarCircle: {
-    width: 36,
-    height: 36,
-    borderRadius: 18,
-    backgroundColor: '#0F766E',
-    borderWidth: 1.5,
-    borderColor: '#fff',
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  avatarText: {
-    color: '#fff',
-    fontSize: 14,
-    fontWeight: '700',
+  headerAddBtnText: {
+    color: '#FFFFFF',
+    fontSize: 13,
+    fontWeight: '800',
   },
   kpiRow: {
     flexDirection: 'row',

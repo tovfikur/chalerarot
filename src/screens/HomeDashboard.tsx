@@ -109,12 +109,13 @@ export function HomeDashboard({
 
   return (
     <ScrollView style={styles.scrollWrapper} contentContainerStyle={styles.container} showsVerticalScrollIndicator={false}>
-      {/* 1. EXECUTIVE LUXURY HERO HEADER */}
+      {/* 1. EXECUTIVE LUXURY HERO HEADER - Royal Blue #1c70b9 */}
       <View style={styles.heroHeaderBar}>
+        <View style={styles.headerGlossSheen} pointerEvents="none" />
         <View style={styles.headerInfo}>
           <View style={{ flexDirection: 'row', alignItems: 'center', gap: 12 }}>
             <View style={styles.appLogoCircle}>
-              <AppIcon name={icons.stock} size={24} iconColor="#FFFFFF" />
+              <AppIcon name={icons.stock} size={22} iconColor="#FFFFFF" />
             </View>
             <View>
               <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10 }}>
@@ -140,12 +141,12 @@ export function HomeDashboard({
             onPress={() => go?.('sale')}
             style={[styles.tactileHeroBtn, styles.btnSaleHero]}
           >
-            <View style={styles.heroBtnIconWrap}>
-              <AppIcon name={icons.sale} size={18} iconColor="#FFFFFF" />
+            <View style={[styles.heroBtnIconWrap, { backgroundColor: '#E0F2FE' }]}>
+              <AppIcon name={icons.sale} size={18} iconColor="#1c70b9" />
             </View>
             <View>
-              <Text style={styles.heroBtnText}>{lang === 'bn' ? 'নতুন বিক্রয়' : 'New Sale'}</Text>
-              <Text style={styles.heroBtnSub}>{lang === 'bn' ? 'চালান তৈরি করুন' : 'Create Invoice'}</Text>
+              <Text style={[styles.heroBtnText, { color: '#1c70b9' }]}>{lang === 'bn' ? 'নতুন বিক্রয়' : 'New Sale'}</Text>
+              <Text style={[styles.heroBtnSub, { color: '#0369A1' }]}>{lang === 'bn' ? 'চালান তৈরি করুন' : 'Create Invoice'}</Text>
             </View>
           </TouchableOpacity>
 
@@ -168,12 +169,12 @@ export function HomeDashboard({
             onPress={() => go?.('accounts')}
             style={[styles.tactileHeroBtn, styles.btnAccountsHero]}
           >
-            <View style={[styles.heroBtnIconWrap, { backgroundColor: '#E2E8F0' }]}>
-              <AppIcon name={icons.accounts} size={18} iconColor="#1E293B" />
+            <View style={[styles.heroBtnIconWrap, { backgroundColor: 'rgba(255,255,255,0.2)' }]}>
+              <AppIcon name={icons.accounts} size={18} iconColor="#FFFFFF" />
             </View>
             <View>
-              <Text style={[styles.heroBtnText, { color: '#0F1E36' }]}>{lang === 'bn' ? 'হিসাব খাতা' : 'Accounts'}</Text>
-              <Text style={[styles.heroBtnSub, { color: '#64748B' }]}>{lang === 'bn' ? 'আদায় ও দেনা' : 'Cash & Ledger'}</Text>
+              <Text style={styles.heroBtnText}>{lang === 'bn' ? 'হিসাব খাতা' : 'Accounts'}</Text>
+              <Text style={styles.heroBtnSub}>{lang === 'bn' ? 'আদায় ও দেনা' : 'Cash & Ledger'}</Text>
             </View>
           </TouchableOpacity>
         </View>
@@ -565,135 +566,133 @@ const styles = StyleSheet.create({
     justifyContent: 'space-between',
     alignItems: 'center',
     gap: 16,
-    marginBottom: 20,
-    padding: 20,
-    borderRadius: 18,
-    backgroundColor: '#FFFFFF',
-    borderWidth: 1.5,
-    borderColor: '#D2E3F3',
-    borderBottomWidth: 3,
-    borderBottomColor: '#B6D7F6',
+    marginBottom: 16,
+    paddingHorizontal: 18,
+    paddingVertical: 14,
+    borderRadius: 16,
+    backgroundColor: '#1c70b9',
+    borderTopWidth: 1.5,
+    borderTopColor: '#60b0f4',
+    borderBottomWidth: 3.5,
+    borderBottomColor: '#124c7e',
+    overflow: 'hidden',
+    position: 'relative',
     ...(Platform.OS === 'web' ? {
-      backgroundImage: 'linear-gradient(180deg, #FFFFFF 0%, #F8FBFE 100%)',
-      boxShadow: '0 4px 20px rgba(28, 112, 185, 0.08)',
-    } as any : { elevation: 2 }),
+      backgroundImage: 'linear-gradient(135deg, #2592ed 0%, #1c70b9 52%, #12518e 100%)',
+      boxShadow: '0 8px 22px rgba(28, 112, 185, 0.38), inset 0 1px 0 rgba(255, 255, 255, 0.45)',
+    } as any : { elevation: 4 }),
+  },
+  headerGlossSheen: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    height: 18,
+    backgroundColor: 'rgba(255, 255, 255, 0.18)',
   },
   headerInfo: {
     gap: 6,
+    zIndex: 2,
   },
   appLogoCircle: {
-    width: 48,
-    height: 48,
-    borderRadius: 14,
-    backgroundColor: '#1c70b9',
+    width: 40,
+    height: 40,
+    borderRadius: 12,
+    backgroundColor: 'rgba(255, 255, 255, 0.2)',
     alignItems: 'center',
     justifyContent: 'center',
-    borderWidth: 1.5,
-    borderColor: '#60b0f4',
-    borderBottomWidth: 3,
-    borderBottomColor: '#124c7e',
-    ...(Platform.OS === 'web' ? {
-      backgroundImage: 'linear-gradient(135deg, #2592ed 0%, #1c70b9 52%, #12518e 100%)',
-      boxShadow: '0 4px 12px rgba(28, 112, 185, 0.35)',
-    } as any : {}),
+    borderTopWidth: 1,
+    borderTopColor: 'rgba(255, 255, 255, 0.45)',
+    borderBottomWidth: 2,
+    borderBottomColor: 'rgba(0, 0, 0, 0.2)',
   },
   headerTitle: {
-    fontSize: 26,
+    fontSize: 22,
     fontWeight: '800',
-    color: '#0F1E36',
-    letterSpacing: -0.5,
+    color: '#FFFFFF',
+    letterSpacing: 0.3,
   },
   headerSubtitle: {
-    fontSize: 13,
-    color: '#5B728F',
-    fontWeight: '600',
+    fontSize: 12.5,
+    color: '#DCEBFA',
+    fontWeight: '500',
     marginTop: 2,
   },
   liveBadge: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 6,
-    backgroundColor: '#ECFDF5',
-    paddingHorizontal: 10,
-    paddingVertical: 4,
-    borderRadius: 16,
+    gap: 5,
+    backgroundColor: 'rgba(255, 255, 255, 0.2)',
+    paddingHorizontal: 8,
+    paddingVertical: 2,
+    borderRadius: 10,
     borderWidth: 1,
-    borderColor: '#A7F3D0',
+    borderColor: 'rgba(255, 255, 255, 0.35)',
   },
   liveDot: {
-    width: 7,
-    height: 7,
-    borderRadius: 3.5,
-    backgroundColor: '#10B981',
+    width: 6,
+    height: 6,
+    borderRadius: 3,
+    backgroundColor: '#86EFAC',
   },
   liveText: {
-    fontSize: 11.5,
+    fontSize: 11,
     fontWeight: '800',
-    color: '#047857',
+    color: '#FFFFFF',
   },
   actionGroup: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: 10,
     flexWrap: 'wrap',
+    zIndex: 2,
   },
   tactileHeroBtn: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: 10,
-    paddingHorizontal: 16,
-    paddingVertical: 10,
-    borderRadius: 12,
-    minHeight: 48,
-    borderWidth: 1.5,
+    paddingHorizontal: 14,
+    paddingVertical: 8,
+    borderRadius: 10,
+    borderTopWidth: 1,
+    borderBottomWidth: 2,
+    borderBottomColor: 'rgba(0, 0, 0, 0.25)',
     ...(Platform.OS === 'web' ? ({ cursor: 'pointer' } as any) : {}),
   },
   heroBtnIconWrap: {
     width: 28,
     height: 28,
     borderRadius: 8,
-    backgroundColor: 'rgba(255, 255, 255, 0.25)',
     alignItems: 'center',
     justifyContent: 'center',
   },
   heroBtnText: {
-    fontSize: 14,
+    fontSize: 13,
     fontWeight: '800',
     color: '#FFFFFF',
   },
   heroBtnSub: {
     fontSize: 11,
     fontWeight: '600',
-    color: 'rgba(255, 255, 255, 0.85)',
+    color: '#DCEBFA',
   },
   btnSaleHero: {
-    backgroundColor: '#1c70b9',
-    borderColor: '#60b0f4',
-    borderBottomWidth: 3,
-    borderBottomColor: '#124c7e',
+    backgroundColor: '#FFFFFF',
+    borderTopColor: '#FFFFFF',
+    borderBottomColor: 'rgba(0, 0, 0, 0.25)',
     ...(Platform.OS === 'web' ? {
-      backgroundImage: 'linear-gradient(180deg, #258ee0 0%, #1c70b9 52%, #135591 100%)',
-      boxShadow: '0 4px 14px rgba(28, 112, 185, 0.35)',
+      boxShadow: '0 4px 12px rgba(0, 0, 0, 0.15)',
     } as any : {}),
   },
   btnPurchaseHero: {
-    backgroundColor: '#0F2B48',
-    borderColor: '#3B82F6',
-    borderBottomWidth: 3,
-    borderBottomColor: '#071626',
-    ...(Platform.OS === 'web' ? {
-      backgroundImage: 'linear-gradient(180deg, #1C3D60 0%, #0F2B48 100%)',
-      boxShadow: '0 4px 14px rgba(15, 43, 72, 0.35)',
-    } as any : {}),
+    backgroundColor: 'rgba(255, 255, 255, 0.2)',
+    borderTopColor: 'rgba(255, 255, 255, 0.45)',
+    borderBottomColor: 'rgba(0, 0, 0, 0.25)',
   },
   btnAccountsHero: {
-    backgroundColor: '#FFFFFF',
-    borderColor: '#CBD5E1',
-    borderBottomWidth: 3,
-    borderBottomColor: '#94A3B8',
-    ...(Platform.OS === 'web' ? {
-      boxShadow: '0 3px 10px rgba(0, 0, 0, 0.06)',
-    } as any : {}),
+    backgroundColor: 'rgba(255, 255, 255, 0.2)',
+    borderTopColor: 'rgba(255, 255, 255, 0.45)',
+    borderBottomColor: 'rgba(0, 0, 0, 0.25)',
   },
 
   /* 2. KPI CARDS */
