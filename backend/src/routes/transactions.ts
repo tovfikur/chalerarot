@@ -138,6 +138,7 @@ tx.post('/sales', async (req: Request, res: Response) => {
         const unitCost = hasCustomCost ? round2(num(l.unitCost)) : currentAvg;
         const lineCogs = round2(qtyKg * unitCost);
         cogs += lineCogs;
+        sub += round2(qtyKg * rate);
         items.push({ productId: p.id, unit: l.unit, enteredQty: entered, qtyKg, rate, unitCost, cogs: lineCogs });
         // Selling leaves quantity AND inventory value (AVCO out).
         // If admin modified the purchase price, forceUnitCost ensures the inventory value is reduced

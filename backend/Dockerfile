@@ -22,8 +22,6 @@ COPY backend/tsconfig.json ./
 COPY backend/src ./src
 COPY backend/scripts ./scripts
 
-# Copy shared src needed if seed script is executed
-COPY src /app/src
 
 # Compile TypeScript
 RUN npm run build

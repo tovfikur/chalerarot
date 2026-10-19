@@ -1109,7 +1109,7 @@ export function TradeDashboardForm({ mode, onDone }: TradeDashboardFormProps) {
                   {activeItemDropdownIdx === rowIdx && (
                     <View style={styles.dropdownMenu3D}>
                       <ScrollView style={{ maxHeight: 200 }} keyboardShouldPersistTaps="handled">
-                        {products.map((p, pIdx) => {
+                        {products.length ? products.map((p, pIdx) => {
                           const pCode = String(pIdx + 1);
                           const pBagKg = p.mediumBagKg || 50;
                           const pPer = isBag ? pBagKg : 1;
@@ -1140,7 +1140,13 @@ export function TradeDashboardForm({ mode, onDone }: TradeDashboardFormProps) {
                               </View>
                             </TouchableOpacity>
                           );
-                        })}
+                        }) : (
+                          <View style={{ padding: 12 }}>
+                            <Text style={{ color: '#5B728F', fontSize: 13, textAlign: 'center' }}>
+                              {lang === 'bn' ? 'কোনো চাল পাওয়া যায়নি (প্রথমে স্টক এন্ট্রি করুন)' : 'No products found (add in stock)'}
+                            </Text>
+                          </View>
+                        )}
                       </ScrollView>
                     </View>
                   )}
