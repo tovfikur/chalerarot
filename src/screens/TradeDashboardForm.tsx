@@ -98,12 +98,13 @@ export function TradeDashboardForm({ mode, onDone }: TradeDashboardFormProps) {
   // Initialize matching product/party if available from store
   useEffect(() => {
     if (parties.length > 0 && !selectedPartyId) {
-      const match = parties.find(p => p.name.includes('আশরাফ')) || parties[0];
+      const match = parties[0];
       if (match) {
         setSelectedPartyId(match.id);
+        setPartyCode('340');
         setPartyName(match.name);
-        setPartyMobile(match.mobile || '199');
-        setPartyAddress(match.address || 'ঢাকা');
+        setPartyMobile(match.mobile || '');
+        setPartyAddress(match.address || '');
       }
     }
   }, [parties, selectedPartyId]);
@@ -193,19 +194,64 @@ export function TradeDashboardForm({ mode, onDone }: TradeDashboardFormProps) {
     return parties.filter((p, idx) => {
       const pCode = String(340 + idx);
       const matchesName = !q || p.name.toLowerCase().includes(q);
-      const matchesCode = !codeQ || pCode.includes(codeQ);
+      const matchesCode = !codeQ || pCode.includes(codeQ) || String(idx + 1) === codeQ;
       return matchesName || matchesCode;
     }).slice(0, 8);
   }, [parties, partyName, partyCode]);
 
-  const onSelectParty = useCallback((p: Party, idx: number) => {
+  // Find party by code (340+ or 1..N), ID, mobile, or name from database
+  const findPartyByCode = useCallback((codeQuery: string): { party: Party; code: string; index: number } | null => {
+    if (!codeQuery) return null;
+    const q = codeQuery.trim().toLowerCase();
+
+    // 1. Numeric matching
+    const num = parseInt(q, 10);
+    if (!isNaN(num)) {
+      // 340+ base code
+      if (num >= 340 && num < 340 + parties.length) {
+        const idx = num - 340;
+        return { party: parties[idx], code: String(num), index: idx };
+      }
+      // 1-based index (1, 2, 3...)
+      if (num >= 1 && num <= parties.length) {
+        const idx = num - 1;
+        return { party: parties[idx], code: String(340 + idx), index: idx };
+      }
+    }
+
+    // 2. Party ID (e.g. v1, v2, c1, c2)
+    const byIdIdx = parties.findIndex(p => p.id.toLowerCase() === q);
+    if (byIdIdx !== -1) {
+      return { party: parties[byIdIdx], code: String(340 + byIdIdx), index: byIdIdx };
+    }
+
+    // 3. Mobile
+    const cleanQ = q.replace(/\D/g, '');
+    if (cleanQ.length >= 3) {
+      const byMobileIdx = parties.findIndex(p => p.mobile && p.mobile.replace(/\D/g, '').includes(cleanQ));
+      if (byMobileIdx !== -1) {
+        return { party: parties[byMobileIdx], code: String(340 + byMobileIdx), index: byMobileIdx };
+      }
+    }
+
+    // 4. Exact or prefix name
+    const byNameIdx = parties.findIndex(p => p.name.toLowerCase() === q || p.name.toLowerCase().startsWith(q));
+    if (byNameIdx !== -1) {
+      return { party: parties[byNameIdx], code: String(340 + byNameIdx), index: byNameIdx };
+    }
+
+    return null;
+  }, [parties]);
+
+  const onSelectParty = useCallback((p: Party, idx?: number) => {
+    const fullIdx = idx !== undefined && idx >= 0 ? idx : parties.findIndex(x => x.id === p.id);
     setSelectedPartyId(p.id);
-    setPartyCode(String(340 + idx));
+    setPartyCode(String(340 + (fullIdx !== -1 ? fullIdx : 0)));
     setPartyName(p.name);
     setPartyMobile(p.mobile || '');
     setPartyAddress(p.address || '');
     setPartyDropdownOpen(false);
-  }, []);
+  }, [parties]);
 
   // Find product by code, index, or ID
   const findProductByCode = useCallback((codeQuery: string): { product: Product; code: string } | null => {
@@ -348,9 +394,11 @@ export function TradeDashboardForm({ mode, onDone }: TradeDashboardFormProps) {
     if (isSale) seq.push('orderNo');
     seq.push('memoNo');
     seq.push('partyCode');
-    seq.push('partyName');
-    seq.push('partyMobile');
-    seq.push('partyAddress');
+    if (isSale) {
+      seq.push('partyName');
+      seq.push('partyMobile');
+      seq.push('partyAddress');
+    }
     seq.push('billDate');
     seq.push('dueDate');
 
@@ -388,6 +436,35 @@ export function TradeDashboardForm({ mode, onDone }: TradeDashboardFormProps) {
       setFocusedField(prevKey);
     }
   }, [getNavSequence]);
+
+  // Handle Enter on Party Code: fetch vendor from DB, fill name/mobile/address, and move focus
+  const handlePartyCodeSubmit = useCallback(() => {
+    const trimmed = partyCode.trim();
+    const match = findPartyByCode(trimmed);
+    if (match) {
+      onSelectParty(match.party, match.index);
+      setPartyDropdownOpen(false);
+      focusNextField('partyCode');
+      return;
+    }
+    if (filteredParties.length > 0 && partyHighlightIdx >= 0 && partyHighlightIdx < filteredParties.length) {
+      const p = filteredParties[partyHighlightIdx];
+      const fullIdx = parties.findIndex(x => x.id === p.id);
+      onSelectParty(p, fullIdx !== -1 ? fullIdx : partyHighlightIdx);
+      setPartyDropdownOpen(false);
+      focusNextField('partyCode');
+      return;
+    }
+    if (filteredParties.length === 1) {
+      const p = filteredParties[0];
+      const fullIdx = parties.findIndex(x => x.id === p.id);
+      onSelectParty(p, fullIdx !== -1 ? fullIdx : 0);
+      setPartyDropdownOpen(false);
+      focusNextField('partyCode');
+      return;
+    }
+    focusNextField('partyCode');
+  }, [partyCode, findPartyByCode, onSelectParty, filteredParties, partyHighlightIdx, parties, focusNextField]);
 
   // Save Draft to localStorage
   const handleSaveDraft = useCallback(() => {
@@ -738,7 +815,7 @@ export function TradeDashboardForm({ mode, onDone }: TradeDashboardFormProps) {
             </View>
 
             {/* Party Code */}
-            <View style={styles.formGroup}>
+            <View style={[styles.formGroup, { position: 'relative', zIndex: 50 }]}>
               <Text style={styles.fieldLabel}>{isSale ? 'কাস্টমার কোড' : 'সরবরাহকারী কোড'}</Text>
               <View style={[styles.inputDebossed, isInputFocused('partyCode') && styles.inputFocusedGlow]}>
                 <TextInput
@@ -747,109 +824,94 @@ export function TradeDashboardForm({ mode, onDone }: TradeDashboardFormProps) {
                   onChangeText={v => {
                     setPartyCode(v);
                     setPartyDropdownOpen(true);
+                    if (v.trim().length >= 3) {
+                      const match = findPartyByCode(v.trim());
+                      if (match) {
+                        setSelectedPartyId(match.party.id);
+                        setPartyName(match.party.name);
+                        setPartyMobile(match.party.mobile || '');
+                        setPartyAddress(match.party.address || '');
+                      }
+                    } else if (!v.trim() && !isSale) {
+                      setSelectedPartyId('');
+                      setPartyName('');
+                      setPartyMobile('');
+                      setPartyAddress('');
+                    }
                   }}
                   onFocus={() => {
                     setFocusedField('partyCode');
                     setPartyDropdownOpen(true);
                   }}
-                  onSubmitEditing={() => {
-                    if (partyDropdownOpen && filteredParties[partyHighlightIdx]) {
-                      onSelectParty(filteredParties[partyHighlightIdx], partyHighlightIdx);
-                      focusNextField('partyName');
-                    } else {
-                      focusNextField('partyCode');
+                  onBlur={() => {
+                    if (partyCode.trim()) {
+                      const match = findPartyByCode(partyCode.trim());
+                      if (match && selectedPartyId !== match.party.id) {
+                        onSelectParty(match.party, match.index);
+                      }
                     }
                   }}
+                  onSubmitEditing={handlePartyCodeSubmit}
                   onKeyPress={(e: any) => {
                     if (partyDropdownOpen) {
                       if (e.nativeEvent.key === 'ArrowDown') {
+                        e.preventDefault?.();
                         setPartyHighlightIdx(i => Math.min(filteredParties.length - 1, i + 1));
                       } else if (e.nativeEvent.key === 'ArrowUp') {
+                        e.preventDefault?.();
                         setPartyHighlightIdx(i => Math.max(0, i - 1));
+                      } else if (e.nativeEvent.key === 'Escape') {
+                        setPartyDropdownOpen(false);
                       }
                     }
                   }}
                   style={styles.textInput}
-                  placeholder="345"
+                  placeholder={!isSale ? "340" : "345"}
+                  keyboardType="numeric"
                   returnKeyType="next"
                 />
                 <TouchableOpacity
-                  onPress={() => setPartyDropdownOpen(prev => !prev)}
-                  style={styles.tactileInnerBtn}
-                >
-                  <AppIcon name={icons.search} size={18} iconColor="#1c70b9" />
-                </TouchableOpacity>
-              </View>
-            </View>
-
-            {/* Party Name with Autocomplete */}
-            <View style={[styles.formGroup, { position: 'relative', zIndex: 40 }]}>
-              <Text style={styles.fieldLabel}>{isSale ? 'কাস্টমারের নাম' : 'সরবরাহকারীর নাম'}</Text>
-              <View style={[styles.inputDebossed, isInputFocused('partyName') && styles.inputFocusedGlow]}>
-                <TextInput
-                  ref={el => (inputRefs.current['partyName'] = el)}
-                  value={partyName}
-                  onChangeText={v => {
-                    setPartyName(v);
-                    setPartyDropdownOpen(true);
+                  onPress={() => {
+                    setFocusedField('partyCode');
+                    setPartyDropdownOpen(prev => !prev);
                   }}
-                  onFocus={() => {
-                    setFocusedField('partyName');
-                    setPartyDropdownOpen(true);
-                  }}
-                  onSubmitEditing={() => {
-                    if (partyDropdownOpen && filteredParties[partyHighlightIdx]) {
-                      onSelectParty(filteredParties[partyHighlightIdx], partyHighlightIdx);
-                      focusNextField('partyName');
-                    } else {
-                      focusNextField('partyName');
-                    }
-                  }}
-                  onKeyPress={(e: any) => {
-                    if (partyDropdownOpen) {
-                      if (e.nativeEvent.key === 'ArrowDown') {
-                        setPartyHighlightIdx(i => Math.min(filteredParties.length - 1, i + 1));
-                      } else if (e.nativeEvent.key === 'ArrowUp') {
-                        setPartyHighlightIdx(i => Math.max(0, i - 1));
-                      }
-                    }
-                  }}
-                  style={styles.textInput}
-                  placeholder={isSale ? 'করিম ট্রেডার্স' : 'আশরাফ'}
-                  returnKeyType="next"
-                />
-                <TouchableOpacity
-                  onPress={() => setPartyDropdownOpen(prev => !prev)}
                   style={styles.tactileInnerBtn}
                 >
                   <AppIcon name={icons.search} size={18} iconColor="#1c70b9" />
                 </TouchableOpacity>
               </View>
 
-              {/* Autocomplete Dropdown */}
+              {/* Autocomplete Dropdown anchored under Party Code */}
               {partyDropdownOpen && (
                 <View style={styles.dropdownMenu3D}>
-                  <ScrollView style={{ maxHeight: 180 }} keyboardShouldPersistTaps="handled">
+                  <ScrollView style={{ maxHeight: 200 }} keyboardShouldPersistTaps="handled">
                     {filteredParties.length ? (
                       filteredParties.map((p, idx) => {
                         const isHighlighted = idx === partyHighlightIdx;
+                        const fullIdx = parties.findIndex(x => x.id === p.id);
+                        const pDisplayCode = String(340 + (fullIdx !== -1 ? fullIdx : idx));
                         return (
                           <TouchableOpacity
                             key={p.id}
-                            onPress={() => onSelectParty(p, idx)}
+                            onPress={() => {
+                              onSelectParty(p, fullIdx !== -1 ? fullIdx : idx);
+                              focusNextField('partyCode');
+                            }}
                             style={[styles.dropdownItem, isHighlighted && styles.dropdownItemActive]}
                           >
                             <View style={{ flex: 1 }}>
                               <Text style={styles.dropdownItemText}>{p.name}</Text>
-                              <Text style={styles.dropdownItemSub}>{p.mobile || 'কোন নম্বর নেই'} • কোড: {340 + idx}</Text>
+                              <Text style={styles.dropdownItemSub}>{p.mobile || 'কোন নম্বর নেই'} • কোড: {pDisplayCode}</Text>
                             </View>
-                            <Text style={styles.dropdownItemDue}>{m(bal(isSale ? 'c' : 'v', p.id).balance || 5000)}</Text>
+                            <Text style={styles.dropdownItemDue}>{m(bal(isSale ? 'c' : 'v', p.id).balance)}</Text>
                           </TouchableOpacity>
                         );
                       })
                     ) : (
                       <View style={{ padding: 12 }}>
-                        <Text style={{ color: '#5B728F', fontSize: 13, textAlign: 'center' }}>কোন সরবরাহকারী পাওয়া যায়নি</Text>
+                        <Text style={{ color: '#5B728F', fontSize: 13, textAlign: 'center' }}>
+                          {isSale ? 'কোন কাস্টমার পাওয়া যায়নি' : 'কোন সরবরাহকারী পাওয়া যায়নি'}
+                        </Text>
                       </View>
                     )}
                   </ScrollView>
@@ -857,43 +919,130 @@ export function TradeDashboardForm({ mode, onDone }: TradeDashboardFormProps) {
               )}
             </View>
 
+            {/* Party Name */}
+            <View style={[styles.formGroup, { position: 'relative', zIndex: 40 }]}>
+              <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 6 }}>
+                <Text style={styles.fieldLabel}>{isSale ? 'কাস্টমারের নাম' : 'সরবরাহকারীর নাম'}</Text>
+                {!isSale && (
+                  <View style={styles.readOnlyBadge}>
+                    <AppIcon name={icons.lock} size={11} iconColor="#64748B" />
+                    <Text style={styles.readOnlyBadgeText}>ডাটাবেজ থেকে</Text>
+                  </View>
+                )}
+              </View>
+              <View style={[
+                styles.inputDebossed,
+                !isSale && styles.inputReadOnly,
+                isInputFocused('partyName') && styles.inputFocusedGlow
+              ]}>
+                <TextInput
+                  ref={el => (inputRefs.current['partyName'] = el)}
+                  value={partyName}
+                  editable={isSale}
+                  onChangeText={v => {
+                    setPartyName(v);
+                    setPartyDropdownOpen(true);
+                  }}
+                  onFocus={() => {
+                    if (isSale) {
+                      setFocusedField('partyName');
+                      setPartyDropdownOpen(true);
+                    }
+                  }}
+                  onSubmitEditing={() => {
+                    if (isSale) {
+                      if (partyDropdownOpen && filteredParties[partyHighlightIdx]) {
+                        const p = filteredParties[partyHighlightIdx];
+                        const fullIdx = parties.findIndex(x => x.id === p.id);
+                        onSelectParty(p, fullIdx !== -1 ? fullIdx : partyHighlightIdx);
+                      }
+                      focusNextField('partyName');
+                    }
+                  }}
+                  style={[styles.textInput, !isSale && styles.textInputReadOnly]}
+                  placeholder={isSale ? 'করিম ট্রেডার্স' : 'কোড লিখলে নাম স্বয়ংক্রিয় আসবে'}
+                  placeholderTextColor={!isSale ? '#94A3B8' : '#9BA8B8'}
+                  returnKeyType={isSale ? "next" : undefined}
+                />
+                {isSale && (
+                  <TouchableOpacity
+                    onPress={() => {
+                      setFocusedField('partyName');
+                      setPartyDropdownOpen(prev => !prev);
+                    }}
+                    style={styles.tactileInnerBtn}
+                  >
+                    <AppIcon name={icons.search} size={18} iconColor="#1c70b9" />
+                  </TouchableOpacity>
+                )}
+              </View>
+            </View>
+
             {/* Mobile */}
             <View style={styles.formGroup}>
-              <Text style={styles.fieldLabel}>মোবাইল নম্বর</Text>
-              <View style={[styles.inputDebossed, isInputFocused('partyMobile') && styles.inputFocusedGlow]}>
+              <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 6 }}>
+                <Text style={styles.fieldLabel}>মোবাইল নম্বর</Text>
+                {!isSale && (
+                  <View style={styles.readOnlyBadge}>
+                    <Text style={styles.readOnlyBadgeText}>রিড-অনলি</Text>
+                  </View>
+                )}
+              </View>
+              <View style={[
+                styles.inputDebossed,
+                !isSale && styles.inputReadOnly,
+                isInputFocused('partyMobile') && styles.inputFocusedGlow
+              ]}>
                 <TextInput
                   ref={el => (inputRefs.current['partyMobile'] = el)}
                   value={partyMobile}
+                  editable={isSale}
                   onChangeText={setPartyMobile}
-                  onFocus={() => setFocusedField('partyMobile')}
-                  onSubmitEditing={() => focusNextField('partyMobile')}
-                  style={styles.textInput}
-                  placeholder="199"
+                  onFocus={() => { if (isSale) setFocusedField('partyMobile'); }}
+                  onSubmitEditing={() => { if (isSale) focusNextField('partyMobile'); }}
+                  style={[styles.textInput, !isSale && styles.textInputReadOnly]}
+                  placeholder={isSale ? '017...' : 'মোবাইল নম্বর'}
+                  placeholderTextColor={!isSale ? '#94A3B8' : '#9BA8B8'}
                   keyboardType="phone-pad"
-                  returnKeyType="next"
+                  returnKeyType={isSale ? "next" : undefined}
                 />
               </View>
             </View>
 
             {/* Address */}
             <View style={styles.formGroup}>
-              <Text style={styles.fieldLabel}>ঠিকানা</Text>
-              <View style={[styles.textareaDebossed, isInputFocused('partyAddress') && styles.inputFocusedGlow]}>
+              <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 6 }}>
+                <Text style={styles.fieldLabel}>ঠিকানা</Text>
+                {!isSale && (
+                  <View style={styles.readOnlyBadge}>
+                    <Text style={styles.readOnlyBadgeText}>রিড-অনলি</Text>
+                  </View>
+                )}
+              </View>
+              <View style={[
+                styles.textareaDebossed,
+                !isSale && styles.inputReadOnly,
+                isInputFocused('partyAddress') && styles.inputFocusedGlow
+              ]}>
                 <TextInput
                   ref={el => (inputRefs.current['partyAddress'] = el)}
                   value={partyAddress}
+                  editable={isSale}
                   onChangeText={setPartyAddress}
-                  onFocus={() => setFocusedField('partyAddress')}
-                  onSubmitEditing={() => focusNextField('partyAddress')}
-                  style={styles.textareaInput}
-                  placeholder="ঢাকা"
+                  onFocus={() => { if (isSale) setFocusedField('partyAddress'); }}
+                  onSubmitEditing={() => { if (isSale) focusNextField('partyAddress'); }}
+                  style={[styles.textareaInput, !isSale && styles.textInputReadOnly]}
+                  placeholder={isSale ? 'ঢাকা' : 'ঠিকানা'}
+                  placeholderTextColor={!isSale ? '#94A3B8' : '#9BA8B8'}
                   multiline
-                  returnKeyType="next"
+                  returnKeyType={isSale ? "next" : undefined}
                 />
-                <View style={styles.textareaCornerGrip}>
-                  <View style={styles.gripLine} />
-                  <View style={[styles.gripLine, { width: 4 }]} />
-                </View>
+                {isSale && (
+                  <View style={styles.textareaCornerGrip}>
+                    <View style={styles.gripLine} />
+                    <View style={[styles.gripLine, { width: 4 }]} />
+                  </View>
+                )}
               </View>
             </View>
           </View>
@@ -1952,6 +2101,37 @@ const styles = StyleSheet.create({
     width: 8,
     backgroundColor: '#94A3B8',
     borderRadius: 1,
+  },
+  inputReadOnly: {
+    backgroundColor: '#F1F5F9',
+    borderColor: '#CBD5E1',
+    borderWidth: 1.5,
+    opacity: 0.95,
+    ...(Platform.OS === 'web' ? {
+      boxShadow: 'none',
+      cursor: 'not-allowed',
+    } as any : {}),
+  },
+  textInputReadOnly: {
+    color: '#334155',
+    fontWeight: '600',
+    ...(Platform.OS === 'web' ? ({ cursor: 'not-allowed' } as any) : {}),
+  },
+  readOnlyBadge: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    backgroundColor: '#F1F5F9',
+    paddingHorizontal: 6,
+    paddingVertical: 2,
+    borderRadius: 4,
+    borderWidth: 1,
+    borderColor: '#E2E8F0',
+  },
+  readOnlyBadgeText: {
+    fontSize: 10,
+    fontWeight: '600',
+    color: '#64748B',
   },
 
   // DROPDOWNS

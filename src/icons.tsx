@@ -67,4 +67,5 @@ export const icons = {
   office: 'domain',
   report: 'file-chart-outline',
   expense: 'wallet-outline',
+  lock: 'lock-outline',
 } as const satisfies Record<string, IconName>;

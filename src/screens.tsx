@@ -1007,7 +1007,15 @@ export function Parties({ kind, focus, onFocusDone, onReturn }: { kind: 'c' | 'v
   const [v, setV] = useState({ name: '', mobile: '', address: '', opening: '' });
   const [pq, setPq] = useState('');
   const balFs = useFs(30, 24);
-  const listed = list.filter(p => matchParty(p, pq));
+  const getPartyCode = useCallback((p: Party) => {
+    const idx = list.findIndex(x => x.id === p.id);
+    return idx !== -1 ? String(340 + idx) : '';
+  }, [list]);
+  const listed = list.filter(p => {
+    const code = getPartyCode(p);
+    const codeMatch = pq.trim() ? code.includes(pq.trim()) : false;
+    return matchParty(p, pq) || codeMatch;
+  });
   // Newest transaction date per party, from the same local ledger that backs
   // the detail view. No extra request, no new financial calculation.
   const lastDateOf = useMemo(() => {
@@ -1108,7 +1116,32 @@ export function Parties({ kind, focus, onFocusDone, onReturn }: { kind: 'c' | 'v
   const money = (v: number) => <Text style={{ fontSize: 14, fontWeight: '600', color: color.text }}>{m(v)}</Text>;
   const partyColumns: TableColumn<Party>[] = useMemo(() => [
     {
-      key: 'name', label: isC ? t('customers') : t('vendors'), flex: 2.2, sort: p => p.name,
+      key: 'code', label: t('code'), flex: 0.8, align: 'center',
+      sort: p => {
+        const idx = list.findIndex(x => x.id === p.id);
+        return idx !== -1 ? 340 + idx : 0;
+      },
+      render: (p, fs) => {
+        const code = getPartyCode(p);
+        return (
+          <View style={{
+            backgroundColor: '#EFF6FF',
+            paddingHorizontal: 8,
+            paddingVertical: 3,
+            borderRadius: 6,
+            borderWidth: 1,
+            borderColor: '#BFDBFE',
+            alignSelf: 'center',
+          }}>
+            <Text style={{ fontSize: fs ? fs - 1 : 13, fontWeight: '700', color: '#1D4ED8', fontFamily: 'monospace' }}>
+              {code}
+            </Text>
+          </View>
+        );
+      },
+    },
+    {
+      key: 'name', label: isC ? t('customers') : t('vendors'), flex: 2.0, sort: p => p.name,
       render: (p, fs) => (
         <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, flex: 1 }}>
           <AppIcon name={isC ? icons.customers : icons.vendors} size={18} iconColor={color.muted} />
@@ -1116,19 +1149,19 @@ export function Parties({ kind, focus, onFocusDone, onReturn }: { kind: 'c' | 'v
         </View>
       ),
     },
-    { key: 'mobile', label: t('mobile'), flex: 1.4, sort: p => p.mobile, render: (p, fs) => <Text style={{ fontSize: fs, color: color.text }}>{p.mobile || '-'}</Text> },
-    { key: 'total', label: isC ? t('totalSales') : t('totalPurchase'), flex: 1.2, align: 'right', sort: p => bal(kind, p.id).total, render: p => money(bal(kind, p.id).total) },
-    { key: 'paid', label: t('totalPaid'), flex: 1.2, align: 'right', sort: p => bal(kind, p.id).paid, render: p => money(bal(kind, p.id).paid) },
+    { key: 'mobile', label: t('mobile'), flex: 1.3, sort: p => p.mobile, render: (p, fs) => <Text style={{ fontSize: fs, color: color.text }}>{p.mobile || '-'}</Text> },
+    { key: 'total', label: isC ? t('totalSales') : t('totalPurchase'), flex: 1.1, align: 'right', sort: p => bal(kind, p.id).total, render: p => money(bal(kind, p.id).total) },
+    { key: 'paid', label: t('totalPaid'), flex: 1.1, align: 'right', sort: p => bal(kind, p.id).paid, render: p => money(bal(kind, p.id).paid) },
     {
-      key: 'balance', label: isC ? t('currentDue') : t('currentPayable'), flex: 1.2, align: 'right',
+      key: 'balance', label: isC ? t('currentDue') : t('currentPayable'), flex: 1.1, align: 'right',
       sort: p => bal(kind, p.id).balance,
       render: (p, fs) => {
         const b2 = bal(kind, p.id).balance;
         return <Text style={{ fontSize: fs, fontWeight: '700', color: b2 > 0 ? color.red : color.primary }}>{m(b2)}</Text>;
       },
     },
-    { key: 'last', label: t('lastTransaction'), flex: 1.2, align: 'right', sort: p => lastDateOf[p.id] ?? '', render: p => <Text style={{ fontSize: 14, color: color.muted }}>{fd(lastDateOf[p.id])}</Text> },
-  ], [isC, kind, t, m, fd, bal, lastDateOf]);
+    { key: 'last', label: t('lastTransaction'), flex: 1.1, align: 'right', sort: p => lastDateOf[p.id] ?? '', render: p => <Text style={{ fontSize: 14, color: color.muted }}>{fd(lastDateOf[p.id])}</Text> },
+  ], [isC, kind, t, m, fd, bal, lastDateOf, list, getPartyCode]);
 
   if (f) return <Screen scrollRef={scrollRef} onScrollY={onScrollY}><BackLink label={sel ? t('back') : backLabel} onPress={back} />
     <Card>
@@ -1152,7 +1185,19 @@ export function Parties({ kind, focus, onFocusDone, onReturn }: { kind: 'c' | 'v
     const b = bal(kind, sel.id), txs = (isC ? cTx : vTx).filter(x => x.partyId === sel.id);
     const lbl = (k: string) => (k === 'payment' ? t('payment') : k === 'sreturn' ? t('saleReturn') : k === 'preturn' ? t('purchaseReturn') : isC ? t('sale') : t('purchase'));
     return <Screen scrollRef={scrollRef} onScrollY={onScrollY}><BackLink label={backLabel} onPress={back} />
-      <Card><Title>{sel.name}</Title><Muted>{sel.mobile}</Muted>
+      <Card>
+        <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 4 }}>
+          <Title>{sel.name}</Title>
+          {(() => {
+            const code = getPartyCode(sel);
+            return code ? (
+              <View style={{ backgroundColor: '#EFF6FF', paddingHorizontal: 8, paddingVertical: 3, borderRadius: 6, borderWidth: 1, borderColor: '#BFDBFE' }}>
+                <Text style={{ fontSize: 13, fontWeight: '700', color: '#1D4ED8' }}>কোড: {code}</Text>
+              </View>
+            ) : null;
+          })()}
+        </View>
+        <Muted>{sel.mobile}</Muted>
       <Text style={{ fontSize: balFs, fontWeight: '700', color: b.balance > 0 ? '#C62828' : '#1B7F4B' }}>{m(b.balance)}</Text><Muted>{isC ? t('currentDue') : t('currentPayable')}</Muted>
       <Row left={isC ? t('totalSales') : t('totalPurchase')} right={m(b.total)} /><Row left={t('totalPaid')} right={m(b.paid)} /><Row left={t('nextDate')} right={fd(sel.next)} />
       <Btn icon={isC ? icons.collect : icons.pay} label={t(isC ? 'receivePayment' : 'payPayment')} onPress={() => setPayOpen(true)} />
@@ -1250,7 +1295,10 @@ export function Parties({ kind, focus, onFocusDone, onReturn }: { kind: 'c' | 'v
       setQuery={setPq}
       placeholder={searchPh}
       match={matchParty}
-      subOf={p => p.mobile}
+      subOf={p => {
+        const code = getPartyCode(p);
+        return (code ? `[কোড: ${code}] ` : '') + (p.mobile || '');
+      }}
       rightOf={p => ({ text: m(bal(kind, p.id).balance), neg: bal(kind, p.id).balance > 0 })}
       emptyText={isC ? t('noCustomer') : t('noVendor')}
       onSelect={p => setPq(p.name)}
@@ -1269,7 +1317,20 @@ export function Parties({ kind, focus, onFocusDone, onReturn }: { kind: 'c' | 'v
       />
     ) : (
       <RGrid mobile={1} tablet={2} desktop={3}>
-        {listed.length ? listed.map(p => <Card key={p.id}><Row icon={isC ? icons.customers : icons.vendors} left={p.name} sub={p.mobile} right={m(bal(kind, p.id).balance)} neg={bal(kind, p.id).balance > 0} /><Btn kind="ghost" icon={icons.history} label={t('history')} onPress={() => openDetail(p)} /></Card>) : <Card>{pq.trim() ? <NoResult /> : <Empty />}</Card>}
+        {listed.length ? listed.map(p => {
+          const code = getPartyCode(p);
+          return (
+            <Card key={p.id}>
+              <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 6 }}>
+                <View style={{ backgroundColor: '#EFF6FF', paddingHorizontal: 7, paddingVertical: 2, borderRadius: 5, borderWidth: 1, borderColor: '#BFDBFE' }}>
+                  <Text style={{ fontSize: 12, fontWeight: '700', color: '#1D4ED8' }}>কোড: {code}</Text>
+                </View>
+              </View>
+              <Row icon={isC ? icons.customers : icons.vendors} left={p.name} sub={p.mobile} right={m(bal(kind, p.id).balance)} neg={bal(kind, p.id).balance > 0} />
+              <Btn kind="ghost" icon={icons.history} label={t('history')} onPress={() => openDetail(p)} />
+            </Card>
+          );
+        }) : <Card>{pq.trim() ? <NoResult /> : <Empty />}</Card>}
       </RGrid>
     )}</Screen>;
 }
