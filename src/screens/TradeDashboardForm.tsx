@@ -75,12 +75,16 @@ export function TradeDashboardForm({ mode, onDone }: TradeDashboardFormProps) {
   const [itemHighlightIdx, setItemHighlightIdx] = useState(0);
 
   // Additional costs (Transport, Landing)
-  const [transportCost, setTransportCost] = useState('500');
-  const [landingCost, setLandingCost] = useState('500');
+  const [transportCost, setTransportCost] = useState('0');
+  const [landingCost, setLandingCost] = useState('0');
 
   // Payments (Cash, Bank)
-  const [cashPaid, setCashPaid] = useState('3000');
+  const [cashPaid, setCashPaid] = useState('0');
   const [bankPaid, setBankPaid] = useState('0');
+
+  // Split Confirmation Modal state
+  const [reviewSplitOpen, setReviewSplitOpen] = useState(false);
+  const [submitting, setSubmitting] = useState(false);
 
   // Success modal state
   const [successTxn, setSuccessTxn] = useState<{ id: string; invoiceNo: string; total: number } | null>(null);
@@ -373,11 +377,11 @@ export function TradeDashboardForm({ mode, onDone }: TradeDashboardFormProps) {
     landingCost, cashPaid, bankPaid
   ]);
 
-  // Submission handler
-  const handleComplete = useCallback(async () => {
+  // Open Split Confirmation Modal after preliminary validation
+  const handleOpenConfirm = useCallback(() => {
     const validLines = items.filter(it => it.name.trim() && parseNum(it.qty) > 0);
     if (!validLines.length) {
-      Alert.alert(t('invalid'), 'অনুগ্রহ করে অন্তত একটি পণ্যের নাম ও পরিমাণ (কেজি) দিন।');
+      Alert.alert(t('invalid'), 'অনুগ্রহ করে অন্তত একটি পণ্যের নাম ও পরিমাণ (কেজি/বস্তা) দিন।');
       return;
     }
 
@@ -386,11 +390,24 @@ export function TradeDashboardForm({ mode, onDone }: TradeDashboardFormProps) {
       return;
     }
 
+    setReviewSplitOpen(true);
+  }, [items, isSale, selectedPartyId, parties, t]);
+
+  // Final submission handler that creates the invoice
+  const executeTransaction = useCallback(async () => {
+    if (submitting) return;
+    const validLines = items.filter(it => it.name.trim() && parseNum(it.qty) > 0);
+    if (!validLines.length) {
+      Alert.alert(t('invalid'), 'অনুগ্রহ করে অন্তত একটি পণ্যের নাম ও পরিমাণ দিন।');
+      return;
+    }
+
     const effectivePartyId = selectedPartyId || (parties[0]?.id ?? '');
     const cashAcc = moneyAccounts.find(a => a.type === 'cash') || moneyAccounts[0];
     const bankAcc = moneyAccounts.find(a => a.type === 'bank') || moneyAccounts[0];
     const chosenAccountId = numBank > 0 ? bankAcc?.id : cashAcc?.id;
 
+    setSubmitting(true);
     try {
       const processedLines = validLines.map(l => {
         let pId = l.productId;
@@ -466,6 +483,7 @@ export function TradeDashboardForm({ mode, onDone }: TradeDashboardFormProps) {
         localStorage.removeItem(`${DRAFT_STORAGE_KEY_PREFIX}${mode}`);
       }
 
+      setReviewSplitOpen(false);
       setSuccessTxn({
         id: res.id,
         invoiceNo: res.invoiceNo || memoNo,
@@ -473,11 +491,13 @@ export function TradeDashboardForm({ mode, onDone }: TradeDashboardFormProps) {
       });
     } catch (err) {
       Alert.alert(t('invalid'), err instanceof Error ? err.message : 'লেনদেন সম্পন্ন করা সম্ভব হয়নি।');
+    } finally {
+      setSubmitting(false);
     }
   }, [
     items, isSale, selectedPartyId, parties, moneyAccounts, numBank, products,
     totalPaid, dueDate, billDate, sale, purchase, numTransport, orderNo,
-    numLanding, mode, memoNo, totalProductValue, saveExpense, t
+    numLanding, mode, memoNo, totalProductValue, saveExpense, t, submitting
   ]);
 
   // Global Keyboard Shortcuts Listener
@@ -1132,171 +1152,7 @@ export function TradeDashboardForm({ mode, onDone }: TradeDashboardFormProps) {
           </TouchableOpacity>
         </View>
 
-        {/* ROW 3: TWO COLUMNS (অতিরিক্ত খরচ & হিসাব বিবরণ) */}
-        <View style={[styles.twoColRow, { marginTop: 16 }]}>
-          {/* Left Card: অতিরিক্ত খরচ */}
-          <View style={[styles.card3D, styles.colLeft]}>
-            <View style={styles.cardHeaderFlex}>
-              <View style={[styles.cardHeaderDot, { backgroundColor: '#F59E0B' }]} />
-              <Text style={styles.cardHeaderTitle}>অতিরিক্ত খরচ</Text>
-            </View>
-
-            {/* পরিবহন খরচ (৳) */}
-            <View style={styles.calcRow}>
-              <View style={styles.calcLabelRow}>
-                <View style={[styles.calcDot, { backgroundColor: '#0284C7' }]} />
-                <Text style={styles.calcLabel}>পরিবহন খরচ (৳)</Text>
-              </View>
-              <TextInput
-                ref={el => (inputRefs.current['transportCost'] = el)}
-                value={transportCost}
-                onChangeText={setTransportCost}
-                onFocus={() => setFocusedField('transportCost')}
-                onSubmitEditing={() => focusNextField('transportCost')}
-                style={[
-                  styles.calcInputDebossed,
-                  isInputFocused('transportCost') && styles.inputFocusedGlow,
-                ]}
-                placeholder="500"
-                keyboardType="numeric"
-                returnKeyType="next"
-              />
-            </View>
-
-            {/* ল্যান্ডিং খরচ (৳) */}
-            <View style={styles.calcRow}>
-              <View style={styles.calcLabelRow}>
-                <View style={[styles.calcDot, { backgroundColor: '#10B981' }]} />
-                <Text style={styles.calcLabel}>ল্যান্ডিং খরচ (৳)</Text>
-              </View>
-              <TextInput
-                ref={el => (inputRefs.current['landingCost'] = el)}
-                value={landingCost}
-                onChangeText={setLandingCost}
-                onFocus={() => setFocusedField('landingCost')}
-                onSubmitEditing={() => focusNextField('landingCost')}
-                style={[
-                  styles.calcInputDebossed,
-                  isInputFocused('landingCost') && styles.inputFocusedGlow,
-                ]}
-                placeholder="500"
-                keyboardType="numeric"
-                returnKeyType="next"
-              />
-            </View>
-          </View>
-
-          {/* Right Card: হিসাব বিবরণ */}
-          <View style={[styles.card3D, styles.colRight]}>
-            <View style={styles.cardHeaderFlex}>
-              <View style={[styles.cardHeaderDot, { backgroundColor: '#1c70b9' }]} />
-              <Text style={styles.cardHeaderTitle}>হিসাব বিবরণ</Text>
-            </View>
-
-            {/* মোট পণ্যের মূল্য (৳) */}
-            <View style={styles.calcRow}>
-              <Text style={styles.calcLabel}>{isSale ? 'মোট বিক্রয় মূল্য (৳)' : 'মোট পণ্যের মূল্য (৳)'}</Text>
-              <View style={styles.readOnlySunkenBox}>
-                <Text style={styles.readOnlySunkenText}>
-                  {toBnDigits(String(Math.round(totalProductValue)))}
-                </Text>
-              </View>
-            </View>
-
-            {/* মোট ক্রয় খরচ (৳) (Only on Sale) */}
-            {isSale && (
-              <View style={styles.calcRow}>
-                <Text style={styles.calcLabel}>মোট ক্রয় খরচ (৳)</Text>
-                <View style={[styles.readOnlySunkenBox, { backgroundColor: '#FFFBEB', borderColor: '#FDE68A' }]}>
-                  <Text style={[styles.readOnlySunkenText, { color: '#B45309' }]}>
-                    {toBnDigits(String(Math.round(totalEstimatedCost)))}
-                  </Text>
-                </View>
-              </View>
-            )}
-
-            {/* প্রত্যাশিত লাভ (৳) (Only on Sale) */}
-            {isSale && (
-              <View style={styles.calcRow}>
-                <Text style={styles.calcLabel}>প্রত্যাশিত লাভ (৳)</Text>
-                <View style={[
-                  styles.readOnlySunkenBox,
-                  estimatedProfit >= 0
-                    ? { backgroundColor: '#ECFDF5', borderColor: '#A7F3D0' }
-                    : { backgroundColor: '#FEF2F2', borderColor: '#FECACA' }
-                ]}>
-                  <Text style={[
-                    styles.readOnlySunkenText,
-                    { color: estimatedProfit >= 0 ? '#047857' : '#DC2626' }
-                  ]}>
-                    {estimatedProfit >= 0 ? '+' : ''}{toBnDigits(String(Math.round(estimatedProfit)))}
-                  </Text>
-                </View>
-              </View>
-            )}
-
-            {/* পূর্বের বাকি (৳) */}
-            <View style={styles.calcRow}>
-              <Text style={styles.calcLabel}>পূর্বের বাকি (৳)</Text>
-              <View style={[styles.readOnlySunkenBox, { backgroundColor: '#FFF5F5', borderColor: '#FED7D7' }]}>
-                <Text style={[styles.readOnlySunkenText, { color: '#C53030' }]}>
-                  {toBnDigits(String(Math.round(prevDue)).replace(/\B(?=(\d{3})+(?!\d))/g, ','))}
-                </Text>
-              </View>
-            </View>
-
-            {/* ক্যাশ পরিশোধ (৳) */}
-            <View style={styles.calcRow}>
-              <Text style={styles.calcLabel}>ক্যাশ পরিশোধ (৳)</Text>
-              <TextInput
-                ref={el => (inputRefs.current['cashPaid'] = el)}
-                value={cashPaid}
-                onChangeText={setCashPaid}
-                onFocus={() => setFocusedField('cashPaid')}
-                onSubmitEditing={() => focusNextField('cashPaid')}
-                style={[
-                  styles.calcInputDebossed,
-                  isInputFocused('cashPaid') && styles.inputFocusedGlow,
-                ]}
-                placeholder="3000"
-                keyboardType="numeric"
-                returnKeyType="next"
-              />
-            </View>
-
-            {/* ব্যাংক পরিশোধ (৳) */}
-            <View style={styles.calcRow}>
-              <Text style={styles.calcLabel}>ব্যাংক পরিশোধ (৳)</Text>
-              <TextInput
-                ref={el => (inputRefs.current['bankPaid'] = el)}
-                value={bankPaid}
-                onChangeText={setBankPaid}
-                onFocus={() => setFocusedField('bankPaid')}
-                onSubmitEditing={() => handleComplete()}
-                style={[
-                  styles.calcInputDebossed,
-                  isInputFocused('bankPaid') && styles.inputFocusedGlow,
-                ]}
-                placeholder="0"
-                keyboardType="numeric"
-                returnKeyType="done"
-              />
-            </View>
-
-            {/* Flashy Grand Total Banner (Skeuomorphic Azure-Cyan) */}
-            <View style={styles.grandTotalBanner3D}>
-              <View>
-                <Text style={styles.grandTotalLabel}>সর্বমোট (৳)</Text>
-                <Text style={styles.grandTotalSub}>নিট প্রদেয় বা অবশিষ্ট বাকি</Text>
-              </View>
-              <Text style={styles.grandTotalValue}>
-                {toBnDigits(String(Math.round(grandTotal)).replace(/\B(?=(\d{3})+(?!\d))/g, ','))}
-              </Text>
-            </View>
-          </View>
-        </View>
-
-        {/* ROW 4: FOOTER ACTION BUTTONS */}
+        {/* ACTION BUTTON TO CONFIRM AND OPEN SPLIT REVIEW MODAL */}
         <View style={styles.footerRow}>
           <View style={styles.footerLeftButtons}>
             <TouchableOpacity
@@ -1319,17 +1175,264 @@ export function TradeDashboardForm({ mode, onDone }: TradeDashboardFormProps) {
           </View>
 
           <TouchableOpacity
-            onPress={handleComplete}
+            onPress={handleOpenConfirm}
             style={styles.completeButton3D}
-            accessibilityLabel="ক্রয় সম্পন্ন করুন (Ctrl+S / F8)"
+            accessibilityLabel={isSale ? 'বিক্রয় নিশ্চিত করুন' : 'ক্রয় নিশ্চিত করুন'}
           >
             <AppIcon name={isSale ? icons.sale : icons.purchase} size={22} iconColor="#fff" />
             <Text style={styles.completeButton3DText}>
-              {isSale ? 'বিক্রয় সম্পন্ন করুন' : 'ক্রয় সম্পন্ন করুন'}
+              {isSale ? 'বিক্রয় নিশ্চিত করুন' : 'ক্রয় নিশ্চিত করুন'}
             </Text>
           </TouchableOpacity>
         </View>
       </ScrollView>
+
+      {/* SPLIT CONFIRMATION REVIEW MODAL */}
+      <Modal
+        visible={reviewSplitOpen}
+        transparent
+        animationType="fade"
+        onRequestClose={() => setReviewSplitOpen(false)}
+      >
+        <TouchableOpacity
+          activeOpacity={1}
+          onPress={() => setReviewSplitOpen(false)}
+          style={styles.modalOverlay}
+        >
+          <TouchableOpacity
+            activeOpacity={1}
+            style={[styles.shortcutModalBox, { maxWidth: 960, width: '95%', maxHeight: '90%' }]}
+          >
+            {/* Modal Header */}
+            <View style={styles.modalHeader3D}>
+              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10 }}>
+                <AppIcon name={isSale ? icons.sale : icons.purchase} size={24} iconColor="#fff" />
+                <Text style={styles.modalTitle}>
+                  {isSale ? 'বিক্রয় নিশ্চিতকরণ ও বিবরণ পর্যালোচনা' : 'ক্রয় নিশ্চিতকরণ ও বিবরণ পর্যালোচনা'}
+                </Text>
+              </View>
+              <TouchableOpacity
+                onPress={() => setReviewSplitOpen(false)}
+                style={{ padding: 6 }}
+                accessibilityLabel="বন্ধ করুন"
+              >
+                <AppIcon name={icons.cancel} size={22} iconColor="#fff" />
+              </TouchableOpacity>
+            </View>
+
+            {/* Split Content: Two Columns */}
+            <ScrollView style={{ padding: 16 }} contentContainerStyle={{ paddingBottom: 16 }}>
+              <View style={{ flexDirection: Platform.OS === 'web' ? 'row' : 'column', gap: 16 }}>
+                
+                {/* LEFT SIDE: Products List with prices, costs, units */}
+                <View style={{ flex: 1.2, backgroundColor: '#FFFFFF', borderRadius: 12, padding: 14, borderWidth: 1.5, borderColor: '#CBD5E1' }}>
+                  <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, marginBottom: 12, borderBottomWidth: 1.5, borderBottomColor: '#E2E8F0', paddingBottom: 8 }}>
+                    <AppIcon name={icons.stock} size={20} iconColor="#1c70b9" />
+                    <Text style={{ fontSize: 16, fontWeight: '700', color: '#0F1E36' }}>পণ্যের তালিকা ও দর</Text>
+                  </View>
+
+                  {items.filter(it => it.name.trim()).map((it, idx) => {
+                    const q = parseNum(it.qty) || 0;
+                    const r = parseNum(it.rate) || 0;
+                    const pr = parseNum(it.purchaseRate) || 0;
+                    const rowTotal = Math.round(q * r);
+                    const prod = products.find(p => p.id === it.productId || p.name === it.name);
+                    const bagKg = prod ? kgPerUnit(prod, it.unit || 'medium') : ((it.unit || 'medium') === 'kg' ? 1 : 50);
+
+                    return (
+                      <View
+                        key={it.id || idx}
+                        style={{
+                          backgroundColor: '#F8FAFC',
+                          borderRadius: 10,
+                          padding: 12,
+                          marginBottom: 8,
+                          borderWidth: 1,
+                          borderColor: '#E2E8F0',
+                        }}
+                      >
+                        <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 4 }}>
+                          <Text style={{ fontSize: 16, fontWeight: '700', color: '#1E293B' }}>{it.name}</Text>
+                          <Text style={{ fontSize: 16, fontWeight: '800', color: '#1c70b9' }}>৳{toBnDigits(String(rowTotal))}</Text>
+                        </View>
+
+                        <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 12, marginTop: 4 }}>
+                          <Text style={{ fontSize: 13, color: '#475569' }}>
+                            একক: <Text style={{ fontWeight: '700' }}>{(it.unit || 'medium') === 'kg' ? 'কেজি' : `বস্তা (${toBnDigits(String(bagKg))} কেজি)`}</Text>
+                          </Text>
+                          <Text style={{ fontSize: 13, color: '#475569' }}>
+                            পরিমাণ: <Text style={{ fontWeight: '700' }}>{toBnDigits(String(q))}</Text>
+                          </Text>
+                          <Text style={{ fontSize: 13, color: '#475569' }}>
+                            দর: <Text style={{ fontWeight: '700' }}>৳{toBnDigits(String(r))}</Text>
+                          </Text>
+                          {isSale && pr > 0 ? (
+                            <Text style={{ fontSize: 13, color: '#B45309' }}>
+                              ক্রয় খরচ: <Text style={{ fontWeight: '700' }}>৳{toBnDigits(String(pr))}</Text>
+                            </Text>
+                          ) : null}
+                        </View>
+                      </View>
+                    );
+                  })}
+
+                  <View style={{ marginTop: 8, paddingTop: 10, borderTopWidth: 1.5, borderTopColor: '#E2E8F0', flexDirection: 'row', justifyContent: 'space-between' }}>
+                    <Text style={{ fontSize: 15, fontWeight: '700', color: '#334155' }}>মোট পণ্যের মূল্য:</Text>
+                    <Text style={{ fontSize: 17, fontWeight: '800', color: '#0F172A' }}>৳{toBnDigits(String(Math.round(totalProductValue)))}</Text>
+                  </View>
+
+                  {isSale ? (
+                    <View style={{ marginTop: 4, flexDirection: 'row', justifyContent: 'space-between' }}>
+                      <Text style={{ fontSize: 14, color: '#475569' }}>মোট আনুমানিক ক্রয় খরচ:</Text>
+                      <Text style={{ fontSize: 15, fontWeight: '700', color: '#B45309' }}>৳{toBnDigits(String(Math.round(totalEstimatedCost)))}</Text>
+                    </View>
+                  ) : null}
+
+                  {isSale ? (
+                    <View style={{ marginTop: 4, flexDirection: 'row', justifyContent: 'space-between' }}>
+                      <Text style={{ fontSize: 14, color: '#475569' }}>প্রত্যাশিত লাভ:</Text>
+                      <Text style={{ fontSize: 15, fontWeight: '700', color: estimatedProfit >= 0 ? '#15803D' : '#DC2626' }}>
+                        {estimatedProfit >= 0 ? '+' : ''}৳{toBnDigits(String(Math.round(estimatedProfit)))}
+                      </Text>
+                    </View>
+                  ) : null}
+                </View>
+
+                {/* RIGHT SIDE: Other Details (Party, Date, Memo, Payments, Final Total) */}
+                <View style={{ flex: 1, backgroundColor: '#FFFFFF', borderRadius: 12, padding: 14, borderWidth: 1.5, borderColor: '#CBD5E1', justifyContent: 'space-between' }}>
+                  <View>
+                    <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, marginBottom: 12, borderBottomWidth: 1.5, borderBottomColor: '#E2E8F0', paddingBottom: 8 }}>
+                      <AppIcon name={icons.accounts} size={20} iconColor="#1c70b9" />
+                      <Text style={{ fontSize: 16, fontWeight: '700', color: '#0F1E36' }}>লেনদেন ও পার্টির তথ্য</Text>
+                    </View>
+
+                    <View style={{ gap: 8 }}>
+                      <View style={{ flexDirection: 'row', justifyContent: 'space-between' }}>
+                        <Text style={{ fontSize: 14, color: '#64748B' }}>{isSale ? 'কাস্টমার' : 'সরবরাহকারী'}:</Text>
+                        <Text style={{ fontSize: 15, fontWeight: '700', color: '#0F172A' }}>{partyName || 'ক্যাশ'}</Text>
+                      </View>
+                      {partyMobile ? (
+                        <View style={{ flexDirection: 'row', justifyContent: 'space-between' }}>
+                          <Text style={{ fontSize: 14, color: '#64748B' }}>মোবাইল:</Text>
+                          <Text style={{ fontSize: 14, color: '#334155' }}>{partyMobile}</Text>
+                        </View>
+                      ) : null}
+                      <View style={{ flexDirection: 'row', justifyContent: 'space-between' }}>
+                        <Text style={{ fontSize: 14, color: '#64748B' }}>তারিখ:</Text>
+                        <Text style={{ fontSize: 14, fontWeight: '600', color: '#334155' }}>{billDate}</Text>
+                      </View>
+                      <View style={{ flexDirection: 'row', justifyContent: 'space-between' }}>
+                        <Text style={{ fontSize: 14, color: '#64748B' }}>মেমো নং:</Text>
+                        <Text style={{ fontSize: 14, fontWeight: '700', color: '#1c70b9' }}>{memoNo}</Text>
+                      </View>
+                      {isSale && orderNo ? (
+                        <View style={{ flexDirection: 'row', justifyContent: 'space-between' }}>
+                          <Text style={{ fontSize: 14, color: '#64748B' }}>অর্ডার নং:</Text>
+                          <Text style={{ fontSize: 14, color: '#334155' }}>{orderNo}</Text>
+                        </View>
+                      ) : null}
+
+                      {/* Payment inputs if user wants to record payment right here */}
+                      <View style={{ marginTop: 8, paddingTop: 8, borderTopWidth: 1, borderTopColor: '#F1F5F9' }}>
+                        <Text style={{ fontSize: 13, fontWeight: '700', color: '#475569', marginBottom: 6 }}>পরিশোধের পরিমাণ</Text>
+                        <View style={{ flexDirection: 'row', gap: 8 }}>
+                          <View style={{ flex: 1 }}>
+                            <Text style={{ fontSize: 12, color: '#64748B', marginBottom: 2 }}>ক্যাশ (৳)</Text>
+                            <TextInput
+                              value={cashPaid}
+                              onChangeText={setCashPaid}
+                              keyboardType="numeric"
+                              placeholder="0"
+                              style={{ borderWidth: 1.5, borderColor: '#CBD5E1', borderRadius: 8, paddingHorizontal: 8, height: 38, fontSize: 14, backgroundColor: '#F8FAFC' }}
+                            />
+                          </View>
+                          <View style={{ flex: 1 }}>
+                            <Text style={{ fontSize: 12, color: '#64748B', marginBottom: 2 }}>ব্যাংক (৳)</Text>
+                            <TextInput
+                              value={bankPaid}
+                              onChangeText={setBankPaid}
+                              keyboardType="numeric"
+                              placeholder="0"
+                              style={{ borderWidth: 1.5, borderColor: '#CBD5E1', borderRadius: 8, paddingHorizontal: 8, height: 38, fontSize: 14, backgroundColor: '#F8FAFC' }}
+                            />
+                          </View>
+                        </View>
+                      </View>
+
+                      {/* Additional Costs inputs */}
+                      <View style={{ marginTop: 6 }}>
+                        <Text style={{ fontSize: 13, fontWeight: '700', color: '#475569', marginBottom: 6 }}>অতিরিক্ত খরচ (ঐচ্ছিক)</Text>
+                        <View style={{ flexDirection: 'row', gap: 8 }}>
+                          <View style={{ flex: 1 }}>
+                            <Text style={{ fontSize: 12, color: '#64748B', marginBottom: 2 }}>পরিবহন (৳)</Text>
+                            <TextInput
+                              value={transportCost}
+                              onChangeText={setTransportCost}
+                              keyboardType="numeric"
+                              placeholder="0"
+                              style={{ borderWidth: 1.5, borderColor: '#CBD5E1', borderRadius: 8, paddingHorizontal: 8, height: 38, fontSize: 14, backgroundColor: '#F8FAFC' }}
+                            />
+                          </View>
+                          <View style={{ flex: 1 }}>
+                            <Text style={{ fontSize: 12, color: '#64748B', marginBottom: 2 }}>ল্যান্ডিং (৳)</Text>
+                            <TextInput
+                              value={landingCost}
+                              onChangeText={setLandingCost}
+                              keyboardType="numeric"
+                              placeholder="0"
+                              style={{ borderWidth: 1.5, borderColor: '#CBD5E1', borderRadius: 8, paddingHorizontal: 8, height: 38, fontSize: 14, backgroundColor: '#F8FAFC' }}
+                            />
+                          </View>
+                        </View>
+                      </View>
+                    </View>
+                  </View>
+
+                  {/* Summary & Create Invoice Button */}
+                  <View style={{ marginTop: 14, paddingTop: 12, borderTopWidth: 1.5, borderTopColor: '#E2E8F0' }}>
+                    <View style={{ flexDirection: 'row', justifyContent: 'space-between', marginBottom: 6 }}>
+                      <Text style={{ fontSize: 14, color: '#64748B' }}>পূর্বের বাকি:</Text>
+                      <Text style={{ fontSize: 15, fontWeight: '600', color: '#DC2626' }}>৳{toBnDigits(String(Math.round(prevDue)))}</Text>
+                    </View>
+                    <View style={{ flexDirection: 'row', justifyContent: 'space-between', marginBottom: 6 }}>
+                      <Text style={{ fontSize: 14, color: '#64748B' }}>মোট পরিশোধ:</Text>
+                      <Text style={{ fontSize: 15, fontWeight: '700', color: '#15803D' }}>৳{toBnDigits(String(Math.round(totalPaid)))}</Text>
+                    </View>
+                    <View style={{ flexDirection: 'row', justifyContent: 'space-between', marginBottom: 12, backgroundColor: '#EFF6FF', padding: 8, borderRadius: 8 }}>
+                      <Text style={{ fontSize: 15, fontWeight: '700', color: '#1E3A8A' }}>সর্বমোট নিট বাকি:</Text>
+                      <Text style={{ fontSize: 18, fontWeight: '800', color: '#1E3A8A' }}>৳{toBnDigits(String(Math.round(grandTotal)))}</Text>
+                    </View>
+
+                    {/* CONFIRM AND CREATE INVOICE BUTTON */}
+                    <TouchableOpacity
+                      onPress={executeTransaction}
+                      disabled={submitting}
+                      style={{
+                        backgroundColor: '#16A34A',
+                        borderRadius: 12,
+                        minHeight: 48,
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                        flexDirection: 'row',
+                        gap: 8,
+                        borderBottomWidth: 3,
+                        borderBottomColor: '#15803D',
+                        cursor: 'pointer' as any,
+                      }}
+                    >
+                      <AppIcon name={icons.print} size={20} iconColor="#FFFFFF" />
+                      <Text style={{ color: '#FFFFFF', fontSize: 16, fontWeight: '800' }}>
+                        {submitting ? 'ইনভয়েস তৈরি হচ্ছে...' : 'নিশ্চিত করুন ও ইনভয়েস তৈরি করুন'}
+                      </Text>
+                    </TouchableOpacity>
+                  </View>
+                </View>
+
+              </View>
+            </ScrollView>
+          </TouchableOpacity>
+        </TouchableOpacity>
+      </Modal>
 
       {/* SUCCESS INVOICE MODAL */}
       {successTxn && (
