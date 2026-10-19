@@ -34,6 +34,32 @@ interface TradeDashboardFormProps {
 }
 
 const DRAFT_STORAGE_KEY_PREFIX = 'chaler_arot_draft_';
+const SESSION_BILL_DATE_KEY = 'chaler_arot_session_bill_date';
+let inMemorySessionBillDate = '';
+
+export const getSessionBillDate = (): string => {
+  try {
+    if (typeof window !== 'undefined' && window.sessionStorage) {
+      const stored = window.sessionStorage.getItem(SESSION_BILL_DATE_KEY);
+      if (stored) return stored;
+    }
+  } catch {}
+  if (inMemorySessionBillDate) return inMemorySessionBillDate;
+  const d = new Date();
+  const day = String(d.getDate()).padStart(2, '0');
+  const month = String(d.getMonth() + 1).padStart(2, '0');
+  const year = d.getFullYear();
+  return `${day}/${month}/${year}`;
+};
+
+export const setSessionBillDate = (val: string): void => {
+  inMemorySessionBillDate = val;
+  try {
+    if (typeof window !== 'undefined' && window.sessionStorage) {
+      window.sessionStorage.setItem(SESSION_BILL_DATE_KEY, val);
+    }
+  } catch {}
+};
 
 export function TradeDashboardForm({ mode, onDone }: TradeDashboardFormProps) {
   const isSale = mode === 'sale';
@@ -45,7 +71,7 @@ export function TradeDashboardForm({ mode, onDone }: TradeDashboardFormProps) {
   const parties: Party[] = isSale ? customers : vendors;
 
   // Active focus tracking for skeuomorphic glowing ring
-  const [focusedField, setFocusedField] = useState<string>('orderNo');
+  const [focusedField, setFocusedField] = useState<string>('memoNo');
 
   // Input refs for keyboard navigation
   const inputRefs = useRef<Record<string, TextInput | null>>({});
@@ -63,9 +89,12 @@ export function TradeDashboardForm({ mode, onDone }: TradeDashboardFormProps) {
   const [partyDropdownOpen, setPartyDropdownOpen] = useState(false);
   const [partyHighlightIdx, setPartyHighlightIdx] = useState(0);
 
-  // Dates
-  const [billDate, setBillDate] = useState('20/09/2026');
-  const [dueDate, setDueDate] = useState('20/09/2026');
+  // Date persists in session until changed by user
+  const [billDate, setBillDateState] = useState(() => getSessionBillDate());
+  const setBillDate = useCallback((val: string) => {
+    setBillDateState(val);
+    setSessionBillDate(val);
+  }, []);
 
   // Products table items
   const [items, setItems] = useState<FormItemLine[]>([
@@ -391,16 +420,9 @@ export function TradeDashboardForm({ mode, onDone }: TradeDashboardFormProps) {
   // Keyboard navigation sequence
   const getNavSequence = useCallback((): string[] => {
     const seq: string[] = [];
-    if (isSale) seq.push('orderNo');
     seq.push('memoNo');
     seq.push('partyCode');
-    if (isSale) {
-      seq.push('partyName');
-      seq.push('partyMobile');
-      seq.push('partyAddress');
-    }
     seq.push('billDate');
-    seq.push('dueDate');
 
     items.forEach((_, idx) => {
       seq.push(`code_${idx}`);
@@ -478,7 +500,6 @@ export function TradeDashboardForm({ mode, onDone }: TradeDashboardFormProps) {
       partyMobile,
       partyAddress,
       billDate,
-      dueDate,
       items,
       transportCost,
       landingCost,
@@ -497,7 +518,7 @@ export function TradeDashboardForm({ mode, onDone }: TradeDashboardFormProps) {
     }
   }, [
     mode, orderNo, memoNo, selectedPartyId, partyCode, partyName, partyMobile,
-    partyAddress, billDate, dueDate, items, transportCost,
+    partyAddress, billDate, items, transportCost,
     landingCost, cashPaid, bankPaid
   ]);
 
@@ -509,8 +530,8 @@ export function TradeDashboardForm({ mode, onDone }: TradeDashboardFormProps) {
       return;
     }
 
-    if (!isSale && !selectedPartyId && !parties.length) {
-      Alert.alert(t('invalid'), 'অনুগ্রহ করে সরবরাহকারী নির্বাচন করুন।');
+    if (!selectedPartyId && !parties.length) {
+      Alert.alert(t('invalid'), isSale ? 'অনুগ্রহ করে কাস্টমার নির্বাচন করুন।' : 'অনুগ্রহ করে সরবরাহকারী নির্বাচন করুন।');
       return;
     }
 
@@ -569,7 +590,6 @@ export function TradeDashboardForm({ mode, onDone }: TradeDashboardFormProps) {
           discount: 0,
           paid: totalPaid,
           accountId: chosenAccountId,
-          next: dueDate !== billDate ? dueDate.split('/').reverse().join('-') : undefined,
         });
       } else {
         res = await purchase({
@@ -577,7 +597,6 @@ export function TradeDashboardForm({ mode, onDone }: TradeDashboardFormProps) {
           lines: processedLines,
           paid: totalPaid,
           accountId: chosenAccountId,
-          next: dueDate !== billDate ? dueDate.split('/').reverse().join('-') : undefined,
         });
       }
 
@@ -589,7 +608,7 @@ export function TradeDashboardForm({ mode, onDone }: TradeDashboardFormProps) {
           amount: numTransport,
           accountId: chosenAccountId,
           date: todayISO,
-          note: `${isSale ? 'বিক্রয়' : 'ক্রয়'} #${orderNo} পরিবহন খরচ`,
+          note: `${isSale ? 'বিক্রয়' : 'ক্রয়'} #${memoNo} পরিবহন খরচ`,
         }).catch(() => {});
       }
       if (numLanding > 0 && chosenAccountId) {
@@ -599,7 +618,7 @@ export function TradeDashboardForm({ mode, onDone }: TradeDashboardFormProps) {
           amount: numLanding,
           accountId: chosenAccountId,
           date: todayISO,
-          note: `${isSale ? 'বিক্রয়' : 'ক্রয়'} #${orderNo} ল্যান্ডিং খরচ`,
+          note: `${isSale ? 'বিক্রয়' : 'ক্রয়'} #${memoNo} ল্যান্ডিং খরচ`,
         }).catch(() => {});
       }
 
@@ -620,7 +639,7 @@ export function TradeDashboardForm({ mode, onDone }: TradeDashboardFormProps) {
     }
   }, [
     items, isSale, selectedPartyId, parties, moneyAccounts, numBank, products,
-    totalPaid, dueDate, billDate, sale, purchase, numTransport, orderNo,
+    totalPaid, billDate, sale, purchase, numTransport,
     numLanding, mode, memoNo, totalProductValue, saveExpense, t, submitting
   ]);
 
@@ -762,55 +781,28 @@ export function TradeDashboardForm({ mode, onDone }: TradeDashboardFormProps) {
               <Text style={styles.cardHeaderTitle}>{isSale ? 'বিক্রয়ের তথ্য' : 'ক্রয়ের তথ্য'}</Text>
             </View>
 
-            {/* Order No & Memo No */}
-            <View style={styles.formRow}>
-              {isSale ? (
-                <View style={styles.formCol}>
-                  <Text style={styles.fieldLabel}>বিক্রয় অর্ডার নং</Text>
-                  <View style={[styles.inputDebossed, isInputFocused('orderNo') && styles.inputFocusedGlow]}>
-                    <TextInput
-                      ref={el => (inputRefs.current['orderNo'] = el)}
-                      value={orderNo}
-                      onChangeText={setOrderNo}
-                      onFocus={() => setFocusedField('orderNo')}
-                      onSubmitEditing={() => focusNextField('orderNo')}
-                      style={styles.textInput}
-                      placeholder="303"
-                      returnKeyType="next"
-                    />
-                    <TouchableOpacity
-                      onPress={() => copyToClipboard(orderNo, 'অর্ডার নং')}
-                      style={styles.tactileInnerBtn}
-                      accessibilityLabel="কপি করুন"
-                    >
-                      <AppIcon name={icons.copy} size={18} iconColor="#1c70b9" />
-                    </TouchableOpacity>
-                  </View>
-                </View>
-              ) : null}
-
-              <View style={[styles.formCol, !isSale && { flex: 1 }]}>
-                <Text style={styles.fieldLabel}>{isSale ? 'বিক্রয় মেমো নং' : 'ক্রয় মেমো নং'}</Text>
-                <View style={[styles.inputDebossed, isInputFocused('memoNo') && styles.inputFocusedGlow]}>
-                  <TextInput
-                    ref={el => (inputRefs.current['memoNo'] = el)}
-                    value={memoNo}
-                    onChangeText={setMemoNo}
-                    onFocus={() => setFocusedField('memoNo')}
-                    onSubmitEditing={() => focusNextField('memoNo')}
-                    style={styles.textInput}
-                    placeholder="90876"
-                    keyboardType="numeric"
-                    returnKeyType="next"
-                  />
-                  <TouchableOpacity
-                    onPress={() => copyToClipboard(memoNo, 'মেমো নং')}
-                    style={styles.tactileInnerBtn}
-                    accessibilityLabel="কপি করুন"
-                  >
-                    <AppIcon name={icons.copy} size={18} iconColor="#1c70b9" />
-                  </TouchableOpacity>
-                </View>
+            {/* Memo No */}
+            <View style={styles.formGroup}>
+              <Text style={styles.fieldLabel}>{isSale ? 'বিক্রয় মেমো নং' : 'ক্রয় মেমো নং'}</Text>
+              <View style={[styles.inputDebossed, isInputFocused('memoNo') && styles.inputFocusedGlow]}>
+                <TextInput
+                  ref={el => (inputRefs.current['memoNo'] = el)}
+                  value={memoNo}
+                  onChangeText={setMemoNo}
+                  onFocus={() => setFocusedField('memoNo')}
+                  onSubmitEditing={() => focusNextField('memoNo')}
+                  style={styles.textInput}
+                  placeholder="90876"
+                  keyboardType="numeric"
+                  returnKeyType="next"
+                />
+                <TouchableOpacity
+                  onPress={() => copyToClipboard(memoNo, 'মেমো নং')}
+                  style={styles.tactileInnerBtn}
+                  accessibilityLabel="কপি করুন"
+                >
+                  <AppIcon name={icons.copy} size={18} iconColor="#1c70b9" />
+                </TouchableOpacity>
               </View>
             </View>
 
@@ -920,61 +912,23 @@ export function TradeDashboardForm({ mode, onDone }: TradeDashboardFormProps) {
             </View>
 
             {/* Party Name */}
-            <View style={[styles.formGroup, { position: 'relative', zIndex: 40 }]}>
+            <View style={styles.formGroup}>
               <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 6 }}>
                 <Text style={styles.fieldLabel}>{isSale ? 'কাস্টমারের নাম' : 'সরবরাহকারীর নাম'}</Text>
-                {!isSale && (
-                  <View style={styles.readOnlyBadge}>
-                    <AppIcon name={icons.lock} size={11} iconColor="#64748B" />
-                    <Text style={styles.readOnlyBadgeText}>ডাটাবেজ থেকে</Text>
-                  </View>
-                )}
+                <View style={styles.readOnlyBadge}>
+                  <AppIcon name={icons.lock} size={11} iconColor="#64748B" />
+                  <Text style={styles.readOnlyBadgeText}>ডাটাবেজ থেকে</Text>
+                </View>
               </View>
-              <View style={[
-                styles.inputDebossed,
-                !isSale && styles.inputReadOnly,
-                isInputFocused('partyName') && styles.inputFocusedGlow
-              ]}>
+              <View style={[styles.inputDebossed, styles.inputReadOnly]}>
                 <TextInput
                   ref={el => (inputRefs.current['partyName'] = el)}
                   value={partyName}
-                  editable={isSale}
-                  onChangeText={v => {
-                    setPartyName(v);
-                    setPartyDropdownOpen(true);
-                  }}
-                  onFocus={() => {
-                    if (isSale) {
-                      setFocusedField('partyName');
-                      setPartyDropdownOpen(true);
-                    }
-                  }}
-                  onSubmitEditing={() => {
-                    if (isSale) {
-                      if (partyDropdownOpen && filteredParties[partyHighlightIdx]) {
-                        const p = filteredParties[partyHighlightIdx];
-                        const fullIdx = parties.findIndex(x => x.id === p.id);
-                        onSelectParty(p, fullIdx !== -1 ? fullIdx : partyHighlightIdx);
-                      }
-                      focusNextField('partyName');
-                    }
-                  }}
-                  style={[styles.textInput, !isSale && styles.textInputReadOnly]}
-                  placeholder={isSale ? 'করিম ট্রেডার্স' : 'কোড লিখলে নাম স্বয়ংক্রিয় আসবে'}
-                  placeholderTextColor={!isSale ? '#94A3B8' : '#9BA8B8'}
-                  returnKeyType={isSale ? "next" : undefined}
+                  editable={false}
+                  style={[styles.textInput, styles.textInputReadOnly]}
+                  placeholder="কোড লিখলে নাম স্বয়ংক্রিয় আসবে"
+                  placeholderTextColor="#94A3B8"
                 />
-                {isSale && (
-                  <TouchableOpacity
-                    onPress={() => {
-                      setFocusedField('partyName');
-                      setPartyDropdownOpen(prev => !prev);
-                    }}
-                    style={styles.tactileInnerBtn}
-                  >
-                    <AppIcon name={icons.search} size={18} iconColor="#1c70b9" />
-                  </TouchableOpacity>
-                )}
               </View>
             </View>
 
@@ -982,29 +936,18 @@ export function TradeDashboardForm({ mode, onDone }: TradeDashboardFormProps) {
             <View style={styles.formGroup}>
               <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 6 }}>
                 <Text style={styles.fieldLabel}>মোবাইল নম্বর</Text>
-                {!isSale && (
-                  <View style={styles.readOnlyBadge}>
-                    <Text style={styles.readOnlyBadgeText}>রিড-অনলি</Text>
-                  </View>
-                )}
+                <View style={styles.readOnlyBadge}>
+                  <Text style={styles.readOnlyBadgeText}>রিড-অনলি</Text>
+                </View>
               </View>
-              <View style={[
-                styles.inputDebossed,
-                !isSale && styles.inputReadOnly,
-                isInputFocused('partyMobile') && styles.inputFocusedGlow
-              ]}>
+              <View style={[styles.inputDebossed, styles.inputReadOnly]}>
                 <TextInput
                   ref={el => (inputRefs.current['partyMobile'] = el)}
                   value={partyMobile}
-                  editable={isSale}
-                  onChangeText={setPartyMobile}
-                  onFocus={() => { if (isSale) setFocusedField('partyMobile'); }}
-                  onSubmitEditing={() => { if (isSale) focusNextField('partyMobile'); }}
-                  style={[styles.textInput, !isSale && styles.textInputReadOnly]}
-                  placeholder={isSale ? '017...' : 'মোবাইল নম্বর'}
-                  placeholderTextColor={!isSale ? '#94A3B8' : '#9BA8B8'}
-                  keyboardType="phone-pad"
-                  returnKeyType={isSale ? "next" : undefined}
+                  editable={false}
+                  style={[styles.textInput, styles.textInputReadOnly]}
+                  placeholder="মোবাইল নম্বর"
+                  placeholderTextColor="#94A3B8"
                 />
               </View>
             </View>
@@ -1013,36 +956,20 @@ export function TradeDashboardForm({ mode, onDone }: TradeDashboardFormProps) {
             <View style={styles.formGroup}>
               <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 6 }}>
                 <Text style={styles.fieldLabel}>ঠিকানা</Text>
-                {!isSale && (
-                  <View style={styles.readOnlyBadge}>
-                    <Text style={styles.readOnlyBadgeText}>রিড-অনলি</Text>
-                  </View>
-                )}
+                <View style={styles.readOnlyBadge}>
+                  <Text style={styles.readOnlyBadgeText}>রিড-অনলি</Text>
+                </View>
               </View>
-              <View style={[
-                styles.textareaDebossed,
-                !isSale && styles.inputReadOnly,
-                isInputFocused('partyAddress') && styles.inputFocusedGlow
-              ]}>
+              <View style={[styles.textareaDebossed, styles.inputReadOnly]}>
                 <TextInput
                   ref={el => (inputRefs.current['partyAddress'] = el)}
                   value={partyAddress}
-                  editable={isSale}
-                  onChangeText={setPartyAddress}
-                  onFocus={() => { if (isSale) setFocusedField('partyAddress'); }}
-                  onSubmitEditing={() => { if (isSale) focusNextField('partyAddress'); }}
-                  style={[styles.textareaInput, !isSale && styles.textInputReadOnly]}
-                  placeholder={isSale ? 'ঢাকা' : 'ঠিকানা'}
-                  placeholderTextColor={!isSale ? '#94A3B8' : '#9BA8B8'}
+                  editable={false}
+                  style={[styles.textareaInput, styles.textInputReadOnly]}
+                  placeholder="ঠিকানা"
+                  placeholderTextColor="#94A3B8"
                   multiline
-                  returnKeyType={isSale ? "next" : undefined}
                 />
-                {isSale && (
-                  <View style={styles.textareaCornerGrip}>
-                    <View style={styles.gripLine} />
-                    <View style={[styles.gripLine, { width: 4 }]} />
-                  </View>
-                )}
               </View>
             </View>
           </View>
@@ -1065,30 +992,7 @@ export function TradeDashboardForm({ mode, onDone }: TradeDashboardFormProps) {
                   onFocus={() => setFocusedField('billDate')}
                   onSubmitEditing={() => focusNextField('billDate')}
                   style={styles.textInput}
-                  placeholder="20/09/2026"
-                  returnKeyType="next"
-                />
-                <View style={styles.tactileInnerBtn}>
-                  <AppIcon name={icons.calendar} size={18} iconColor="#1c70b9" />
-                </View>
-              </View>
-            </View>
-
-            {/* Due Date */}
-            <View style={styles.formGroup}>
-              <Text style={styles.fieldLabel}>পরিশোধের শেষ তারিখ</Text>
-              <View style={[styles.inputDebossed, isInputFocused('dueDate') && styles.inputFocusedGlow]}>
-                <TextInput
-                  ref={el => (inputRefs.current['dueDate'] = el)}
-                  value={dueDate}
-                  onChangeText={setDueDate}
-                  onFocus={() => setFocusedField('dueDate')}
-                  onSubmitEditing={() => {
-                    inputRefs.current['code_0']?.focus();
-                    setFocusedField('code_0');
-                  }}
-                  style={styles.textInput}
-                  placeholder="20/09/2026"
+                  placeholder={getSessionBillDate()}
                   returnKeyType="next"
                 />
                 <View style={styles.tactileInnerBtn}>
