@@ -20,7 +20,7 @@ ENV EXPO_PUBLIC_API_URL=$EXPO_PUBLIC_API_URL
 # Export static web bundle
 RUN npx expo export -p web && \
     cp web/LiPurnoPran*.ttf dist/ && \
-    sed -i '/<head>/a <style>@font-face{font-family:"PurnoPran";src:url("/LiPurnoPran.ttf") format("truetype");font-weight:normal;font-style:normal;}@font-face{font-family:"PurnoPran";src:url("/LiPurnoPran-Italic.ttf") format("truetype");font-weight:normal;font-style:italic;}@font-face{font-family:"PurnoPran";src:url("/LiPurnoPran.ttf") format("truetype");font-weight:bold;font-style:normal;}*,*::before,*::after,html,body,input,button,textarea,select,div,span,p{font-family:"PurnoPran",sans-serif !important;}</style>' dist/index.html
+    sed -i '/<head>/a <style>@font-face{font-family:"PurnoPran";src:url("/LiPurnoPran.ttf") format("truetype");font-weight:normal;font-style:normal;}@font-face{font-family:"PurnoPran";src:url("/LiPurnoPran-Italic.ttf") format("truetype");font-weight:normal;font-style:italic;}@font-face{font-family:"PurnoPran";src:url("/LiPurnoPran.ttf") format("truetype");font-weight:bold;font-style:normal;}@font-face{font-family:"material-community";src:url("/assets/node_modules/@expo/vector-icons/build/vendor/react-native-vector-icons/Fonts/MaterialCommunityIcons.b62641afc9ab487008e996a5c5865e56.ttf") format("truetype");}html,body,input,button,textarea,select{font-family:"PurnoPran",sans-serif;}*:not([style*="material-community"]):not([class*="material-community"]):not([data-icon]){font-family:inherit;}[style*="material-community"]{font-family:"material-community" !important;}</style>' dist/index.html
 
 # Production web server using Nginx
 FROM nginx:alpine

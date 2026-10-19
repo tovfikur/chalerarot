@@ -9,7 +9,7 @@ export const ICON_SIZE = 22;
 export const TAB_ICON_SIZE = 24;
 
 export function AppIcon({ name, size = ICON_SIZE, iconColor }: { name: IconName; size?: number; iconColor?: string }) {
-  return <MaterialCommunityIcons name={name} size={size} color={iconColor ?? color.text} />;
+  return <MaterialCommunityIcons name={name} size={size} color={iconColor ?? color.text} style={{ fontFamily: 'material-community' }} />;
 }
 
 // Central icon map — change here only if an icon needs swapping.
