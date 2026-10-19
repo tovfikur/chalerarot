@@ -1705,10 +1705,8 @@ const styles = StyleSheet.create({
     backgroundColor: '#F0F6FC',
   },
   contentContainer: {
-    padding: 16,
+    padding: 18,
     paddingBottom: 40,
-    maxWidth: 1400,
-    alignSelf: 'center',
     width: '100%',
   },
   toastContainer: {

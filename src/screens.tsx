@@ -284,9 +284,9 @@ export function Home({ go }: { go?: (r: string) => void } = {}) {
     }
     return null;
   };
-  return (
-    <Screen>
-      {view ? detail() : (
+  if (!view) {
+    return (
+      <View style={{ flex: 1, backgroundColor: color.bg }}>
         <HomeDashboard
           go={go}
           onOpenInvoice={(id) => setInv(id)}
@@ -294,7 +294,15 @@ export function Home({ go }: { go?: (r: string) => void } = {}) {
           onOpenReturn={(id) => setRetV(id)}
           onDrillDown={(v) => setView(v)}
         />
-      )}
+        {inv ? <InvoiceModal kind="sale" id={inv} onClose={() => setInv(null)} /> : null}
+        {rc ? <ReceivableModal id={rc} onClose={() => setRc(null)} /> : null}
+        {retV ? <ReturnModal id={retV} onClose={() => setRetV(null)} /> : null}
+      </View>
+    );
+  }
+  return (
+    <Screen>
+      {detail()}
       {inv ? <InvoiceModal kind="sale" id={inv} onClose={() => setInv(null)} /> : null}
       {rc ? <ReceivableModal id={rc} onClose={() => setRc(null)} /> : null}
       {retV ? <ReturnModal id={retV} onClose={() => setRetV(null)} /> : null}

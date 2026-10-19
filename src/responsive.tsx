@@ -21,7 +21,7 @@ export function useColumns(mobile = 1, tablet = 2, desktop = 3) {
 }
 
 export function contentPadding(width: number) {
-  return width >= BP_DESKTOP ? 24 : width >= BP_TABLET ? 20 : 14;
+  return width >= BP_DESKTOP ? 18 : width >= BP_TABLET ? 16 : 14;
 }
 
 // Shared desktop typography scale. Mobile/tablet keep the first value,

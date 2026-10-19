@@ -418,7 +418,7 @@ function RowPressable<T>({ row, selected, onPress, columns }: { row: T; selected
  * Page shell. The optional scroll props let a screen that swaps its own body
  * (list -> detail) remember where the list was scrolled to and come back to it.
  */
-export const Screen = ({ children, maxWidth = CONTENT_MAX, scrollRef, onScrollY }: {
+export const Screen = ({ children, maxWidth, scrollRef, onScrollY }: {
   children: ReactNode; maxWidth?: number;
   scrollRef?: React.Ref<ScrollView>;
   onScrollY?: (y: number) => void;
@@ -430,8 +430,10 @@ export const Screen = ({ children, maxWidth = CONTENT_MAX, scrollRef, onScrollY 
       ref={scrollRef}
       onScroll={onScrollY ? (e: { nativeEvent: { contentOffset: { y: number } } }) => onScrollY(e.nativeEvent.contentOffset.y) : undefined}
       scrollEventThrottle={onScrollY ? 32 : undefined}
-      style={{ flex: 1, backgroundColor: color.bg }} contentContainerStyle={{ padding: pad, paddingBottom: 30 }} keyboardShouldPersistTaps="handled">
-      <View style={{ width: '100%', maxWidth, alignSelf: 'center' }}>{children}</View>
+      style={{ flex: 1, backgroundColor: color.bg }}
+      contentContainerStyle={{ padding: pad, paddingBottom: 40 }}
+      keyboardShouldPersistTaps="handled">
+      <View style={{ width: '100%', ...(maxWidth ? { maxWidth, alignSelf: 'center' } : {}) }}>{children}</View>
     </ScrollView>
   );
 };

@@ -552,9 +552,7 @@ const styles = StyleSheet.create({
     backgroundColor: '#F0F6FC',
   },
   container: {
-    padding: 20,
-    maxWidth: 1440,
-    alignSelf: 'center',
+    padding: 18,
     width: '100%',
     paddingBottom: 48,
   },
