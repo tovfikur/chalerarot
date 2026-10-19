@@ -69,7 +69,7 @@ export function TradeDashboardForm({ mode, onDone }: TradeDashboardFormProps) {
 
   // Products table items
   const [items, setItems] = useState<FormItemLine[]>([
-    { id: 'item_1', code: '300', productId: '', name: 'আতপ চাল', unit: 'medium', qty: '1', purchaseRate: '200', rate: '200' },
+    { id: 'item_1', code: '300', productId: '', name: 'আতপ চাল', unit: 'medium', qty: '', purchaseRate: '200', rate: '200' },
   ]);
   const [activeItemDropdownIdx, setActiveItemDropdownIdx] = useState<number | null>(null);
   const [itemHighlightIdx, setItemHighlightIdx] = useState(0);
@@ -299,7 +299,7 @@ export function TradeDashboardForm({ mode, onDone }: TradeDashboardFormProps) {
           productId: match.product.id,
           name: match.product.name,
           unit: u,
-          qty: copy[rowIdx].qty || '1',
+          qty: copy[rowIdx].qty || '',
           purchaseRate: String(costVal || (isSale ? 0 : 200)),
           rate: String(priceVal),
         };
@@ -333,7 +333,7 @@ export function TradeDashboardForm({ mode, onDone }: TradeDashboardFormProps) {
         productId: p.id,
         name: p.name,
         unit: u,
-        qty: copy[rowIdx].qty || '1',
+        qty: copy[rowIdx].qty || '',
         purchaseRate: String(costVal || (isSale ? 0 : 200)),
         rate: String(priceVal),
       };
@@ -1291,12 +1291,13 @@ export function TradeDashboardForm({ mode, onDone }: TradeDashboardFormProps) {
                     }}
                     onFocus={() => setFocusedField(`qty_${rowIdx}`)}
                     onSubmitEditing={() => focusNextField(`qty_${rowIdx}`)}
+                    selectTextOnFocus={true}
                     style={[
                       styles.tableTextInput,
                       { textAlign: 'center' },
                       isInputFocused(`qty_${rowIdx}`) && styles.inputFocusedGlow,
                     ]}
-                    placeholder="1"
+                    placeholder="পরিমাণ"
                     keyboardType="numeric"
                     returnKeyType="next"
                   />
@@ -1317,6 +1318,7 @@ export function TradeDashboardForm({ mode, onDone }: TradeDashboardFormProps) {
                       }}
                       onFocus={() => setFocusedField(`purchaseRate_${rowIdx}`)}
                       onSubmitEditing={() => focusNextField(`purchaseRate_${rowIdx}`)}
+                      selectTextOnFocus={true}
                       style={[
                         styles.tableTextInput,
                         { textAlign: 'center', borderColor: '#F59E0B', backgroundColor: '#FFFDF7' },
@@ -1348,6 +1350,7 @@ export function TradeDashboardForm({ mode, onDone }: TradeDashboardFormProps) {
                     }}
                     onFocus={() => setFocusedField(`rate_${rowIdx}`)}
                     onSubmitEditing={() => focusNextField(`rate_${rowIdx}`)}
+                    selectTextOnFocus={true}
                     style={[
                       styles.tableTextInput,
                       { textAlign: 'center' },
