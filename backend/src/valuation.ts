@@ -72,13 +72,13 @@ export function applyMovement(
     value = round2(-out * useCost);
     qtyKg = round2(p.qtyKg - out);
     stockValue = round2(p.stockValue + value);
-    if (qtyKg <= 0) {
+    if (qtyKg <= 0 || stockValue < 0) {
       qtyKg = qtyKg < 0 ? 0 : qtyKg;
       stockValue = 0;
     }
   }
 
-  const cost = round2(avgCost(qtyKg, stockValue, m.forceUnitCost ? p.cost : unitCost || p.cost));
+  const cost = round2(avgCost(qtyKg, stockValue, unitCost || p.cost));
   return {
     movement: {
       type: m.type, bucket: m.bucket, qtyKg: signedQty,

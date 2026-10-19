@@ -70,8 +70,8 @@ export const Btn = ({ label, onPress, kind = 'primary', icon }: { label: string;
   return (
     <TouchableOpacity onPress={onPress} style={[s.btn, kind === 'ghost' && s.ghost, kind === 'danger' && s.dangerBtn]}>
       <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
-        {icon ? <MaterialCommunityIcons name={icon} size={20} color={kind === 'ghost' ? color.primary : '#fff'} /> : null}
-        <Text style={[s.btnT, kind === 'ghost' && { color: color.primary }, { fontSize: fs }]}>{label}</Text>
+        {icon ? <MaterialCommunityIcons name={icon} size={20} color={kind === 'ghost' ? '#1c70b9' : '#fff'} /> : null}
+        <Text style={[s.btnT, kind === 'ghost' && { color: '#0F2B48' }, { fontSize: fs }]}>{label}</Text>
       </View>
     </TouchableOpacity>
   );
@@ -103,7 +103,7 @@ const METHOD_ICON: Record<AccountType, IconName> = {
 const METHOD_KEY: Record<AccountType, Key> = {
   cash: 'mCash', bkash: 'mBkash', nagad: 'mNagad', bank: 'mBank', rocket: 'mRocket',
 };
-export const ACCOUNT_TYPES: AccountType[] = ['cash', 'bkash', 'nagad', 'bank', 'rocket'];
+export const ACCOUNT_TYPES: AccountType[] = ['cash', 'bank'];
 export const methodName = (m: string, t: (k: Key) => string) => t(METHOD_KEY[m as AccountType] ?? 'mCash');
 export const methodIcon = (m?: string): IconName => (m && METHOD_ICON[m as AccountType]) || icons.accounts;
 
@@ -400,12 +400,15 @@ const s = StyleSheet.create({
     } as any : {}),
   },
   ghost: {
-    backgroundColor: '#fff',
+    backgroundColor: '#FFFFFF',
     borderWidth: 1.5,
-    borderColor: '#B9D7F2',
+    borderColor: '#CBD5E1',
+    borderTopWidth: 1,
+    borderTopColor: '#E2E8F0',
     borderBottomWidth: 3,
     borderBottomColor: '#1c70b9',
     ...(Platform.OS === 'web' ? {
+      backgroundImage: 'none',
       boxShadow: '0 3px 10px rgba(28, 112, 185, 0.12), inset 0 1px 0 #FFFFFF',
       cursor: 'pointer',
     } as any : {}),

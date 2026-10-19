@@ -10,7 +10,7 @@ export const uomLabel = (uom: string | undefined, kgLabel: string) => (!uom || u
 export type Party = { id: string; name: string; mobile: string; address?: string; opening: number; next?: string };
 export type Tx = { id: string; partyId: string; kind: 'sale' | 'purchase' | 'payment' | 'sreturn' | 'preturn'; amount: number; date: string; note?: string; ref?: string; method?: string; returnId?: string; returnId2?: never; createdAt?: string; saleId?: string; purchaseId?: string; account?: string };
 export type Line = { productId: string; qty: number; rate: number };
-export type SaleLineIn = { productId: string; unit: string; enteredQty: number; rate: number };
+export type SaleLineIn = { productId: string; unit: string; enteredQty: number; rate: number; unitCost?: number };
 export type PurchaseLineIn = { productId: string; unit: string; enteredQty: number; rate: number };
 export type StockTx = { id: string; productId: string; productName?: string; type: 'OPENING' | 'PURCHASE' | 'SALE' | 'ADJUSTMENT'; qty: number; date: string };
 export type SaleRec = { id: string; date: string; profit: number; total: number; customerId?: string; invoiceNo?: string; paid: number; due: number; status: SettlementStatus; cogs: number; createdAt?: string };

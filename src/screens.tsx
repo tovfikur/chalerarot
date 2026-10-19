@@ -1826,7 +1826,8 @@ export function ExpenseModal({ init, onClose, onSave, onTrash }: {
 export function MoneyTransferModal({ onClose }: { onClose: () => void }) {
   const { t, lang, moneyAccounts, transferMoney } = useApp();
   const m = useMoney(); const fd = useDateStr();
-  const active = moneyAccounts.filter(a => a.active);
+  const isBankOrCash = (a: (typeof moneyAccounts)[number]) => a.type === 'cash' || a.type === 'bank';
+  const active = moneyAccounts.filter(a => a.active && isBankOrCash(a));
   const [fromId, setFromId] = useState<string>(active[0]?.id ?? '');
   const [toId, setToId] = useState<string>(active[1]?.id ?? active[0]?.id ?? '');
   const [amt, setAmt] = useState('');
@@ -1961,35 +1962,40 @@ export function BankCash() {
   const [editId, setEditId] = useState<string | null>(null);
   const [detailId, setDetailId] = useState<string | null>(null);
   const [transferOpen, setTransferOpen] = useState(false);
-  const active = moneyAccounts.filter(a => a.active);
-  const archived = moneyAccounts.filter(a => !a.active);
+  const isBankOrCash = (a: (typeof moneyAccounts)[number]) => a.type === 'cash' || a.type === 'bank';
+  const active = moneyAccounts.filter(a => a.active && isBankOrCash(a));
+  const archived = moneyAccounts.filter(a => !a.active && isBankOrCash(a));
   const total = active.reduce((sum, a) => sum + a.balance, 0);
   // Active accounts are the default view; archived ones stay hidden until asked
   // for, so the main screen is not cluttered.
   const [showArchived, setShowArchived] = useState(false);
   const chip = (label: string, on: boolean, onPress: () => void) => (
     <TouchableOpacity key={label} onPress={onPress} accessibilityRole="button" accessibilityState={{ selected: on }}
-      style={{ paddingHorizontal: 14, minHeight: 40, justifyContent: 'center', borderRadius: 20, borderWidth: 1, borderColor: color.line, backgroundColor: on ? color.primary : color.card }}>
-      <Text style={{ color: on ? '#fff' : color.text, fontSize: 14, fontWeight: on ? '700' : '400' }}>{label}</Text>
+      style={{ paddingHorizontal: 16, minHeight: 42, justifyContent: 'center', borderRadius: 22, borderWidth: 1.5, borderColor: on ? '#2563EB' : color.line, backgroundColor: on ? '#2563EB' : color.card }}>
+      <Text style={{ color: on ? '#fff' : color.text, fontSize: 14, fontWeight: on ? '700' : '600' }}>{label}</Text>
     </TouchableOpacity>
   );
 
   const card = (a: (typeof moneyAccounts)[number]) => (
     <TouchableOpacity key={a.id} onPress={() => setDetailId(a.id)} activeOpacity={0.85}
       accessibilityRole="button" accessibilityLabel={a.name}
-      style={{ backgroundColor: color.card, borderRadius: 14, borderWidth: 1.5, borderColor: color.line, padding: 14, marginBottom: 10 }}>
-      <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10 }}>
-        <AppIcon name={methodIcon(a.type)} size={26} iconColor={color.primary} />
+      style={{ backgroundColor: color.card, borderRadius: 14, borderWidth: 1.5, borderColor: color.line, padding: 16, marginBottom: 12 }}>
+      <View style={{ flexDirection: 'row', alignItems: 'center', gap: 12 }}>
+        <View style={{ width: 44, height: 44, borderRadius: 12, backgroundColor: a.type === 'cash' ? '#ECFDF5' : '#EFF6FF', alignItems: 'center', justifyContent: 'center' }}>
+          <AppIcon name={a.type === 'cash' ? icons.cash : icons.bank} size={24} iconColor={a.type === 'cash' ? '#059669' : '#2563EB'} />
+        </View>
         <View style={{ flex: 1 }}>
-          <Text style={{ fontSize: 16, fontWeight: '700', color: color.text }}>{a.name}</Text>
-          <Muted>{methodName(a.type, t)}</Muted>
+          <Text style={{ fontSize: 17, fontWeight: '700', color: color.text }}>{a.name}</Text>
+          <Muted>{a.type === 'cash' ? 'ক্যাশ ড্রয়ার / ক্যাশ ইন হ্যান্ড' : (a.bankName ? `${a.bankName}${a.branch ? ` (${a.branch})` : ''}` : 'ব্যাংক একাউন্ট')}</Muted>
         </View>
         <AppIcon name={icons.chevR} size={22} iconColor={color.muted} />
       </View>
-      {[a.bankName, a.branch, a.accountNumber, a.mobileNumber].filter(Boolean).length ? (
-        <Muted>{[a.bankName, a.branch, a.accountNumber, a.mobileNumber].filter(Boolean).join(' \u2022 ')}</Muted>
+      {a.accountNumber ? (
+        <View style={{ marginTop: 8, paddingHorizontal: 10, paddingVertical: 4, backgroundColor: '#F8FAFC', borderRadius: 8, alignSelf: 'flex-start' }}>
+          <Text style={{ fontSize: 13, color: '#475569', fontWeight: '500' }}>হিসাব নং: {a.accountNumber}</Text>
+        </View>
       ) : null}
-      <View style={{ height: 6 }} />
+      <View style={{ height: 10 }} />
       <Row left={t('accountBalanceLabel')} right={m(a.balance)} neg={a.balance < 0} />
     </TouchableOpacity>
   );
@@ -1999,13 +2005,53 @@ export function BankCash() {
       <Card><SectionHead icon={icons.accounts}>{t('bankCash')}</SectionHead></Card>
       <Card>
         <Muted>{t('totalMoneyLabel')}</Muted>
-        <Text style={{ fontSize: 30, fontWeight: '700', color: color.primary }}>{m(total)}</Text>
+        <Text style={{ fontSize: 32, fontWeight: '800', color: '#1E3A8A', marginTop: 4 }}>{m(total)}</Text>
       </Card>
-      <View style={{ flexDirection: 'row', gap: 8, marginBottom: 10 }}>
-        <View style={{ flex: 1 }}><Btn kind="ghost" icon={icons.add} label={t('addAccount')} onPress={() => setAddOpen(true)} /></View>
-        <View style={{ flex: 1 }}><Btn kind="ghost" icon={icons.transfer} label={t('transferMoney')} onPress={() => setTransferOpen(true)} /></View>
+      {/* Prominent High-Visibility Action Buttons */}
+      <View style={{ flexDirection: 'row', gap: 12, marginBottom: 14 }}>
+        <TouchableOpacity
+          onPress={() => setAddOpen(true)}
+          style={{
+            flex: 1,
+            backgroundColor: '#2563EB',
+            borderRadius: 14,
+            minHeight: 50,
+            alignItems: 'center',
+            justifyContent: 'center',
+            paddingHorizontal: 16,
+            flexDirection: 'row',
+            gap: 8,
+            borderBottomWidth: 3,
+            borderBottomColor: '#1D4ED8',
+            cursor: 'pointer' as any,
+          }}
+        >
+          <MaterialCommunityIcons name={icons.add} size={22} color="#FFFFFF" />
+          <Text style={{ color: '#FFFFFF', fontSize: 16, fontWeight: '700' }}>{t('addAccount')}</Text>
+        </TouchableOpacity>
+
+        <TouchableOpacity
+          onPress={() => setTransferOpen(true)}
+          style={{
+            flex: 1,
+            backgroundColor: '#0F172A',
+            borderRadius: 14,
+            minHeight: 50,
+            alignItems: 'center',
+            justifyContent: 'center',
+            paddingHorizontal: 16,
+            flexDirection: 'row',
+            gap: 8,
+            borderBottomWidth: 3,
+            borderBottomColor: '#020617',
+            cursor: 'pointer' as any,
+          }}
+        >
+          <MaterialCommunityIcons name={icons.transfer} size={22} color="#FFFFFF" />
+          <Text style={{ color: '#FFFFFF', fontSize: 16, fontWeight: '700' }}>{t('transferMoney')}</Text>
+        </TouchableOpacity>
       </View>
-      <View style={{ flexDirection: 'row', gap: 8, marginBottom: 10 }}>
+      <View style={{ flexDirection: 'row', gap: 8, marginBottom: 12 }}>
         {chip(t('activeAccountsTab'), !showArchived, () => setShowArchived(false))}
         {archived.length ? chip(`${t('inactiveAccountsTab')} (${archived.length})`, showArchived, () => setShowArchived(true)) : null}
       </View>
@@ -2023,22 +2069,20 @@ export function BankCash() {
   );
 }
 
-/** Add / edit one money account. Bank + wallet details only when relevant. */
+/** Add / edit one money account. Cash and Bank accounts only. */
 function AccountFormModal({ id, onClose }: { id?: string; onClose: () => void }) {
   const { t, moneyAccounts, saveAccount, setAccountOpening } = useApp();
   const cur = id ? moneyAccounts.find(a => a.id === id) : undefined;
   const [name, setName] = useState(cur?.name ?? '');
-  const [type, setType] = useState<string>(cur?.type ?? 'cash');
+  const [type, setType] = useState<string>(cur?.type === 'bank' ? 'bank' : 'cash');
   const [opening, setOpening] = useState(cur ? String(cur.openingBalance) : '');
   const [bankName, setBankName] = useState(cur?.bankName ?? '');
   const [accountNumber, setAccountNumber] = useState(cur?.accountNumber ?? '');
   const [branch, setBranch] = useState(cur?.branch ?? '');
-  const [mobileNumber, setMobileNumber] = useState(cur?.mobileNumber ?? '');
   const [note, setNote] = useState(cur?.note ?? '');
   const [activeOn, setActiveOn] = useState(cur ? cur.active : true);
   const [busy, setBusy] = useState(false);
   const isBank = type === 'bank';
-  const isMobile = type === 'bkash' || type === 'nagad' || type === 'rocket';
 
   const save = () => {
     if (!name.trim()) return Alert.alert(t('accountName'));
@@ -2049,9 +2093,9 @@ function AccountFormModal({ id, onClose }: { id?: string; onClose: () => void })
         const openingVal = opening.trim() === '' ? 0 : parseNum(opening);
         if (openingVal < 0) return Alert.alert(t('invalidAmount'));
         const payload = {
-          name: name.trim(), type: type as AccountType,
+          name: name.trim(), type: (type === 'bank' ? 'bank' : 'cash') as AccountType,
           bankName: isBank ? bankName.trim() : '', accountNumber: isBank ? accountNumber.trim() : '',
-          branch: isBank ? branch.trim() : '', mobileNumber: isMobile ? mobileNumber.trim() : '',
+          branch: isBank ? branch.trim() : '', mobileNumber: '',
           note: note.trim(), active: activeOn,
         };
         if (cur) {
@@ -2077,13 +2121,30 @@ function AccountFormModal({ id, onClose }: { id?: string; onClose: () => void })
       <Card>
         <Field label={`${t('accountName')} *`} value={name} onChange={setName} />
         <Muted>{`${t('accountType')} *`}</Muted>
-        <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginVertical: 8 }}>
-          {ACCOUNT_TYPES.map(ty => (
-            <TouchableOpacity key={ty} onPress={() => setType(ty)}
-              style={{ paddingHorizontal: 14, minHeight: 44, justifyContent: 'center', borderRadius: 22, backgroundColor: type === ty ? color.primary : color.primaryLight }}>
-              <Text style={{ color: type === ty ? '#fff' : color.text, fontSize: 15, fontWeight: type === ty ? '700' : '400' }}>{methodName(ty, t)}</Text>
-            </TouchableOpacity>
-          ))}
+        <View style={{ flexDirection: 'row', gap: 12, marginVertical: 10 }}>
+          {(['cash', 'bank'] as AccountType[]).map(ty => {
+            const on = type === ty;
+            return (
+              <TouchableOpacity
+                key={ty}
+                onPress={() => setType(ty)}
+                style={{
+                  flex: 1,
+                  paddingVertical: 12,
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  borderRadius: 12,
+                  backgroundColor: on ? '#2563EB' : '#F1F5F9',
+                  borderWidth: 1.5,
+                  borderColor: on ? '#1D4ED8' : '#CBD5E1',
+                }}
+              >
+                <Text style={{ color: on ? '#FFFFFF' : '#1E293B', fontSize: 16, fontWeight: '700' }}>
+                  {methodName(ty, t)}
+                </Text>
+              </TouchableOpacity>
+            );
+          })}
         </View>
         <Field label={t('openingBalanceLabel')} value={opening} onChange={setOpening} num />
         {isBank ? (
@@ -2093,7 +2154,6 @@ function AccountFormModal({ id, onClose }: { id?: string; onClose: () => void })
             <Field label={t('branch')} value={branch} onChange={setBranch} />
           </>
         ) : null}
-        {isMobile ? <Field label={t('mobileNumber')} value={mobileNumber} onChange={setMobileNumber} /> : null}
         <Field label={t('note')} value={note} onChange={setNote} />
         {cur ? (
           <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, marginVertical: 8 }}>

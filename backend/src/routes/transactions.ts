@@ -131,16 +131,19 @@ tx.post('/sales', async (req: Request, res: Response) => {
         // Older clients that send no rate fall back to the current price.
         const rate = l?.rate === undefined ? p.price : num(l.rate);
         if (!(rate > 0)) throw Object.assign(new Error('Invalid sale rate'), { status: 400, code: 'RATE_INVALID' });
-        sub += qtyKg * rate;
-        // Cost of this line is the weighted average cost of the stock on hand
-        // right now, captured once and frozen on the line.
-        const unitCost = await currentAvgCost(t, p.id);
+        // Cost of this line: if admin modified the purchase price (unitCost is provided and > 0),
+        // use the admin's modified purchase price; otherwise use current running average cost.
+        const hasCustomCost = l.unitCost !== undefined && num(l.unitCost) > 0;
+        const currentAvg = await currentAvgCost(t, p.id);
+        const unitCost = hasCustomCost ? round2(num(l.unitCost)) : currentAvg;
         const lineCogs = round2(qtyKg * unitCost);
         cogs += lineCogs;
         items.push({ productId: p.id, unit: l.unit, enteredQty: entered, qtyKg, rate, unitCost, cogs: lineCogs });
         // Selling leaves quantity AND inventory value (AVCO out).
+        // If admin modified the purchase price, forceUnitCost ensures the inventory value is reduced
+        // by the modified purchase price, which re-blends the remaining inventory average cost.
         await writeMovement(t, p.id, {
-          type: 'SALE', bucket: 'sellable', qtyKg: -qtyKg, unitCost, date: day,
+          type: 'SALE', bucket: 'sellable', qtyKg: -qtyKg, unitCost, date: day, forceUnitCost: hasCustomCost,
         });
       }
       const total = Math.round((sub - disc) * 100) / 100;

@@ -15,13 +15,16 @@ import { color, useMoney, useNum, toBnDigits } from '../ui';
 import { parseNum } from '../bn';
 import { AppIcon, icons } from '../icons';
 import { SuccessModal } from '../screens';
+import { BagUnit, kgPerUnit } from '../bags';
 
 export interface FormItemLine {
   id: string;
   code: string;
   productId: string;
   name: string;
+  unit: BagUnit;
   qty: string;
+  purchaseRate: string;
   rate: string;
 }
 
@@ -66,7 +69,7 @@ export function TradeDashboardForm({ mode, onDone }: TradeDashboardFormProps) {
 
   // Products table items
   const [items, setItems] = useState<FormItemLine[]>([
-    { id: 'item_1', code: '300', productId: '', name: 'আতপ চাল', qty: '1', rate: '200' },
+    { id: 'item_1', code: '300', productId: '', name: 'আতপ চাল', unit: 'medium', qty: '1', purchaseRate: '200', rate: '200' },
   ]);
   const [activeItemDropdownIdx, setActiveItemDropdownIdx] = useState<number | null>(null);
   const [itemHighlightIdx, setItemHighlightIdx] = useState(0);
@@ -105,13 +108,22 @@ export function TradeDashboardForm({ mode, onDone }: TradeDashboardFormProps) {
     if (products.length > 0 && items.length > 0 && !items[0].productId) {
       const match = products.find(p => p.name.includes('আতপ')) || products[0];
       if (match) {
+        const u = items[0].unit || 'medium';
+        const per = kgPerUnit(match, u);
+        const costVal = Math.round((match.cost || 0) * per);
+        const priceVal = isSale
+          ? Math.round((match.price || 0) * per)
+          : (costVal || 200);
+
         setItems(prev => [
           {
             ...prev[0],
             productId: match.id,
             name: match.name,
             code: prev[0].code || '300',
-            rate: prev[0].rate || String(isSale ? match.price : match.cost || 200),
+            unit: u,
+            purchaseRate: prev[0].purchaseRate || String(costVal || (isSale ? 0 : 200)),
+            rate: prev[0].rate || String(priceVal),
           },
         ]);
       }
@@ -206,19 +218,28 @@ export function TradeDashboardForm({ mode, onDone }: TradeDashboardFormProps) {
     return null;
   }, [products]);
 
-  // Code change handler: auto selects product name & rate
+  // Code change handler: auto selects product name, unit, purchaseRate & rate
   const handleCodeChange = useCallback((rowIdx: number, val: string) => {
     setItems(prev => {
       const copy = [...prev];
       const match = findProductByCode(val);
       if (match) {
+        const u = copy[rowIdx].unit || 'medium';
+        const per = kgPerUnit(match.product, u);
+        const costVal = Math.round((match.product.cost || 0) * per);
+        const priceVal = isSale
+          ? Math.round((match.product.price || 0) * per)
+          : (costVal || 200);
+
         copy[rowIdx] = {
           ...copy[rowIdx],
           code: val,
           productId: match.product.id,
           name: match.product.name,
-          rate: String(isSale ? match.product.price : (match.product.cost || 200)),
+          unit: u,
           qty: copy[rowIdx].qty || '1',
+          purchaseRate: String(costVal || (isSale ? 0 : 200)),
+          rate: String(priceVal),
         };
       } else {
         copy[rowIdx] = {
@@ -226,6 +247,7 @@ export function TradeDashboardForm({ mode, onDone }: TradeDashboardFormProps) {
           code: val,
           productId: '',
           name: '',
+          purchaseRate: '',
         };
       }
       return copy;
@@ -236,18 +258,48 @@ export function TradeDashboardForm({ mode, onDone }: TradeDashboardFormProps) {
   const onSelectProduct = useCallback((rowIdx: number, p: Product, pIdx: number) => {
     setItems(prev => {
       const copy = [...prev];
+      const u = copy[rowIdx].unit || 'medium';
+      const per = kgPerUnit(p, u);
+      const costVal = Math.round((p.cost || 0) * per);
+      const priceVal = isSale
+        ? Math.round((p.price || 0) * per)
+        : (costVal || 200);
+
       copy[rowIdx] = {
         ...copy[rowIdx],
         code: String(pIdx + 1),
         productId: p.id,
         name: p.name,
+        unit: u,
         qty: copy[rowIdx].qty || '1',
-        rate: String(isSale ? p.price : p.cost || 200),
+        purchaseRate: String(costVal || (isSale ? 0 : 200)),
+        rate: String(priceVal),
       };
       return copy;
     });
     setActiveItemDropdownIdx(null);
   }, [isSale]);
+
+  // Unit change handler (toggle between 'medium' [বস্তা] and 'kg' [কেজি])
+  const handleUnitChange = useCallback((rowIdx: number, newUnit: BagUnit) => {
+    setItems(prev => {
+      const copy = [...prev];
+      const row = copy[rowIdx];
+      const p = products.find(x => x.id === row.productId || x.name === row.name);
+      const newPer = p ? kgPerUnit(p, newUnit) : (newUnit === 'kg' ? 1 : 50);
+
+      const newCost = p ? Math.round((p.cost || 0) * newPer) : 0;
+      const newPrice = p ? (isSale ? Math.round((p.price || 0) * newPer) : (newCost || 200)) : 0;
+
+      copy[rowIdx] = {
+        ...row,
+        unit: newUnit,
+        purchaseRate: String(newCost || row.purchaseRate),
+        rate: String(newPrice || row.rate),
+      };
+      return copy;
+    });
+  }, [products, isSale]);
 
   // Add new product row
   const addNewRow = useCallback((autoFocus = true) => {
@@ -255,7 +307,7 @@ export function TradeDashboardForm({ mode, onDone }: TradeDashboardFormProps) {
     const newId = `item_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`;
     setItems(prev => [
       ...prev,
-      { id: newId, code: '', productId: '', name: '', qty: '', rate: '' },
+      { id: newId, code: '', productId: '', name: '', unit: 'medium', qty: '', purchaseRate: '', rate: '' },
     ]);
     if (autoFocus) {
       setTimeout(() => {
@@ -268,7 +320,7 @@ export function TradeDashboardForm({ mode, onDone }: TradeDashboardFormProps) {
   // Remove product row
   const removeRow = useCallback((idx: number) => {
     if (items.length <= 1) {
-      setItems([{ id: 'item_1', code: '', productId: '', name: '', qty: '', rate: '' }]);
+      setItems([{ id: 'item_1', code: '', productId: '', name: '', unit: 'medium', qty: '', purchaseRate: '', rate: '' }]);
       return;
     }
     setItems(prev => prev.filter((_, i) => i !== idx));
@@ -330,15 +382,28 @@ export function TradeDashboardForm({ mode, onDone }: TradeDashboardFormProps) {
     try {
       const processedLines = validLines.map(l => {
         let pId = l.productId;
-        if (!pId) {
-          const match = products.find(p => p.name.toLowerCase() === l.name.toLowerCase());
-          pId = match?.id || products[0]?.id || 'p1';
+        let prod = products.find(p => p.id === pId);
+        if (!pId || !prod) {
+          prod = products.find(p => p.name.toLowerCase() === l.name.toLowerCase()) || products[0];
+          pId = prod?.id || 'p1';
         }
+        const unit = (l.unit || 'medium') as BagUnit;
+        const per = prod ? kgPerUnit(prod, unit) : (unit === 'kg' ? 1 : 50);
+        const enteredQty = parseNum(l.qty) || 1;
+        const enteredRate = parseNum(l.rate);
+        const enteredPurchaseRate = parseNum(l.purchaseRate);
+
+        // Rate per KG for backend (since backend records rate per KG and sub += qtyKg * rate)
+        const ratePerKg = per > 0 ? (enteredRate / per) : enteredRate;
+        // Purchase cost per KG for backend (if admin modified purchase price)
+        const unitCostPerKg = enteredPurchaseRate > 0 ? (enteredPurchaseRate / per) : (prod?.cost || 0);
+
         return {
           productId: pId,
-          unit: 'kg',
-          enteredQty: parseNum(l.qty) || 1,
-          rate: parseNum(l.rate) || 200,
+          unit: unit,
+          enteredQty: enteredQty,
+          rate: Math.round(ratePerKg * 100) / 100,
+          unitCost: isSale ? Math.round(unitCostPerKg * 100) / 100 : undefined,
         };
       });
 
@@ -1893,6 +1958,46 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: '#A7F3D0',
     marginLeft: 6,
+  },
+  unitToggleBtn: {
+    backgroundColor: '#EFF6FF',
+    borderWidth: 1.5,
+    borderColor: '#93C5FD',
+    borderRadius: 8,
+    paddingHorizontal: 8,
+    height: 38,
+    alignItems: 'center',
+    justifyContent: 'center',
+    ...(Platform.OS === 'web' ? ({ cursor: 'pointer' } as any) : {}),
+  },
+  unitToggleText: {
+    fontSize: 12,
+    fontWeight: '800',
+    color: '#0F3B63',
+  },
+  unitToggleSub: {
+    fontSize: 9.5,
+    fontWeight: '700',
+    color: '#0284C7',
+  },
+  baseAvgHintText: {
+    fontSize: 10,
+    fontWeight: '700',
+    color: '#B45309',
+    textAlign: 'center',
+    marginTop: 2,
+  },
+  rowProfitBadge: {
+    fontSize: 10,
+    fontWeight: '800',
+    marginTop: 2,
+    textAlign: 'center',
+  },
+  rowProfitPos: {
+    color: '#047857',
+  },
+  rowProfitNeg: {
+    color: '#DC2626',
   },
 
   // ADDITIONAL COSTS & CALCULATION SUMMARY
