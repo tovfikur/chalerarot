@@ -576,30 +576,32 @@ export function TradeDashboardForm({ mode, onDone }: TradeDashboardFormProps) {
 
             {/* Order No & Memo No */}
             <View style={styles.formRow}>
-              <View style={styles.formCol}>
-                <Text style={styles.fieldLabel}>{isSale ? 'বিক্রয় অর্ডার নং' : 'ক্রয় অর্ডার নং'}</Text>
-                <View style={[styles.inputDebossed, isInputFocused('orderNo') && styles.inputFocusedGlow]}>
-                  <TextInput
-                    ref={el => (inputRefs.current['orderNo'] = el)}
-                    value={orderNo}
-                    onChangeText={setOrderNo}
-                    onFocus={() => setFocusedField('orderNo')}
-                    onSubmitEditing={() => focusNextField('orderNo')}
-                    style={styles.textInput}
-                    placeholder="303"
-                    returnKeyType="next"
-                  />
-                  <TouchableOpacity
-                    onPress={() => copyToClipboard(orderNo, 'অর্ডার নং')}
-                    style={styles.tactileInnerBtn}
-                    accessibilityLabel="কপি করুন"
-                  >
-                    <AppIcon name={icons.copy} size={18} iconColor="#1c70b9" />
-                  </TouchableOpacity>
+              {isSale ? (
+                <View style={styles.formCol}>
+                  <Text style={styles.fieldLabel}>বিক্রয় অর্ডার নং</Text>
+                  <View style={[styles.inputDebossed, isInputFocused('orderNo') && styles.inputFocusedGlow]}>
+                    <TextInput
+                      ref={el => (inputRefs.current['orderNo'] = el)}
+                      value={orderNo}
+                      onChangeText={setOrderNo}
+                      onFocus={() => setFocusedField('orderNo')}
+                      onSubmitEditing={() => focusNextField('orderNo')}
+                      style={styles.textInput}
+                      placeholder="303"
+                      returnKeyType="next"
+                    />
+                    <TouchableOpacity
+                      onPress={() => copyToClipboard(orderNo, 'অর্ডার নং')}
+                      style={styles.tactileInnerBtn}
+                      accessibilityLabel="কপি করুন"
+                    >
+                      <AppIcon name={icons.copy} size={18} iconColor="#1c70b9" />
+                    </TouchableOpacity>
+                  </View>
                 </View>
-              </View>
+              ) : null}
 
-              <View style={styles.formCol}>
+              <View style={[styles.formCol, !isSale && { flex: 1 }]}>
                 <Text style={styles.fieldLabel}>{isSale ? 'বিক্রয় মেমো নং' : 'ক্রয় মেমো নং'}</Text>
                 <View style={[styles.inputDebossed, isInputFocused('memoNo') && styles.inputFocusedGlow]}>
                   <TextInput
