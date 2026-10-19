@@ -824,7 +824,7 @@ export function TradeDashboardForm({ mode, onDone }: TradeDashboardFormProps) {
                         setPartyMobile(match.party.mobile || '');
                         setPartyAddress(match.party.address || '');
                       }
-                    } else if (!v.trim() && !isSale) {
+                    } else if (!v.trim()) {
                       setSelectedPartyId('');
                       setPartyName('');
                       setPartyMobile('');
@@ -1485,12 +1485,6 @@ export function TradeDashboardForm({ mode, onDone }: TradeDashboardFormProps) {
                         <Text style={{ fontSize: 14, color: '#64748B' }}>মেমো নং:</Text>
                         <Text style={{ fontSize: 14, fontWeight: '700', color: '#1c70b9' }}>{memoNo}</Text>
                       </View>
-                      {isSale && orderNo ? (
-                        <View style={{ flexDirection: 'row', justifyContent: 'space-between' }}>
-                          <Text style={{ fontSize: 14, color: '#64748B' }}>অর্ডার নং:</Text>
-                          <Text style={{ fontSize: 14, color: '#334155' }}>{orderNo}</Text>
-                        </View>
-                      ) : null}
 
                       {/* Payment inputs if user wants to record payment right here */}
                       <View style={{ marginTop: 8, paddingTop: 8, borderTopWidth: 1, borderTopColor: '#F1F5F9' }}>
