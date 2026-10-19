@@ -1,5 +1,6 @@
 import { db } from './db';
 import type { TxClient } from './routes/transactions';
+import { businessToday } from './units';
 
 /**
  * Money accounts + ledger.
@@ -104,7 +105,7 @@ export async function resolveAccount(
     data: {
       name: ACCOUNT_TYPE_LABEL[method].en, type: method,
       legacyMethod: activeOfType.length || (await t.moneyAccount.count({ where: { type: method } })) === 0 ? method : null,
-      openingBalance: 0, openingDate: new Date().toISOString().slice(0, 10),
+      openingBalance: 0, openingDate: businessToday(),
     },
   });
   return created;
@@ -213,7 +214,7 @@ export async function accountBalances(client: typeof db | TxClient = db, today?:
   const inCounts = await client.moneyTransfer.groupBy({ by: ['toAccountId'], _count: { _all: true } });
   const countOf = (rows: { [k: string]: unknown; _count: { _all: number } }[], k: string, id: string) =>
     rows.find(r => (r[k] as string | null) === id)?._count._all ?? 0;
-  const day = today ?? new Date().toISOString().slice(0, 10);
+  const day = today ?? businessToday();
   const todayRows = await client.moneyMovement.groupBy({
     by: ['moneyAccountId', 'direction'],
     where: { active: true, date: day },

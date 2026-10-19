@@ -82,7 +82,7 @@ export function TradeDashboardForm({ mode, onDone }: TradeDashboardFormProps) {
 
   // Party selection state
   const [selectedPartyId, setSelectedPartyId] = useState<string>('');
-  const [partyCode, setPartyCode] = useState('340');
+  const [partyCode, setPartyCode] = useState('');
   const [partyName, setPartyName] = useState('');
   const [partyMobile, setPartyMobile] = useState('');
   const [partyAddress, setPartyAddress] = useState('');
@@ -98,7 +98,7 @@ export function TradeDashboardForm({ mode, onDone }: TradeDashboardFormProps) {
 
   // Products table items
   const [items, setItems] = useState<FormItemLine[]>([
-    { id: 'item_1', code: '300', productId: '', name: 'আতপ চাল', unit: 'medium', qty: '', purchaseRate: '200', rate: '200' },
+    { id: 'item_1', code: '', productId: '', name: '', unit: 'medium', qty: '', purchaseRate: '', rate: '' },
   ]);
   const [activeItemDropdownIdx, setActiveItemDropdownIdx] = useState<number | null>(null);
   const [itemHighlightIdx, setItemHighlightIdx] = useState(0);
@@ -130,7 +130,7 @@ export function TradeDashboardForm({ mode, onDone }: TradeDashboardFormProps) {
       const match = parties[0];
       if (match) {
         setSelectedPartyId(match.id);
-        setPartyCode('340');
+        setPartyCode('1');
         setPartyName(match.name);
         setPartyMobile(match.mobile || '');
         setPartyAddress(match.address || '');
@@ -139,25 +139,25 @@ export function TradeDashboardForm({ mode, onDone }: TradeDashboardFormProps) {
   }, [parties, selectedPartyId]);
 
   useEffect(() => {
-    if (products.length > 0 && items.length > 0 && !items[0].productId) {
-      const match = products.find(p => p.name.includes('আতপ')) || products[0];
+    if (products.length > 0 && items.length > 0 && !items[0].productId && !items[0].name) {
+      const match = products[0];
       if (match) {
         const u = items[0].unit || 'medium';
         const per = kgPerUnit(match, u);
         const costVal = Math.round((match.cost || 0) * per);
         const priceVal = isSale
           ? Math.round((match.price || 0) * per)
-          : (costVal || 200);
+          : (costVal || 0);
 
         setItems(prev => [
           {
             ...prev[0],
             productId: match.id,
             name: match.name,
-            code: prev[0].code || '300',
+            code: '1',
             unit: u,
-            purchaseRate: prev[0].purchaseRate || String(costVal || (isSale ? 0 : 200)),
-            rate: prev[0].rate || String(priceVal),
+            purchaseRate: String(costVal || 0),
+            rate: String(priceVal),
           },
         ]);
       }
@@ -166,9 +166,9 @@ export function TradeDashboardForm({ mode, onDone }: TradeDashboardFormProps) {
 
   // Previous balance for selected party
   const prevDue = useMemo(() => {
-    if (!selectedPartyId) return 5000;
+    if (!selectedPartyId) return 0;
     const b = bal(isSale ? 'c' : 'v', selectedPartyId);
-    return b.balance !== 0 ? b.balance : 5000;
+    return b ? b.balance : 0;
   }, [selectedPartyId, bal, isSale]);
 
   // Calculations
@@ -554,15 +554,24 @@ export function TradeDashboardForm({ mode, onDone }: TradeDashboardFormProps) {
 
     setSubmitting(true);
     try {
+      let isoDate: string | undefined = undefined;
+      const dParts = billDate.trim().match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})$/);
+      if (dParts) {
+        isoDate = `${dParts[3]}-${dParts[2].padStart(2, '0')}-${dParts[1].padStart(2, '0')}`;
+      }
+
       const processedLines = validLines.map(l => {
         let pId = l.productId;
         let prod = products.find(p => p.id === pId);
         if (!pId || !prod) {
           prod = products.find(p => p.name.toLowerCase() === l.name.toLowerCase()) || products[0];
-          pId = prod?.id || 'p1';
+          pId = prod?.id || '';
+        }
+        if (!prod || !pId) {
+          throw new Error(lang === 'bn' ? `পণ্য '${l.name}' খুঁজে পাওয়া যায়নি।` : `Product '${l.name}' not found.`);
         }
         const unit = (l.unit || 'medium') as BagUnit;
-        const per = prod ? kgPerUnit(prod, unit) : (unit === 'kg' ? 1 : 50);
+        const per = kgPerUnit(prod, unit);
         const enteredQty = parseNum(l.qty) || 1;
         const enteredRate = parseNum(l.rate);
         const enteredPurchaseRate = parseNum(l.purchaseRate);
@@ -590,6 +599,7 @@ export function TradeDashboardForm({ mode, onDone }: TradeDashboardFormProps) {
           discount: 0,
           paid: totalPaid,
           accountId: chosenAccountId,
+          date: isoDate,
         });
       } else {
         res = await purchase({
@@ -597,10 +607,11 @@ export function TradeDashboardForm({ mode, onDone }: TradeDashboardFormProps) {
           lines: processedLines,
           paid: totalPaid,
           accountId: chosenAccountId,
+          date: isoDate,
         });
       }
 
-      const todayISO = new Date().toISOString().slice(0, 10);
+      const todayISO = isoDate || new Date().toISOString().slice(0, 10);
       if (numTransport > 0 && chosenAccountId) {
         await saveExpense({
           category: 'transport',

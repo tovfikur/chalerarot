@@ -23,8 +23,8 @@ export const today = () => new Date().toISOString().slice(0, 10);
 export interface Service {
   saveProduct(p: Product): Promise<void>; deleteProduct(id: string): Promise<void>;
   saveParty(kind: 'c' | 'v', p: Party): Promise<void>; deleteParty(kind: 'c' | 'v', id: string): Promise<void>;
-  sale(a: { customerId?: string; lines: SaleLineIn[]; discount: number; paid: number; accountId?: string; next?: string }): Promise<{ id: string; invoiceNo?: string; total: number }>;
-  purchase(a: { vendorId: string; lines: PurchaseLineIn[]; paid: number; accountId?: string; next?: string }): Promise<{ id: string; invoiceNo?: string; total: number }>;
+  sale(a: { customerId?: string; lines: SaleLineIn[]; discount: number; paid: number; accountId?: string; next?: string; date?: string }): Promise<{ id: string; invoiceNo?: string; total: number }>;
+  purchase(a: { vendorId: string; lines: PurchaseLineIn[]; paid: number; accountId?: string; next?: string; date?: string }): Promise<{ id: string; invoiceNo?: string; total: number }>;
   money(kind: 'c' | 'v', a: { partyId: string; amount: number; accountId: string; date: string; note?: string; next?: string }): Promise<void>;
   saveExpense(e: { id?: string; category: string; customName?: string; amount: number; accountId: string; date: string; note?: string }): Promise<void>;
   deleteExpense(id: string): Promise<void>;
@@ -151,13 +151,13 @@ export function AppProvider({ children }: { children: ReactNode }) {
       await refresh();
     },
     deleteParty: async (k, id) => { await api.deleteParty(k, id); await refresh(); },
-    sale: async ({ customerId, lines, discount, paid, accountId, next }) => {
-      const r = await api.createSale({ customerId, lines, discount, paid, accountId, next });
+    sale: async ({ customerId, lines, discount, paid, accountId, next, date }) => {
+      const r = await api.createSale({ customerId, lines, discount, paid, accountId, next, date });
       await refresh();
       return r;
     },
-    purchase: async ({ vendorId, lines, paid, accountId, next }) => {
-      const r = await api.createPurchase({ vendorId, lines, paid, accountId, next });
+    purchase: async ({ vendorId, lines, paid, accountId, next, date }) => {
+      const r = await api.createPurchase({ vendorId, lines, paid, accountId, next, date });
       await refresh();
       return r;
     },

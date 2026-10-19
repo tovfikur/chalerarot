@@ -1,6 +1,7 @@
 import { Router, Request, Response } from 'express';
 import { db } from '../db';
 import { revalueStock, round2, writeMovement } from '../valuation';
+import { businessToday } from '../units';
 
 const num = (v: unknown, d = 0) => {
   const n = typeof v === 'number' ? v : parseFloat(String(v ?? ''));
@@ -52,7 +53,7 @@ products.post('/', async (req: Request, res: Response) => {
     if (!(sb > 0) || !(mb > 0) || !(lb > 0)) return res.status(400).json({ error: 'Bag weights must be greater than 0' });
     const o = Math.max(0, num(opening));
     const c = num(cost);
-    const day = new Date().toISOString().slice(0, 10);
+    const day = businessToday();
     // Opening stock is valued ONCE, here, at the cost entered on this form.
     const openingValue = round2(o * c);
     const p = await db.$transaction(async tx => {
@@ -92,7 +93,7 @@ products.put('/:id', async (req: Request, res: Response) => {
     const sb = num(smallBagKg, cur.smallBagKg), mb = num(mediumBagKg, cur.mediumBagKg), lb = num(largeBagKg, cur.largeBagKg);
     if (!(sb > 0) || !(mb > 0) || !(lb > 0)) return res.status(400).json({ error: 'Bag weights must be greater than 0' });
     const o = opening === undefined ? cur.openingQtyKg : Math.max(0, num(opening));
-    const day = new Date().toISOString().slice(0, 10);
+    const day = businessToday();
     const updated = await db.$transaction(async tx => {
       const data: Record<string, unknown> = {
         name: name === undefined ? cur.name : String(name).trim(),

@@ -56,18 +56,18 @@ async function dueTotal(kind: 'c' | 'v') {
       db.customer.findMany({ where: { deletedAt: null } }), db.sale.findMany(), db.customerPayment.findMany(),
     ]);
     const byCust = (id: string) =>
-      (cs.find(c => c.id === id)?.openingDue ?? 0) +
+      Math.max(0, (cs.find(c => c.id === id)?.openingDue ?? 0) +
       sales.filter(s => s.customerId === id).reduce((s, x) => s + x.total, 0) -
-      pays.filter(p => p.customerId === id).reduce((s, x) => s + x.amount, 0);
+      pays.filter(p => p.customerId === id).reduce((s, x) => s + x.amount, 0));
     return cs.reduce((s, c) => s + byCust(c.id), 0);
   }
   const [vs, purs, pays] = await Promise.all([
     db.vendor.findMany({ where: { deletedAt: null } }), db.purchase.findMany(), db.vendorPayment.findMany(),
   ]);
   const byVend = (id: string) =>
-    (vs.find(v => v.id === id)?.openingPayable ?? 0) +
+    Math.max(0, (vs.find(v => v.id === id)?.openingPayable ?? 0) +
     purs.filter(p => p.vendorId === id).reduce((s, x) => s + x.total, 0) -
-    pays.filter(p => p.vendorId === id).reduce((s, x) => s + x.amount, 0);
+    pays.filter(p => p.vendorId === id).reduce((s, x) => s + x.amount, 0));
   return vs.reduce((s, v) => s + byVend(v.id), 0);
 }
 

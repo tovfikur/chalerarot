@@ -6,7 +6,7 @@ import {
 } from '../money';
 import { nextInvoiceNo } from './transactions';
 import type { TxClient } from './transactions';
-import { transactionDay } from '../units';
+import { transactionDay, businessToday } from '../units';
 
 const num = (v: unknown, d = 0) => {
   const n = typeof v === 'number' ? v : parseFloat(String(v ?? ''));
@@ -14,7 +14,7 @@ const num = (v: unknown, d = 0) => {
 };
 const round2 = (n: number) => Math.round(n * 100) / 100;
 const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
-const today = () => new Date().toISOString().slice(0, 10);
+const today = () => businessToday();
 const fail = (res: Response, error: string, code: string, status = 400) =>
   res.status(status).json({ error, code });
 

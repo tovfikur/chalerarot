@@ -4,7 +4,7 @@ import { toKg, isUnit, transactionDay } from '../units';
 import { recordMovement, resolveAccount } from '../money';
 import { currentAvgCost, round2 as r2, writeMovement } from '../valuation';
 import { syncPartyInvoices } from '../settlement';
-import { nextInvoiceNo } from './transactions';
+import { nextInvoiceNo, type TxClient } from './transactions';
 
 export const returns = Router();
 
@@ -19,8 +19,8 @@ const UNITS = ['kg', 'small', 'medium', 'large', 'ton', 'others'];
 const round2 = (n: number) => Math.round(n * 100) / 100;
 
 // Remaining returnable KG per original line and invoice totals.
-async function remainingFor(kind: 'sale' | 'purchase', parentId: string) {
-  const rets = await db.productReturn.findMany({
+async function remainingFor(kind: 'sale' | 'purchase', parentId: string, client: typeof db | TxClient = db) {
+  const rets = await client.productReturn.findMany({
     where: kind === 'sale' ? { saleId: parentId } : { purchaseId: parentId },
     include: { items: true },
   });
@@ -102,7 +102,7 @@ returns.post('/', async (req: Request, res: Response) => {
         : await t.purchase.findUnique({ where: { id: String(purchaseId ?? '') }, include: { items: true, vendor: true } });
       if (!parent) throw Object.assign(new Error(kind === 'sale' ? 'Sale not found' : 'Purchase not found'), { status: 400 });
 
-      const rem = await remainingFor(kind, parent.id);
+      const rem = await remainingFor(kind, parent.id, t);
       const origTotalKg = parent.items.reduce((s, l) => s + l.qtyKg, 0);
       let invoiceRemaining = Math.round((origTotalKg - rem.total) * 100) / 100;
 
@@ -260,25 +260,27 @@ returns.post('/', async (req: Request, res: Response) => {
           items: { create: built.map(({ source, ...it }) => it) },
         },
       });
-      // Financial settlement: credit memo against due/payable (negative sum
-      // via a linked payment row keeps existing balance math intact).
-      if (kind === 'sale') {
-        const s = parent as { customerId?: string | null };
-        await t.customerPayment.create({
-          data: { customerId: s.customerId ?? null, saleId: null, returnId: created.id, amount: totalAmount, date: day, note: returnNo },
-        });
-        // The credit reduces that invoice's remaining: re-attribute in-tx.
-        await syncPartyInvoices('sale', s.customerId ?? null, t);
-      } else {
-        const v = parent as { vendorId: string };
-        await t.vendorPayment.create({
-          data: { vendorId: v.vendorId, purchaseId: null, returnId: created.id, amount: totalAmount, date: day, note: returnNo },
-        });
-        await syncPartyInvoices('purchase', v.vendorId, t);
+      // Financial settlement:
+      // A 'credit' memo reduces due/payable via a linked payment row.
+      // A 'refund' pays or receives actual cash/bank money via recordMovement below.
+      if (settlement === 'credit') {
+        if (kind === 'sale') {
+          const s = parent as { customerId?: string | null };
+          await t.customerPayment.create({
+            data: { customerId: s.customerId ?? null, saleId: null, returnId: created.id, amount: totalAmount, date: day, note: returnNo },
+          });
+          // The credit reduces that invoice's remaining: re-attribute in-tx.
+          await syncPartyInvoices('sale', s.customerId ?? null, t);
+        } else {
+          const v = parent as { vendorId: string };
+          await t.vendorPayment.create({
+            data: { vendorId: v.vendorId, purchaseId: null, returnId: created.id, amount: totalAmount, date: day, note: returnNo },
+          });
+          await syncPartyInvoices('purchase', v.vendorId, t);
+        }
       }
       // Only an actual refund moves money: sales return pays the customer back
-      // (out), purchase return receives money from the vendor (in). A credit
-      // memo is just a due/payable adjustment and never touches a balance.
+      // (out), purchase return receives money from the vendor (in).
       if (settlement === 'refund' && totalAmount > 0) {
         // A real refund moves money, so it needs the concrete account.
         const acc = await resolveAccount(t, { accountId, method });

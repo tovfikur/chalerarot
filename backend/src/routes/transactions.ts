@@ -150,15 +150,20 @@ tx.post('/sales', async (req: Request, res: Response) => {
       const total = Math.round((sub - disc) * 100) / 100;
       if (pay > total) throw Object.assign(new Error('Paid amount cannot exceed total'), { status: 400 });
       const due = Math.round((total - pay) * 100) / 100;
-      // Rule: due sale requires a customer.
-      if (due > 0) {
-        if (!customerId) throw Object.assign(new Error('Customer is required when there is a due'), { status: 400 });
+      let validCustomerId: string | null = null;
+      if (customerId) {
         const c = await t.customer.findUnique({ where: { id: String(customerId) } });
-        if (!c || (c as { deletedAt?: Date | null }).deletedAt) throw Object.assign(new Error('Customer not found'), { status: 400 });
+        if (c && !c.deletedAt) {
+          validCustomerId = c.id;
+        } else if (due > 0) {
+          throw Object.assign(new Error('Customer not found'), { status: 400 });
+        }
+      } else if (due > 0) {
+        throw Object.assign(new Error('Customer is required when there is a due'), { status: 400 });
       }
       const sale = await t.sale.create({
         data: {
-          customerId: customerId ? String(customerId) : null, date: day, discount: disc,
+          customerId: validCustomerId, date: day, discount: disc,
           total, paid: pay, due,
           // Snapshot of this sale's own COGS; the canonical period report
           // recomputes COGS from the inventory trail and must agree with it.
@@ -173,7 +178,7 @@ tx.post('/sales', async (req: Request, res: Response) => {
       // never counted twice.
       if (payAccount) {
         await t.customerPayment.create({
-          data: { customerId: customerId ? String(customerId) : null, saleId: sale.id, amount: pay, date: day },
+          data: { customerId: validCustomerId, saleId: sale.id, amount: pay, date: day },
         });
         // Ledger entry for the same single event — `paid` is NOT counted again.
         await recordMovement(t, {
@@ -181,12 +186,12 @@ tx.post('/sales', async (req: Request, res: Response) => {
           sourceType: 'sale', sourceId: sale.id, note: sale.invoiceNo,
         });
       }
-      if (customerId && next) await t.customer.update({ where: { id: String(customerId) }, data: { nextDate: String(next) } });
+      if (validCustomerId && next) await t.customer.update({ where: { id: validCustomerId }, data: { nextDate: String(next) } });
       // Re-materialize this customer's stored paid/due from the canonical
       // settlement inside the same transaction (FIFO may now attribute older
       // floating collections to settled invoices, or this sale may absorb
       // them when older invoices are clear).
-      if (customerId) await syncPartyInvoices('sale', String(customerId), t);
+      if (validCustomerId) await syncPartyInvoices('sale', validCustomerId, t);
       return { id: sale.id, invoiceNo: sale.invoiceNo, total: sale.total };
     });
     res.status(201).json(result);
@@ -285,14 +290,14 @@ tx.post('/purchases', async (req: Request, res: Response) => {
         const rate = l?.rate === undefined ? p.cost : num(l.rate);
         if (!(rate >= 0)) throw Object.assign(new Error('Invalid rate'), { status: 400 });
         const qtyKg = Math.round(toKg(p, l.unit, entered) * 100) / 100;
-        total += qtyKg * rate;
+        total += round2(qtyKg * rate);
         items.push({ productId: p.id, unit: l.unit, enteredQty: entered, qtyKg, rate });
         // Stock in at the real purchase rate; weighted average re-blends.
         await writeMovement(t, p.id, {
           type: 'PURCHASE', bucket: 'sellable', qtyKg, unitCost: rate, date: day,
         });
       }
-      total = Math.round(total * 100) / 100;
+      total = round2(total);
       if (pay > total) throw Object.assign(new Error('Paid amount cannot exceed total'), { status: 400 });
       const due = Math.round((total - pay) * 100) / 100;
       const pur = await t.purchase.create({
