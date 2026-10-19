@@ -34,7 +34,7 @@ const DRAFT_STORAGE_KEY_PREFIX = 'chaler_arot_draft_';
 
 export function TradeDashboardForm({ mode, onDone }: TradeDashboardFormProps) {
   const isSale = mode === 'sale';
-  const { t, products, vendors, customers, bal, purchase, sale, moneyAccounts, saveExpense } = useApp();
+  const { t, lang, products, vendors, customers, bal, purchase, sale, moneyAccounts, saveExpense } = useApp();
   const m = useMoney();
   const n = useNum();
 
