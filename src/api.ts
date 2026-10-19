@@ -1,6 +1,8 @@
 // REST client for the chalarot-api backend.
 // Base URL comes from EXPO_PUBLIC_API_URL (see .env.example).
-const BASE = process.env.EXPO_PUBLIC_API_URL ?? 'http://localhost:4000/api';
+const BASE = (typeof window !== 'undefined' && window.location)
+  ? '/api'
+  : (process.env.EXPO_PUBLIC_API_URL ?? 'http://localhost:4000/api');
 
 export class ApiError extends Error {
   code?: string;
