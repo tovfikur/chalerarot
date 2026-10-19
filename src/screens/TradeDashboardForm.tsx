@@ -56,10 +56,10 @@ export function TradeDashboardForm({ mode, onDone }: TradeDashboardFormProps) {
 
   // Party selection state
   const [selectedPartyId, setSelectedPartyId] = useState<string>('');
-  const [partyCode, setPartyCode] = useState('345');
-  const [partyName, setPartyName] = useState('আশরাফ');
-  const [partyMobile, setPartyMobile] = useState('199');
-  const [partyAddress, setPartyAddress] = useState('ঢাকা');
+  const [partyCode, setPartyCode] = useState('340');
+  const [partyName, setPartyName] = useState('');
+  const [partyMobile, setPartyMobile] = useState('');
+  const [partyAddress, setPartyAddress] = useState('');
   const [partyDropdownOpen, setPartyDropdownOpen] = useState(false);
   const [partyHighlightIdx, setPartyHighlightIdx] = useState(0);
 
@@ -1050,12 +1050,6 @@ export function TradeDashboardForm({ mode, onDone }: TradeDashboardFormProps) {
                       placeholder={lang === 'bn' ? 'কোড (১, ২...)' : 'Code (1, 2...)'}
                       returnKeyType="next"
                     />
-                    <TouchableOpacity
-                      onPress={() => setActiveItemDropdownIdx(activeItemDropdownIdx === rowIdx ? null : rowIdx)}
-                      style={styles.tableIconWrap}
-                    >
-                      <AppIcon name={icons.search} size={16} iconColor="#1c70b9" />
-                    </TouchableOpacity>
                   </View>
 
                   {/* Product Dropdown (from Code) */}
