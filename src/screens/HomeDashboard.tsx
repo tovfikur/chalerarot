@@ -3,7 +3,7 @@ import { View, Text, TextInput, TouchableOpacity, ScrollView, StyleSheet, Platfo
 import { useApp, today, Product, SaleRec } from '../store';
 import { useMoney, useNum, useDateStr, toBnDigits, color } from '../ui';
 import { AppIcon, icons } from '../icons';
-import { useBreakpoint, useFs } from '../responsive';
+import { useBreakpoint } from '../responsive';
 import { fmtTime } from '../invoice';
 
 interface HomeDashboardProps {
@@ -20,15 +20,12 @@ export function HomeDashboard({
   onDrillDown,
 }: HomeDashboardProps) {
   const {
-    t,
     lang,
     stats,
     customers,
     vendors,
     sales,
     products,
-    expenses,
-    returns,
     moneyAccounts,
     bal,
   } = useApp();
@@ -38,18 +35,15 @@ export function HomeDashboard({
   const fd = useDateStr();
   const s = stats();
   const td = today();
-  const { isDesktop, isTablet, isMobile } = useBreakpoint();
+  const { isDesktop } = useBreakpoint();
 
-  // Invoice tab filter: 'today' | 'due' | 'all'
+  // Tab filter: 'today' | 'due' | 'all'
   const [invoiceTab, setInvoiceTab] = useState<'today' | 'due' | 'all'>('today');
-  // Stock search filter
-  const [stockQuery, setStockQuery] = useState('');
 
   // Today's data
   const tSales = useMemo(() => sales.filter(x => x.date === td), [sales, td]);
-  const tExp = useMemo(() => expenses.filter(e => e.date === td), [expenses, td]);
 
-  // Customer helper
+  // Customer name lookup
   const custName = (id?: string) => {
     if (!id || id === 'cash') return lang === 'bn' ? 'নগদ বিক্রয়' : 'Cash Sale';
     return customers.find(c => c.id === id)?.name ?? (lang === 'bn' ? 'নগদ বিক্রয়' : 'Cash Sale');
@@ -65,7 +59,6 @@ export function HomeDashboard({
     } else {
       list = sales;
     }
-    // Return newest first (limit 8 for dashboard view)
     return list.slice(0, 8);
   }, [invoiceTab, tSales, sales]);
 
@@ -86,35 +79,22 @@ export function HomeDashboard({
   }, [products]);
 
   const totalStockBags = useMemo(() => stockSummary.reduce((sum, item) => sum + item.physicalBags, 0), [stockSummary]);
-  const totalStockKg = useMemo(() => products.reduce((sum, p) => sum + Math.max(0, p.qty), 0), [products]);
   const totalStockVal = useMemo(() => stockSummary.reduce((sum, item) => sum + item.stockVal, 0), [stockSummary]);
 
-  // Filtered products for stock widget
-  const filteredStock = useMemo(() => {
-    const q = stockQuery.trim().toLowerCase();
-    if (!q) return stockSummary.slice(0, 6);
-    return stockSummary.filter(item => item.product.name.toLowerCase().includes(q)).slice(0, 6);
-  }, [stockSummary, stockQuery]);
+  // Top stock items for clean widget
+  const topStock = useMemo(() => {
+    return [...stockSummary].sort((a, b) => b.physicalBags - a.physicalBags).slice(0, 6);
+  }, [stockSummary]);
 
-  // Total cash & bank balances
+  // Liquid cash & bank balances
   const totalLiquidMoney = useMemo(() => {
     return moneyAccounts.reduce((sum, acc) => sum + (acc.balance || 0), 0);
   }, [moneyAccounts]);
 
-  // Top due customers
-  const topDueCustomers = useMemo(() => {
-    return customers
-      .map(c => ({ customer: c, due: bal('c', c.id).balance }))
-      .filter(item => item.due > 0)
-      .sort((a, b) => b.due - a.due)
-      .slice(0, 5);
-  }, [customers, bal]);
-
-  // Active counts
   const activeDueCustCount = useMemo(() => customers.filter(c => bal('c', c.id).balance > 0).length, [customers, bal]);
   const activePayableVendCount = useMemo(() => vendors.filter(v => bal('v', v.id).balance > 0).length, [vendors, bal]);
 
-  // Format today's date in a pleasant display string
+  // Today formatted
   const formattedToday = useMemo(() => {
     const now = new Date();
     const day = now.getDate();
@@ -128,753 +108,423 @@ export function HomeDashboard({
   }, [lang]);
 
   return (
-    <View style={dashStyles.container}>
-      {/* 1. Header: Welcome Banner & Fast Actions */}
-      <View style={dashStyles.headerCard}>
-        <View style={dashStyles.headerLeft}>
-          <View style={dashStyles.brandBadge}>
-            <AppIcon name={icons.stock} size={28} iconColor="#1B7F4B" />
-          </View>
-          <View>
-            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
-              <Text style={dashStyles.headerTitle}>
-                {lang === 'bn' ? 'চালের আড়ত ড্যাশবোর্ড' : 'Chaler Arot Dashboard'}
-              </Text>
-              <View style={dashStyles.statusLiveBadge}>
-                <View style={dashStyles.statusDot} />
-                <Text style={dashStyles.statusText}>
-                  {lang === 'bn' ? 'সিস্টেম লাইভ' : 'Live'}
-                </Text>
-              </View>
-            </View>
-            <Text style={dashStyles.headerSubtitle}>
-              {lang === 'bn'
-                ? `আজকের তারিখ: ${formattedToday} • চালের পাইকারি আড়ত ও সার্বিক হিসাব`
-                : `Date: ${formattedToday} • Rice Wholesale & Financial Overview`}
+    <View style={styles.container}>
+      {/* 1. MINIMALIST EXECUTIVE HEADER */}
+      <View style={styles.header}>
+        <View style={styles.headerInfo}>
+          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10 }}>
+            <Text style={styles.headerTitle}>
+              {lang === 'bn' ? 'চালের আড়ত' : 'Chaler Arot'}
             </Text>
+            <View style={styles.liveBadge}>
+              <View style={styles.liveDot} />
+              <Text style={styles.liveText}>{lang === 'bn' ? 'সিস্টেম সক্রিয়' : 'Live'}</Text>
+            </View>
           </View>
+          <Text style={styles.headerSubtitle}>
+            {lang === 'bn' ? `আজ: ${formattedToday} • পাইকারি আড়ত ও ব্যবসায়িক হিসাব` : `Date: ${formattedToday} • Wholesale Dashboard`}
+          </Text>
         </View>
 
-        {/* Quick Action Navigation Buttons */}
-        <View style={dashStyles.actionsBar}>
+        {/* Primary Quick Actions */}
+        <View style={styles.actionGroup}>
           <TouchableOpacity
             activeOpacity={0.85}
             onPress={() => go?.('sale')}
-            style={[dashStyles.actionBtn, { backgroundColor: '#1B7F4B' }]}
+            style={[styles.actionBtn, styles.btnSale]}
           >
-            <AppIcon name={icons.sale} size={18} iconColor="#fff" />
-            <Text style={dashStyles.actionBtnText}>{lang === 'bn' ? 'নতুন বিক্রয়' : 'New Sale'}</Text>
+            <AppIcon name={icons.sale} size={16} iconColor="#FFFFFF" />
+            <Text style={styles.actionBtnText}>{lang === 'bn' ? 'নতুন বিক্রয়' : 'New Sale'}</Text>
           </TouchableOpacity>
 
           <TouchableOpacity
             activeOpacity={0.85}
             onPress={() => go?.('purchase')}
-            style={[dashStyles.actionBtn, { backgroundColor: '#1E3A8A' }]}
+            style={[styles.actionBtn, styles.btnPurchase]}
           >
-            <AppIcon name={icons.purchase} size={18} iconColor="#fff" />
-            <Text style={dashStyles.actionBtnText}>{lang === 'bn' ? 'চাল ক্রয়' : 'Purchase'}</Text>
+            <AppIcon name={icons.purchase} size={16} iconColor="#FFFFFF" />
+            <Text style={styles.actionBtnText}>{lang === 'bn' ? 'চাল ক্রয়' : 'Purchase'}</Text>
           </TouchableOpacity>
 
           <TouchableOpacity
             activeOpacity={0.85}
-            onPress={() => go?.('collect')}
-            style={[dashStyles.actionBtn, { backgroundColor: '#0284C7' }]}
+            onPress={() => go?.('accounts')}
+            style={[styles.actionBtn, styles.btnSecondary]}
           >
-            <AppIcon name={icons.collect} size={18} iconColor="#fff" />
-            <Text style={dashStyles.actionBtnText}>{lang === 'bn' ? 'টাকা আদায়' : 'Collect'}</Text>
-          </TouchableOpacity>
-
-          <TouchableOpacity
-            activeOpacity={0.85}
-            onPress={() => go?.('expense')}
-            style={[dashStyles.actionBtn, { backgroundColor: '#D97706' }]}
-          >
-            <AppIcon name={icons.expense} size={18} iconColor="#fff" />
-            <Text style={dashStyles.actionBtnText}>{lang === 'bn' ? 'খরচ এন্ট্রি' : 'Expense'}</Text>
-          </TouchableOpacity>
-
-          <TouchableOpacity
-            activeOpacity={0.85}
-            onPress={() => go?.('stock')}
-            style={[dashStyles.actionBtn, { backgroundColor: '#475569' }]}
-          >
-            <AppIcon name={icons.stock} size={18} iconColor="#fff" />
-            <Text style={dashStyles.actionBtnText}>{lang === 'bn' ? 'স্টক রিপোর্ট' : 'Stock'}</Text>
+            <AppIcon name={icons.accounts} size={16} iconColor="#1E293B" />
+            <Text style={styles.btnSecondaryText}>{lang === 'bn' ? 'হিসাব খাতা' : 'Accounts'}</Text>
           </TouchableOpacity>
         </View>
       </View>
 
-      {/* 2. Today's Core Performance KPIs (Clickable Drilldown) */}
-      <View style={dashStyles.sectionHeaderRow}>
-        <Text style={dashStyles.sectionTitle}>
-          {lang === 'bn' ? 'আজকের ব্যবসায়িক হিসাব (Today\'s Overview)' : 'Today\'s Business Summary'}
-        </Text>
-        <Text style={dashStyles.sectionHint}>
-          {lang === 'bn' ? '* কার্ডে ক্লিক করে বিস্তারিত হিসাব দেখুন' : '* Click card for detailed breakdown'}
-        </Text>
-      </View>
-
-      <View style={dashStyles.kpiGrid}>
+      {/* 2. 4 EXECUTIVE KPI CARDS */}
+      <View style={styles.kpiGrid}>
         {/* Today's Sales */}
         <TouchableOpacity
           activeOpacity={0.85}
           onPress={() => onDrillDown('sale')}
-          style={dashStyles.kpiCard}
+          style={styles.kpiCard}
         >
-          <View style={dashStyles.kpiTop}>
-            <View style={[dashStyles.kpiIconWrapper, { backgroundColor: '#E8F5E9' }]}>
-              <AppIcon name={icons.sale} size={24} iconColor="#1B7F4B" />
-            </View>
-            <View style={[dashStyles.kpiBadge, { backgroundColor: '#DCFCE7' }]}>
-              <Text style={[dashStyles.kpiBadgeText, { color: '#15803D' }]}>
-                {lang === 'bn' ? `${toBnDigits(tSales.length)} টি চালান` : `${tSales.length} Invoices`}
+          <View style={styles.kpiHeader}>
+            <Text style={styles.kpiTitle}>{lang === 'bn' ? 'আজকের বিক্রয়' : "Today's Sales"}</Text>
+            <View style={[styles.kpiBadge, { backgroundColor: '#ECFDF5' }]}>
+              <Text style={[styles.kpiBadgeText, { color: '#059669' }]}>
+                {lang === 'bn' ? `${toBnDigits(tSales.length)} চালান` : `${tSales.length} Invoices`}
               </Text>
             </View>
           </View>
-          <Text style={dashStyles.kpiLabel}>{lang === 'bn' ? 'আজকের মোট বিক্রয়' : 'Today\'s Sales'}</Text>
-          <Text style={[dashStyles.kpiValue, { color: '#1B7F4B' }]}>{m(s.todaySale)}</Text>
-          <View style={dashStyles.kpiFooter}>
-            <Text style={dashStyles.kpiFooterText}>
-              {lang === 'bn' ? 'চাল বিক্রয় ও চালান তালিকা →' : 'View sales invoices →'}
-            </Text>
-          </View>
+          <Text style={[styles.kpiAmount, { color: '#0F172A' }]}>{m(s.todaySale)}</Text>
+          <Text style={styles.kpiFooterLink}>
+            {lang === 'bn' ? 'চালান তালিকা দেখুন →' : 'View invoices →'}
+          </Text>
         </TouchableOpacity>
 
         {/* Today's Collection */}
         <TouchableOpacity
           activeOpacity={0.85}
           onPress={() => onDrillDown('collect')}
-          style={dashStyles.kpiCard}
+          style={styles.kpiCard}
         >
-          <View style={dashStyles.kpiTop}>
-            <View style={[dashStyles.kpiIconWrapper, { backgroundColor: '#EFF6FF' }]}>
-              <AppIcon name={icons.collect} size={24} iconColor="#2563EB" />
-            </View>
-            <View style={[dashStyles.kpiBadge, { backgroundColor: '#DBEAFE' }]}>
-              <Text style={[dashStyles.kpiBadgeText, { color: '#1E40AF' }]}>
-                {lang === 'bn' ? 'ক্যাশ ও ব্যাংক' : 'Cash & Bank'}
+          <View style={styles.kpiHeader}>
+            <Text style={styles.kpiTitle}>{lang === 'bn' ? 'আজকের নগদ আদায়' : "Today's Collection"}</Text>
+            <View style={[styles.kpiBadge, { backgroundColor: '#EFF6FF' }]}>
+              <Text style={[styles.kpiBadgeText, { color: '#2563EB' }]}>
+                {lang === 'bn' ? 'ক্যাশ/ব্যাংক' : 'Cash/Bank'}
               </Text>
             </View>
           </View>
-          <Text style={dashStyles.kpiLabel}>{lang === 'bn' ? 'আজকের নগদ আদায়' : 'Today\'s Collection'}</Text>
-          <Text style={[dashStyles.kpiValue, { color: '#2563EB' }]}>{m(s.todayCollect)}</Text>
-          <View style={dashStyles.kpiFooter}>
-            <Text style={dashStyles.kpiFooterText}>
-              {lang === 'bn' ? 'কাস্টমারদের জমার খাতা →' : 'Customer payments →'}
-            </Text>
-          </View>
-        </TouchableOpacity>
-
-        {/* Today's Due */}
-        <TouchableOpacity
-          activeOpacity={0.85}
-          onPress={() => onDrillDown('due')}
-          style={dashStyles.kpiCard}
-        >
-          <View style={dashStyles.kpiTop}>
-            <View style={[dashStyles.kpiIconWrapper, { backgroundColor: '#FEE2E2' }]}>
-              <AppIcon name={icons.pay} size={24} iconColor="#DC2626" />
-            </View>
-            <View style={[dashStyles.kpiBadge, { backgroundColor: '#FEE2E2' }]}>
-              <Text style={[dashStyles.kpiBadgeText, { color: '#B91C1C' }]}>
-                {lang === 'bn' ? 'নতুন বাকি' : 'New Due'}
-              </Text>
-            </View>
-          </View>
-          <Text style={dashStyles.kpiLabel}>{lang === 'bn' ? 'আজকের নতুন বাকি' : 'Today\'s Due'}</Text>
-          <Text style={[dashStyles.kpiValue, { color: s.todayDue > 0 ? '#DC2626' : '#10B981' }]}>
-            {m(s.todayDue)}
+          <Text style={[styles.kpiAmount, { color: '#2563EB' }]}>{m(s.todayCollect)}</Text>
+          <Text style={styles.kpiFooterLink}>
+            {lang === 'bn' ? 'জমার খাতা দেখুন →' : 'View collection →'}
           </Text>
-          <View style={dashStyles.kpiFooter}>
-            <Text style={dashStyles.kpiFooterText}>
-              {lang === 'bn' ? 'আজকের বাকি চালানসমূহ →' : 'Today\'s due invoices →'}
-            </Text>
-          </View>
         </TouchableOpacity>
 
-        {/* Today's Net Profit */}
+        {/* Today's Profit */}
         <TouchableOpacity
           activeOpacity={0.85}
           onPress={() => onDrillDown('profit')}
-          style={dashStyles.kpiCard}
+          style={styles.kpiCard}
         >
-          <View style={dashStyles.kpiTop}>
-            <View style={[dashStyles.kpiIconWrapper, { backgroundColor: '#FEF3C7' }]}>
-              <AppIcon name={icons.profit} size={24} iconColor="#D97706" />
-            </View>
-            <View style={[dashStyles.kpiBadge, { backgroundColor: '#FEF3C7' }]}>
-              <Text style={[dashStyles.kpiBadgeText, { color: '#B45309' }]}>
-                {lang === 'bn' ? 'নীট লাভ' : 'Net Margin'}
+          <View style={styles.kpiHeader}>
+            <Text style={styles.kpiTitle}>{lang === 'bn' ? 'আজকের নীট লাভ' : "Today's Profit"}</Text>
+            <View style={[styles.kpiBadge, { backgroundColor: '#FEF3C7' }]}>
+              <Text style={[styles.kpiBadgeText, { color: '#D97706' }]}>
+                {lang === 'bn' ? 'মার্জিন' : 'Margin'}
               </Text>
             </View>
           </View>
-          <Text style={dashStyles.kpiLabel}>{lang === 'bn' ? 'আজকের নীট লাভ' : 'Today\'s Profit'}</Text>
-          <Text style={[dashStyles.kpiValue, { color: s.todayProfit >= 0 ? '#15803D' : '#DC2626' }]}>
+          <Text style={[styles.kpiAmount, { color: s.todayProfit >= 0 ? '#059669' : '#DC2626' }]}>
             {m(s.todayProfit)}
           </Text>
-          <View style={dashStyles.kpiFooter}>
-            <Text style={dashStyles.kpiFooterText}>
-              {lang === 'bn' ? 'লাভ ও ব্যয়ের বিশ্লেষণ →' : 'Profit breakdown →'}
-            </Text>
-          </View>
-        </TouchableOpacity>
-      </View>
-
-      {/* 3. Secondary Financial Snapshot & Stock Valuation */}
-      <View style={dashStyles.snapshotRow}>
-        {/* Total Market Due */}
-        <TouchableOpacity
-          activeOpacity={0.85}
-          onPress={() => go?.('customers')}
-          style={dashStyles.snapshotCard}
-        >
-          <View style={dashStyles.snapshotIcon}>
-            <AppIcon name={icons.customers} size={22} iconColor="#DC2626" />
-          </View>
-          <View style={{ flex: 1 }}>
-            <Text style={dashStyles.snapshotLabel}>{lang === 'bn' ? 'মোট বাজার বাকি (কাস্টমার)' : 'Total Market Due'}</Text>
-            <Text style={[dashStyles.snapshotVal, { color: '#DC2626' }]}>{m(s.due)}</Text>
-            <Text style={dashStyles.snapshotSub}>
-              {lang === 'bn' ? `${toBnDigits(activeDueCustCount)} জন কাস্টমারের বাকি` : `${activeDueCustCount} parties`}
-            </Text>
-          </View>
-          <AppIcon name={icons.chevR} size={20} iconColor="#94A3B8" />
+          <Text style={styles.kpiFooterLink}>
+            {lang === 'bn' ? 'লাভ বিশ্লেষণ →' : 'Profit breakdown →'}
+          </Text>
         </TouchableOpacity>
 
-        {/* Total Vendor Payables */}
-        <TouchableOpacity
-          activeOpacity={0.85}
-          onPress={() => go?.('vendors')}
-          style={dashStyles.snapshotCard}
-        >
-          <View style={dashStyles.snapshotIcon}>
-            <AppIcon name={icons.vendors} size={22} iconColor="#D97706" />
-          </View>
-          <View style={{ flex: 1 }}>
-            <Text style={dashStyles.snapshotLabel}>{lang === 'bn' ? 'মিল ও মহাজন দেনা' : 'Vendor Payables'}</Text>
-            <Text style={[dashStyles.snapshotVal, { color: '#D97706' }]}>{m(s.payable)}</Text>
-            <Text style={dashStyles.snapshotSub}>
-              {lang === 'bn' ? `${toBnDigits(activePayableVendCount)} টি মিল/সরবরাহকারী` : `${activePayableVendCount} vendors`}
-            </Text>
-          </View>
-          <AppIcon name={icons.chevR} size={20} iconColor="#94A3B8" />
-        </TouchableOpacity>
-
-        {/* Liquid Cash & Bank */}
-        <TouchableOpacity
-          activeOpacity={0.85}
-          onPress={() => go?.('bank')}
-          style={dashStyles.snapshotCard}
-        >
-          <View style={dashStyles.snapshotIcon}>
-            <AppIcon name={icons.bankCash} size={22} iconColor="#2563EB" />
-          </View>
-          <View style={{ flex: 1 }}>
-            <Text style={dashStyles.snapshotLabel}>{lang === 'bn' ? 'হাতে নগদ ও ব্যাংক ব্যালেন্স' : 'Liquid Cash & Bank'}</Text>
-            <Text style={[dashStyles.snapshotVal, { color: '#2563EB' }]}>{m(totalLiquidMoney)}</Text>
-            <Text style={dashStyles.snapshotSub}>
-              {lang === 'bn' ? `${toBnDigits(moneyAccounts.length)} টি একাউন্ট স্থিতি` : `${moneyAccounts.length} accounts`}
-            </Text>
-          </View>
-          <AppIcon name={icons.chevR} size={20} iconColor="#94A3B8" />
-        </TouchableOpacity>
-
-        {/* Rice Godown Stock */}
+        {/* Godown Stock Value */}
         <TouchableOpacity
           activeOpacity={0.85}
           onPress={() => go?.('stock')}
-          style={dashStyles.snapshotCard}
+          style={styles.kpiCard}
         >
-          <View style={dashStyles.snapshotIcon}>
-            <AppIcon name={icons.stock} size={22} iconColor="#1B7F4B" />
+          <View style={styles.kpiHeader}>
+            <Text style={styles.kpiTitle}>{lang === 'bn' ? 'গুদামে মোট মজুদ' : 'Godown Stock'}</Text>
+            <View style={[styles.kpiBadge, { backgroundColor: '#F1F5F9' }]}>
+              <Text style={[styles.kpiBadgeText, { color: '#475569' }]}>
+                {lang === 'bn' ? `${toBnDigits(totalStockBags)} বস্তা` : `${totalStockBags} Bags`}
+              </Text>
+            </View>
           </View>
-          <View style={{ flex: 1 }}>
-            <Text style={dashStyles.snapshotLabel}>{lang === 'bn' ? 'গুদামে চালের মোট মজুদ' : 'Total Rice in Stock'}</Text>
-            <Text style={[dashStyles.snapshotVal, { color: '#1B7F4B' }]}>
-              {lang === 'bn' ? `${toBnDigits(totalStockBags)} বস্তা` : `${totalStockBags} Bags`}
-            </Text>
-            <Text style={dashStyles.snapshotSub}>
-              {lang === 'bn' ? `মূল্য আনুমানিক ${m(totalStockVal)}` : `Est: ${m(totalStockVal)}`}
-            </Text>
-          </View>
-          <AppIcon name={icons.chevR} size={20} iconColor="#94A3B8" />
+          <Text style={[styles.kpiAmount, { color: '#1E293B' }]}>{m(totalStockVal)}</Text>
+          <Text style={styles.kpiFooterLink}>
+            {lang === 'bn' ? 'স্টক ড্যাশবোর্ড →' : 'Open stock →'}
+          </Text>
         </TouchableOpacity>
       </View>
 
-      {/* 4. Main Two-Column Analytics Grid */}
-      <View style={[dashStyles.mainGrid, isDesktop ? { flexDirection: 'row' } : { flexDirection: 'column' }]}>
-        
-        {/* Left Column: Recent Sales Invoices */}
-        <View style={[dashStyles.gridCol, isDesktop ? { flex: 1.2 } : { width: '100%' }]}>
-          <View style={dashStyles.panelCard}>
-            <View style={dashStyles.panelHeader}>
-              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10 }}>
-                <View style={[dashStyles.panelHeaderIcon, { backgroundColor: '#E8F5E9' }]}>
-                  <AppIcon name={icons.sale} size={20} iconColor="#1B7F4B" />
-                </View>
-                <View>
-                  <Text style={dashStyles.panelTitle}>
-                    {lang === 'bn' ? 'সাম্প্রতিক চাল বিক্রয় ও চালান' : 'Recent Sales & Invoices'}
-                  </Text>
-                  <Text style={dashStyles.panelSubtitle}>
-                    {lang === 'bn' ? 'আজকের বিক্রয় ও বকেয়া চালানসমূহ' : 'Latest invoice records'}
-                  </Text>
-                </View>
-              </View>
+      {/* 3. FINANCIAL STANDING STRIP */}
+      <View style={styles.snapshotStrip}>
+        <TouchableOpacity
+          activeOpacity={0.75}
+          onPress={() => go?.('customers')}
+          style={styles.snapshotItem}
+        >
+          <Text style={styles.snapshotLabel}>{lang === 'bn' ? 'কাস্টমার মোট বাকি' : 'Customer Market Due'}</Text>
+          <Text style={[styles.snapshotVal, { color: '#DC2626' }]}>{m(s.due)}</Text>
+          <Text style={styles.snapshotSub}>
+            {lang === 'bn' ? `${toBnDigits(activeDueCustCount)} জন কাস্টমার` : `${activeDueCustCount} parties`}
+          </Text>
+        </TouchableOpacity>
 
-              {/* Segmented Filter Pills */}
-              <View style={dashStyles.pillFilterRow}>
-                <TouchableOpacity
-                  onPress={() => setInvoiceTab('today')}
-                  style={[dashStyles.filterPill, invoiceTab === 'today' && dashStyles.filterPillActive]}
-                >
-                  <Text style={[dashStyles.filterPillText, invoiceTab === 'today' && dashStyles.filterPillTextActive]}>
-                    {lang === 'bn' ? `আজকের (${toBnDigits(tSales.length)})` : `Today (${tSales.length})`}
-                  </Text>
-                </TouchableOpacity>
+        <View style={styles.snapshotDivider} />
 
-                <TouchableOpacity
-                  onPress={() => setInvoiceTab('due')}
-                  style={[dashStyles.filterPill, invoiceTab === 'due' && dashStyles.filterPillActive]}
-                >
-                  <Text style={[dashStyles.filterPillText, invoiceTab === 'due' && dashStyles.filterPillTextActive]}>
-                    {lang === 'bn' ? 'বাকি চালান' : 'Due'}
-                  </Text>
-                </TouchableOpacity>
+        <TouchableOpacity
+          activeOpacity={0.75}
+          onPress={() => go?.('vendors')}
+          style={styles.snapshotItem}
+        >
+          <Text style={styles.snapshotLabel}>{lang === 'bn' ? 'মিল ও মহাজন দেনা' : 'Vendor Payables'}</Text>
+          <Text style={[styles.snapshotVal, { color: '#D97706' }]}>{m(s.payable)}</Text>
+          <Text style={styles.snapshotSub}>
+            {lang === 'bn' ? `${toBnDigits(activePayableVendCount)} টি মিল/সরবরাহকারী` : `${activePayableVendCount} vendors`}
+          </Text>
+        </TouchableOpacity>
 
-                <TouchableOpacity
-                  onPress={() => setInvoiceTab('all')}
-                  style={[dashStyles.filterPill, invoiceTab === 'all' && dashStyles.filterPillActive]}
-                >
-                  <Text style={[dashStyles.filterPillText, invoiceTab === 'all' && dashStyles.filterPillTextActive]}>
-                    {lang === 'bn' ? 'সকল চালান' : 'All'}
-                  </Text>
-                </TouchableOpacity>
-              </View>
+        <View style={styles.snapshotDivider} />
+
+        <TouchableOpacity
+          activeOpacity={0.75}
+          onPress={() => go?.('bank')}
+          style={styles.snapshotItem}
+        >
+          <Text style={styles.snapshotLabel}>{lang === 'bn' ? 'ক্যাশ ও ব্যাংক স্থিতি' : 'Cash & Bank Balance'}</Text>
+          <Text style={[styles.snapshotVal, { color: '#2563EB' }]}>{m(totalLiquidMoney)}</Text>
+          <Text style={styles.snapshotSub}>
+            {lang === 'bn' ? `${toBnDigits(moneyAccounts.length)} টি একাউন্ট` : `${moneyAccounts.length} accounts`}
+          </Text>
+        </TouchableOpacity>
+      </View>
+
+      {/* 4. MAIN OPERATING 2-COLUMN SECTION */}
+      <View style={[styles.mainLayout, isDesktop ? { flexDirection: 'row' } : { flexDirection: 'column' }]}>
+        {/* Left Column: Recent Sales */}
+        <View style={[styles.columnCard, isDesktop ? { flex: 1.3 } : { width: '100%' }]}>
+          <View style={styles.cardTop}>
+            <View>
+              <Text style={styles.cardHeading}>{lang === 'bn' ? 'সাম্প্রতিক বিক্রয় চালান' : 'Recent Invoices'}</Text>
+              <Text style={styles.cardSubheading}>{lang === 'bn' ? 'সর্বশেষ চালানসমূহ' : 'Latest sales records'}</Text>
             </View>
 
-            {/* Invoices List */}
-            <View style={dashStyles.invoicesList}>
-              {displaySales.length === 0 ? (
-                <View style={dashStyles.emptyState}>
-                  <AppIcon name={icons.calc} size={36} iconColor="#94A3B8" />
-                  <Text style={dashStyles.emptyText}>
-                    {lang === 'bn' ? 'এই তালিকায় কোনো চালান পাওয়া যায়নি।' : 'No invoices found.'}
-                  </Text>
+            {/* Filter Pills */}
+            <View style={styles.pillGroup}>
+              <TouchableOpacity
+                onPress={() => setInvoiceTab('today')}
+                style={[styles.pill, invoiceTab === 'today' && styles.pillActive]}
+              >
+                <Text style={[styles.pillText, invoiceTab === 'today' && styles.pillTextActive]}>
+                  {lang === 'bn' ? `আজকের (${toBnDigits(tSales.length)})` : `Today (${tSales.length})`}
+                </Text>
+              </TouchableOpacity>
+
+              <TouchableOpacity
+                onPress={() => setInvoiceTab('due')}
+                style={[styles.pill, invoiceTab === 'due' && styles.pillActive]}
+              >
+                <Text style={[styles.pillText, invoiceTab === 'due' && styles.pillTextActive]}>
+                  {lang === 'bn' ? 'বাকি' : 'Due'}
+                </Text>
+              </TouchableOpacity>
+
+              <TouchableOpacity
+                onPress={() => setInvoiceTab('all')}
+                style={[styles.pill, invoiceTab === 'all' && styles.pillActive]}
+              >
+                <Text style={[styles.pillText, invoiceTab === 'all' && styles.pillTextActive]}>
+                  {lang === 'bn' ? 'সকল' : 'All'}
+                </Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+
+          {/* Invoice List */}
+          <View style={styles.invoiceList}>
+            {displaySales.length === 0 ? (
+              <View style={styles.emptyWrap}>
+                <Text style={styles.emptyMessage}>
+                  {lang === 'bn' ? 'কোনো চালান পাওয়া যায়নি।' : 'No invoices found.'}
+                </Text>
+                <TouchableOpacity onPress={() => go?.('sale')} style={styles.emptyAddBtn}>
+                  <Text style={styles.emptyAddBtnText}>{lang === 'bn' ? '+ নতুন চালান তৈরি করুন' : '+ New Invoice'}</Text>
+                </TouchableOpacity>
+              </View>
+            ) : (
+              displaySales.map((sale, idx) => {
+                const isDue = (sale.total - sale.paid) > 0;
+                const isPaid = sale.paid >= sale.total;
+                const isPartial = sale.paid > 0 && !isPaid;
+
+                return (
                   <TouchableOpacity
-                    onPress={() => go?.('sale')}
-                    style={dashStyles.emptyBtn}
+                    key={sale.id || idx}
+                    activeOpacity={0.7}
+                    onPress={() => onOpenInvoice(sale.id)}
+                    style={styles.invoiceRow}
                   >
-                    <Text style={dashStyles.emptyBtnText}>
-                      {lang === 'bn' ? '+ নতুন চালান তৈরি করুন' : '+ Create Invoice'}
-                    </Text>
-                  </TouchableOpacity>
-                </View>
-              ) : (
-                displaySales.map((sale, idx) => {
-                  const isDue = (sale.total - sale.paid) > 0;
-                  const isPaid = sale.paid >= sale.total;
-                  const isPartial = sale.paid > 0 && !isPaid;
-                  return (
-                    <TouchableOpacity
-                      key={sale.id || idx}
-                      activeOpacity={0.7}
-                      onPress={() => onOpenInvoice(sale.id)}
-                      style={dashStyles.invoiceRow}
-                    >
-                      <View style={dashStyles.invoiceRowLeft}>
-                        <View style={dashStyles.invBadge}>
-                          <Text style={dashStyles.invBadgeText}>
-                            {sale.invoiceNo || (lang === 'bn' ? 'চালান' : 'INV')}
+                    <View style={styles.invLeft}>
+                      <View style={styles.invNoBadge}>
+                        <Text style={styles.invNoText}>{sale.invoiceNo || (lang === 'bn' ? 'চালান' : 'INV')}</Text>
+                      </View>
+                      <View>
+                        <Text style={styles.invCust}>{custName(sale.customerId)}</Text>
+                        <Text style={styles.invDate}>
+                          {sale.createdAt ? fmtTime(sale.createdAt, lang === 'bn') : fd(sale.date)}
+                        </Text>
+                      </View>
+                    </View>
+
+                    <View style={styles.invRight}>
+                      <View style={{ alignItems: 'flex-end', marginRight: 10 }}>
+                        <Text style={styles.invTotal}>{m(sale.total)}</Text>
+                        {isDue ? (
+                          <Text style={styles.invDue}>
+                            {lang === 'bn' ? `বাকি: ${m(sale.total - sale.paid)}` : `Due: ${m(sale.total - sale.paid)}`}
                           </Text>
-                        </View>
-                        <View>
-                          <Text style={dashStyles.invCustomerName}>
-                            {custName(sale.customerId)}
-                          </Text>
-                          <Text style={dashStyles.invTime}>
-                            {sale.createdAt ? fmtTime(sale.createdAt, lang === 'bn') : fd(sale.date)}
-                          </Text>
-                        </View>
+                        ) : null}
                       </View>
 
-                      <View style={dashStyles.invoiceRowRight}>
-                        <View style={{ alignItems: 'flex-end', marginRight: 10 }}>
-                          <Text style={dashStyles.invTotal}>{m(sale.total)}</Text>
-                          {isDue ? (
-                            <Text style={dashStyles.invDue}>
-                              {lang === 'bn' ? `বাকি: ${m(sale.total - sale.paid)}` : `Due: ${m(sale.total - sale.paid)}`}
-                            </Text>
-                          ) : (
-                            <Text style={dashStyles.invPaid}>{lang === 'bn' ? 'সম্পূর্ণ পরিশোধ' : 'Fully Paid'}</Text>
-                          )}
-                        </View>
-
-                        <View style={[
-                          dashStyles.statusPill,
-                          isPaid ? { backgroundColor: '#DCFCE7' } : isPartial ? { backgroundColor: '#FEF3C7' } : { backgroundColor: '#FEE2E2' }
+                      <View style={[
+                        styles.statusBadge,
+                        isPaid ? { backgroundColor: '#DCFCE7' } : isPartial ? { backgroundColor: '#FEF3C7' } : { backgroundColor: '#FEE2E2' }
+                      ]}>
+                        <Text style={[
+                          styles.statusBadgeText,
+                          isPaid ? { color: '#15803D' } : isPartial ? { color: '#B45309' } : { color: '#B91C1C' }
                         ]}>
-                          <Text style={[
-                            dashStyles.statusPillText,
-                            isPaid ? { color: '#15803D' } : isPartial ? { color: '#B45309' } : { color: '#B91C1C' }
-                          ]}>
-                            {isPaid ? (lang === 'bn' ? 'পরিশোধিত' : 'Paid') : isPartial ? (lang === 'bn' ? 'আংশিক' : 'Partial') : (lang === 'bn' ? 'বাকি' : 'Due')}
-                          </Text>
-                        </View>
+                          {isPaid ? (lang === 'bn' ? 'পরিশোধ' : 'Paid') : isPartial ? (lang === 'bn' ? 'আংশিক' : 'Partial') : (lang === 'bn' ? 'বাকি' : 'Due')}
+                        </Text>
                       </View>
-                    </TouchableOpacity>
-                  );
-                })
-              )}
-            </View>
+                    </View>
+                  </TouchableOpacity>
+                );
+              })
+            )}
+          </View>
 
-            <View style={dashStyles.panelFooter}>
-              <TouchableOpacity
-                onPress={() => go?.('sale')}
-                style={dashStyles.footerLink}
-              >
-                <Text style={dashStyles.footerLinkText}>
-                  {lang === 'bn' ? 'সকল বিক্রয় চালান ও বিস্তারিত খাতা দেখুন →' : 'View full sales ledger →'}
-                </Text>
-              </TouchableOpacity>
-            </View>
+          <View style={styles.cardBottom}>
+            <TouchableOpacity onPress={() => go?.('sale')}>
+              <Text style={styles.bottomLinkText}>
+                {lang === 'bn' ? 'সকল বিক্রয় ও বিস্তারিত খাতা দেখুন →' : 'View all sales →'}
+              </Text>
+            </TouchableOpacity>
           </View>
         </View>
 
-        {/* Right Column: Rice Godown Stock Status */}
-        <View style={[dashStyles.gridCol, isDesktop ? { flex: 1 } : { width: '100%' }]}>
-          <View style={dashStyles.panelCard}>
-            <View style={dashStyles.panelHeader}>
-              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10 }}>
-                <View style={[dashStyles.panelHeaderIcon, { backgroundColor: '#EFF6FF' }]}>
-                  <AppIcon name={icons.stock} size={20} iconColor="#2563EB" />
-                </View>
-                <View>
-                  <Text style={dashStyles.panelTitle}>
-                    {lang === 'bn' ? 'চালের গুদাম ও স্টক স্থিতি' : 'Rice Godown Inventory'}
-                  </Text>
-                  <Text style={dashStyles.panelSubtitle}>
-                    {lang === 'bn' ? `মোট চাল: ${toBnDigits(totalStockBags)} বস্তা (${n(totalStockKg)} কেজি)` : `${totalStockBags} Bags in stock`}
-                  </Text>
-                </View>
+        {/* Right Column: Rice Godown Stock */}
+        <View style={[styles.columnCard, isDesktop ? { flex: 1 } : { width: '100%' }]}>
+          <View style={styles.cardTop}>
+            <View>
+              <Text style={styles.cardHeading}>{lang === 'bn' ? 'চালের গুদাম স্টক' : 'Rice Stock'}</Text>
+              <Text style={styles.cardSubheading}>
+                {lang === 'bn' ? `মোট চাল: ${toBnDigits(totalStockBags)} বস্তা` : `${totalStockBags} Bags in Godown`}
+              </Text>
+            </View>
+
+            <TouchableOpacity onPress={() => go?.('stock')} style={styles.headerSmallBtn}>
+              <Text style={styles.headerSmallBtnText}>{lang === 'bn' ? 'স্টক ড্যাশবোর্ড' : 'Stock'}</Text>
+            </TouchableOpacity>
+          </View>
+
+          {/* Top Products */}
+          <View style={styles.stockList}>
+            {topStock.length === 0 ? (
+              <View style={styles.emptyWrap}>
+                <Text style={styles.emptyMessage}>{lang === 'bn' ? 'কোনো চাল পাওয়া যায়নি।' : 'No products found.'}</Text>
               </View>
-
-              <TouchableOpacity
-                onPress={() => go?.('stock')}
-                style={dashStyles.headerSmallBtn}
-              >
-                <Text style={dashStyles.headerSmallBtnText}>{lang === 'bn' ? 'স্টক খাতা' : 'Stock'}</Text>
-              </TouchableOpacity>
-            </View>
-
-            {/* Quick search input */}
-            <View style={dashStyles.searchBox}>
-              <AppIcon name={icons.search} size={18} iconColor="#94A3B8" />
-              <TextInput
-                value={stockQuery}
-                onChangeText={setStockQuery}
-                placeholder={lang === 'bn' ? 'চালের নাম দিয়ে খুঁজুন (মিনিকেট, নাজিরশাইল...)' : 'Search rice variety...'}
-                placeholderTextColor="#94A3B8"
-                style={dashStyles.searchInput}
-              />
-              {stockQuery.length > 0 && (
-                <TouchableOpacity onPress={() => setStockQuery('')}>
-                  <AppIcon name={icons.cancel} size={18} iconColor="#94A3B8" />
-                </TouchableOpacity>
-              )}
-            </View>
-
-            {/* Stock List */}
-            <View style={dashStyles.stockList}>
-              {filteredStock.length === 0 ? (
-                <View style={dashStyles.emptyState}>
-                  <Text style={dashStyles.emptyText}>
-                    {lang === 'bn' ? 'কোনো চাল পাওয়া যায়নি।' : 'No products found.'}
-                  </Text>
-                </View>
-              ) : (
-                filteredStock.map((item, idx) => {
-                  const p = item.product;
-                  // Calculate stock health meter (0 to 100%)
-                  const progressPct = Math.min(100, Math.max(8, (item.physicalBags / 150) * 100));
-                  return (
-                    <View key={p.id || idx} style={dashStyles.stockRow}>
-                      <View style={dashStyles.stockRowMain}>
-                        <View style={{ flex: 1 }}>
-                          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
-                            <Text style={dashStyles.stockName}>{p.name}</Text>
-                            {item.isLow && (
-                              <View style={dashStyles.lowStockTag}>
-                                <Text style={dashStyles.lowStockText}>
-                                  {lang === 'bn' ? 'স্বল্প স্টক' : 'Low'}
-                                </Text>
-                              </View>
-                            )}
+            ) : (
+              topStock.map((item, idx) => {
+                const p = item.product;
+                return (
+                  <View key={p.id || idx} style={styles.stockRow}>
+                    <View style={{ flex: 1 }}>
+                      <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+                        <Text style={styles.stockName}>{p.name}</Text>
+                        {item.isLow && (
+                          <View style={styles.lowTag}>
+                            <Text style={styles.lowTagText}>{lang === 'bn' ? 'কম স্টক' : 'Low'}</Text>
                           </View>
-                          <Text style={dashStyles.stockWeight}>
-                            {lang === 'bn' ? `${toBnDigits(item.bagWeight)} কেজি বস্তা • বিক্রয় দর: ${m(p.price)}` : `${item.bagWeight}kg bag • Price: ${m(p.price)}`}
-                          </Text>
-                        </View>
-
-                        <View style={{ alignItems: 'flex-end' }}>
-                          <Text style={[dashStyles.stockBags, item.isLow && { color: '#DC2626' }]}>
-                            {lang === 'bn' ? `${toBnDigits(item.physicalBags)} বস্তা` : `${item.physicalBags} Bags`}
-                          </Text>
-                          <Text style={dashStyles.stockKg}>
-                            {lang === 'bn' ? `${n(p.qty)} কেজি` : `${n(p.qty)} KG`}
-                          </Text>
-                        </View>
+                        )}
                       </View>
-
-                      {/* Stock Level Bar */}
-                      <View style={dashStyles.progressBarTrack}>
-                        <View
-                          style={[
-                            dashStyles.progressBarFill,
-                            {
-                              width: `${progressPct}%`,
-                              backgroundColor: item.isLow ? '#EF4444' : progressPct > 60 ? '#10B981' : '#F59E0B'
-                            }
-                          ]}
-                        />
-                      </View>
-                    </View>
-                  );
-                })
-              )}
-            </View>
-
-            <View style={dashStyles.panelFooter}>
-              <TouchableOpacity
-                onPress={() => go?.('stock')}
-                style={dashStyles.footerLink}
-              >
-                <Text style={dashStyles.footerLinkText}>
-                  {lang === 'bn' ? 'সম্পূর্ণ চালের গুদাম স্টক ড্যাশবোর্ড দেখুন →' : 'Open full stock manager →'}
-                </Text>
-              </TouchableOpacity>
-            </View>
-          </View>
-        </View>
-
-      </View>
-
-      {/* 5. Bottom 3 Management Insights: Cash/Bank, Expenses, Top Due Parties */}
-      <View style={dashStyles.bottomGrid}>
-
-        {/* Card A: Cash & Bank Accounts */}
-        <View style={dashStyles.bottomCard}>
-          <View style={dashStyles.bottomCardHeader}>
-            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
-              <AppIcon name={icons.bankCash} size={20} iconColor="#2563EB" />
-              <Text style={dashStyles.bottomCardTitle}>
-                {lang === 'bn' ? 'ক্যাশ ড্রয়ার ও ব্যাংক একাউন্ট' : 'Cash & Bank Accounts'}
-              </Text>
-            </View>
-            <TouchableOpacity onPress={() => go?.('bank')}>
-              <Text style={dashStyles.cardActionText}>{lang === 'bn' ? 'ব্যবস্থাপনা →' : 'Manage →'}</Text>
-            </TouchableOpacity>
-          </View>
-
-          <View style={dashStyles.accountsList}>
-            {moneyAccounts.slice(0, 4).map((acc, idx) => (
-              <View key={acc.id || idx} style={dashStyles.accRow}>
-                <View style={dashStyles.accRowLeft}>
-                  <View style={[dashStyles.accIcon, { backgroundColor: acc.type === 'cash' ? '#DCFCE7' : '#DBEAFE' }]}>
-                    <AppIcon
-                      name={acc.type === 'cash' ? icons.cash : acc.type === 'bank' ? icons.bank : icons.bkash}
-                      size={18}
-                      iconColor={acc.type === 'cash' ? '#15803D' : '#1E40AF'}
-                    />
-                  </View>
-                  <View>
-                    <Text style={dashStyles.accName}>{acc.name}</Text>
-                    <Text style={dashStyles.accSub}>
-                      {acc.type === 'cash'
-                        ? (lang === 'bn' ? 'আড়ত ক্যাশ ড্রয়ার' : 'Shop Cash')
-                        : (acc.accountNumber ? `${acc.bankName || ''} • ${acc.accountNumber}` : (lang === 'bn' ? 'ব্যাংক একাউন্ট' : 'Bank Account'))}
-                    </Text>
-                  </View>
-                </View>
-                <Text style={[dashStyles.accBalance, (acc.balance || 0) < 0 && { color: '#DC2626' }]}>
-                  {m(acc.balance || 0)}
-                </Text>
-              </View>
-            ))}
-          </View>
-        </View>
-
-        {/* Card B: Today's Expenses Breakdown */}
-        <View style={dashStyles.bottomCard}>
-          <View style={dashStyles.bottomCardHeader}>
-            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
-              <AppIcon name={icons.expense} size={20} iconColor="#D97706" />
-              <Text style={dashStyles.bottomCardTitle}>
-                {lang === 'bn' ? 'আজকের ব্যয়ের বিবরণ' : 'Today\'s Expenses'}
-              </Text>
-            </View>
-            <TouchableOpacity onPress={() => go?.('expense')}>
-              <Text style={dashStyles.cardActionText}>{lang === 'bn' ? '+ খরচ এন্ট্রি' : '+ Add'}</Text>
-            </TouchableOpacity>
-          </View>
-
-          <View style={dashStyles.accountsList}>
-            {tExp.length === 0 ? (
-              <View style={dashStyles.emptyStateSmall}>
-                <Text style={dashStyles.emptyTextSmall}>
-                  {lang === 'bn' ? 'আজকের কোনো খরচ এন্ট্রি করা হয়নি।' : 'No expenses recorded today.'}
-                </Text>
-              </View>
-            ) : (
-              tExp.slice(0, 4).map((e, idx) => (
-                <View key={e.id || idx} style={dashStyles.accRow}>
-                  <View style={dashStyles.accRowLeft}>
-                    <View style={[dashStyles.accIcon, { backgroundColor: '#FEF3C7' }]}>
-                      <AppIcon name={icons.calc} size={18} iconColor="#D97706" />
-                    </View>
-                    <View>
-                      <Text style={dashStyles.accName}>
-                        {e.customName || e.category || (lang === 'bn' ? 'আড়ত খরচ' : 'General')}
+                      <Text style={styles.stockMeta}>
+                        {lang === 'bn' ? `${toBnDigits(item.bagWeight)} কেজি বস্তা • দর: ${m(p.price)}` : `${item.bagWeight}kg bag • ${m(p.price)}`}
                       </Text>
-                      <Text style={dashStyles.accSub}>
-                        {e.note || fd(e.date)}
+                    </View>
+
+                    <View style={{ alignItems: 'flex-end' }}>
+                      <Text style={[styles.stockBags, item.isLow && { color: '#DC2626' }]}>
+                        {lang === 'bn' ? `${toBnDigits(item.physicalBags)} বস্তা` : `${item.physicalBags} Bags`}
+                      </Text>
+                      <Text style={styles.stockKg}>
+                        {lang === 'bn' ? `${n(p.qty)} কেজি` : `${n(p.qty)} kg`}
                       </Text>
                     </View>
                   </View>
-                  <Text style={[dashStyles.accBalance, { color: '#DC2626' }]}>
-                    -{m(e.amount)}
-                  </Text>
-                </View>
-              ))
-            )}
-            <View style={dashStyles.expenseTotalRow}>
-              <Text style={dashStyles.expenseTotalLabel}>
-                {lang === 'bn' ? 'আজকের মোট খরচ:' : 'Total Expense Today:'}
-              </Text>
-              <Text style={dashStyles.expenseTotalVal}>
-                {m(s.todayExpense)}
-              </Text>
-            </View>
-          </View>
-        </View>
-
-        {/* Card C: Top Due Customers */}
-        <View style={dashStyles.bottomCard}>
-          <View style={dashStyles.bottomCardHeader}>
-            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
-              <AppIcon name={icons.customers} size={20} iconColor="#DC2626" />
-              <Text style={dashStyles.bottomCardTitle}>
-                {lang === 'bn' ? 'শীর্ষ বাকিদার কাস্টমার' : 'Top Outstanding Due'}
-              </Text>
-            </View>
-            <TouchableOpacity onPress={() => go?.('customers')}>
-              <Text style={dashStyles.cardActionText}>{lang === 'bn' ? 'খাতা দেখুন →' : 'View All →'}</Text>
-            </TouchableOpacity>
-          </View>
-
-          <View style={dashStyles.accountsList}>
-            {topDueCustomers.length === 0 ? (
-              <View style={dashStyles.emptyStateSmall}>
-                <Text style={dashStyles.emptyTextSmall}>
-                  {lang === 'bn' ? 'কোনো কাস্টমারের বাকি নেই!' : 'No due balance recorded.'}
-                </Text>
-              </View>
-            ) : (
-              topDueCustomers.map((item, idx) => (
-                <View key={item.customer.id || idx} style={dashStyles.accRow}>
-                  <View style={dashStyles.accRowLeft}>
-                    <View style={[dashStyles.accIcon, { backgroundColor: '#FEE2E2' }]}>
-                      <AppIcon name={icons.customers} size={18} iconColor="#DC2626" />
-                    </View>
-                    <View>
-                      <Text style={dashStyles.accName}>{item.customer.name}</Text>
-                      <Text style={dashStyles.accSub}>
-                        {item.customer.mobile || (lang === 'bn' ? 'মোবাইল নেই' : 'No mobile')}
-                      </Text>
-                    </View>
-                  </View>
-                  <Text style={[dashStyles.accBalance, { color: '#DC2626' }]}>
-                    {m(item.due)}
-                  </Text>
-                </View>
-              ))
+                );
+              })
             )}
           </View>
+
+          <View style={styles.cardBottom}>
+            <TouchableOpacity onPress={() => go?.('stock')}>
+              <Text style={styles.bottomLinkText}>
+                {lang === 'bn' ? 'সম্পূর্ণ স্টক খাতা দেখুন →' : 'View complete stock →'}
+              </Text>
+            </TouchableOpacity>
+          </View>
         </View>
-
       </View>
-
     </View>
   );
 }
 
-const dashStyles = StyleSheet.create({
+const styles = StyleSheet.create({
   container: {
-    paddingBottom: 28,
+    padding: 16,
+    maxWidth: 1400,
+    alignSelf: 'center',
+    width: '100%',
   },
-  headerCard: {
-    backgroundColor: '#FFFFFF',
-    borderRadius: 16,
-    padding: 18,
-    borderWidth: 1,
-    borderColor: '#E2E8E4',
-    marginBottom: 16,
+  header: {
     flexDirection: 'row',
     flexWrap: 'wrap',
-    alignItems: 'center',
     justifyContent: 'space-between',
-    gap: 14,
-    ...(Platform.OS === 'web' ? { boxShadow: '0 2px 4px rgba(0,0,0,0.03)' } : { elevation: 2 }),
-  },
-  headerLeft: {
-    flexDirection: 'row',
     alignItems: 'center',
     gap: 14,
+    marginBottom: 20,
+    paddingBottom: 16,
+    borderBottomWidth: 1,
+    borderBottomColor: '#E2E8F0',
   },
-  brandBadge: {
-    width: 52,
-    height: 52,
-    borderRadius: 14,
-    backgroundColor: '#E8F5E9',
-    alignItems: 'center',
-    justifyContent: 'center',
+  headerInfo: {
+    gap: 4,
   },
   headerTitle: {
-    fontSize: 20,
-    fontWeight: '700',
+    fontSize: 24,
+    fontWeight: '800',
     color: '#0F172A',
+    letterSpacing: -0.3,
   },
   headerSubtitle: {
     fontSize: 13,
     color: '#64748B',
-    marginTop: 2,
     fontWeight: '500',
   },
-  statusLiveBadge: {
+  liveBadge: {
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: '#DCFCE7',
+    gap: 5,
+    backgroundColor: '#ECFDF5',
     paddingHorizontal: 8,
     paddingVertical: 3,
     borderRadius: 12,
-    gap: 5,
+    borderWidth: 1,
+    borderColor: '#A7F3D0',
   },
-  statusDot: {
+  liveDot: {
     width: 6,
     height: 6,
     borderRadius: 3,
-    backgroundColor: '#16A34A',
+    backgroundColor: '#10B981',
   },
-  statusText: {
+  liveText: {
     fontSize: 11,
-    fontWeight: '600',
-    color: '#15803D',
+    fontWeight: '700',
+    color: '#047857',
   },
-  actionsBar: {
+  actionGroup: {
     flexDirection: 'row',
-    flexWrap: 'wrap',
-    gap: 8,
     alignItems: 'center',
+    gap: 8,
+    flexWrap: 'wrap',
   },
   actionBtn: {
     flexDirection: 'row',
@@ -882,264 +532,218 @@ const dashStyles = StyleSheet.create({
     gap: 6,
     paddingHorizontal: 14,
     paddingVertical: 9,
-    borderRadius: 10,
+    borderRadius: 8,
+    minHeight: 38,
+    ...(Platform.OS === 'web' ? ({ cursor: 'pointer' } as any) : {}),
+  },
+  btnSale: {
+    backgroundColor: '#2563EB',
+  },
+  btnPurchase: {
+    backgroundColor: '#0F172A',
+  },
+  btnSecondary: {
+    backgroundColor: '#FFFFFF',
+    borderWidth: 1,
+    borderColor: '#CBD5E1',
   },
   actionBtnText: {
+    fontSize: 13,
+    fontWeight: '700',
     color: '#FFFFFF',
+  },
+  btnSecondaryText: {
     fontSize: 13,
     fontWeight: '600',
-  },
-  sectionHeaderRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    marginBottom: 10,
-    marginTop: 4,
-    paddingHorizontal: 2,
-  },
-  sectionTitle: {
-    fontSize: 16,
-    fontWeight: '700',
     color: '#1E293B',
   },
-  sectionHint: {
-    fontSize: 12,
-    color: '#64748B',
-  },
+
+  /* KPI Grid */
   kpiGrid: {
     flexDirection: 'row',
     flexWrap: 'wrap',
-    gap: 12,
+    gap: 14,
     marginBottom: 16,
   },
   kpiCard: {
     flex: 1,
     minWidth: 220,
     backgroundColor: '#FFFFFF',
-    borderRadius: 14,
+    borderRadius: 12,
     padding: 16,
     borderWidth: 1,
-    borderColor: '#E2E8E4',
-    ...(Platform.OS === 'web' ? { boxShadow: '0 2px 4px rgba(0,0,0,0.03)' } : { elevation: 2 }),
+    borderColor: '#E2E8F0',
+    gap: 8,
+    ...(Platform.OS === 'web' ? {
+      boxShadow: '0 1px 3px rgba(0,0,0,0.04)',
+      cursor: 'pointer',
+    } : { elevation: 1 }),
   },
-  kpiTop: {
+  kpiHeader: {
     flexDirection: 'row',
-    alignItems: 'center',
     justifyContent: 'space-between',
-    marginBottom: 12,
-  },
-  kpiIconWrapper: {
-    width: 46,
-    height: 46,
-    borderRadius: 12,
     alignItems: 'center',
-    justifyContent: 'center',
+  },
+  kpiTitle: {
+    fontSize: 13,
+    fontWeight: '600',
+    color: '#64748B',
   },
   kpiBadge: {
-    paddingHorizontal: 8,
-    paddingVertical: 3,
-    borderRadius: 8,
+    paddingHorizontal: 7,
+    paddingVertical: 2,
+    borderRadius: 6,
   },
   kpiBadgeText: {
     fontSize: 11,
-    fontWeight: '600',
-  },
-  kpiLabel: {
-    fontSize: 13,
-    color: '#64748B',
-    fontWeight: '500',
-    marginBottom: 4,
-  },
-  kpiValue: {
-    fontSize: 22,
     fontWeight: '700',
-    marginBottom: 10,
   },
-  kpiFooter: {
-    borderTopWidth: 1,
-    borderTopColor: '#F1F5F9',
-    paddingTop: 8,
+  kpiAmount: {
+    fontSize: 22,
+    fontWeight: '800',
+    letterSpacing: -0.5,
   },
-  kpiFooterText: {
+  kpiFooterLink: {
     fontSize: 12,
-    color: '#64748B',
-    fontWeight: '500',
+    fontWeight: '600',
+    color: '#2563EB',
+    marginTop: 2,
   },
-  snapshotRow: {
+
+  /* Snapshot Strip */
+  snapshotStrip: {
     flexDirection: 'row',
     flexWrap: 'wrap',
-    gap: 12,
-    marginBottom: 16,
-  },
-  snapshotCard: {
-    flex: 1,
-    minWidth: 220,
     backgroundColor: '#FFFFFF',
     borderRadius: 12,
-    padding: 14,
     borderWidth: 1,
-    borderColor: '#E2E8E4',
-    flexDirection: 'row',
+    borderColor: '#E2E8F0',
+    paddingVertical: 14,
+    paddingHorizontal: 20,
+    marginBottom: 20,
     alignItems: 'center',
     gap: 12,
   },
-  snapshotIcon: {
-    width: 42,
-    height: 42,
-    borderRadius: 10,
-    backgroundColor: '#F8FAFC',
-    alignItems: 'center',
-    justifyContent: 'center',
+  snapshotItem: {
+    flex: 1,
+    minWidth: 180,
+    gap: 3,
+    ...(Platform.OS === 'web' ? ({ cursor: 'pointer' } as any) : {}),
   },
   snapshotLabel: {
     fontSize: 12,
     color: '#64748B',
-    fontWeight: '500',
-    marginBottom: 2,
+    fontWeight: '600',
   },
   snapshotVal: {
-    fontSize: 17,
-    fontWeight: '700',
+    fontSize: 18,
+    fontWeight: '800',
   },
   snapshotSub: {
     fontSize: 11,
     color: '#94A3B8',
-    marginTop: 1,
   },
-  mainGrid: {
-    gap: 14,
-    marginBottom: 16,
+  snapshotDivider: {
+    width: 1,
+    height: 36,
+    backgroundColor: '#E2E8F0',
   },
-  gridCol: {
-    minWidth: 300,
+
+  /* 2-Column Layout */
+  mainLayout: {
+    gap: 16,
   },
-  panelCard: {
+  columnCard: {
     backgroundColor: '#FFFFFF',
-    borderRadius: 16,
-    borderWidth: 1,
-    borderColor: '#E2E8E4',
-    overflow: 'hidden',
-  },
-  panelHeader: {
-    padding: 16,
-    borderBottomWidth: 1,
-    borderBottomColor: '#F1F5F9',
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    gap: 10,
-  },
-  panelHeaderIcon: {
-    width: 38,
-    height: 38,
-    borderRadius: 10,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  panelTitle: {
-    fontSize: 15,
-    fontWeight: '700',
-    color: '#0F172A',
-  },
-  panelSubtitle: {
-    fontSize: 12,
-    color: '#64748B',
-    marginTop: 1,
-  },
-  pillFilterRow: {
-    flexDirection: 'row',
-    backgroundColor: '#F1F5F9',
-    borderRadius: 8,
-    padding: 2,
-    gap: 2,
-  },
-  filterPill: {
-    paddingHorizontal: 10,
-    paddingVertical: 5,
-    borderRadius: 6,
-  },
-  filterPillActive: {
-    backgroundColor: '#FFFFFF',
-  },
-  filterPillText: {
-    fontSize: 12,
-    color: '#64748B',
-    fontWeight: '500',
-  },
-  filterPillTextActive: {
-    color: '#1B7F4B',
-    fontWeight: '700',
-  },
-  headerSmallBtn: {
-    paddingHorizontal: 10,
-    paddingVertical: 5,
-    borderRadius: 6,
-    backgroundColor: '#EFF6FF',
-  },
-  headerSmallBtnText: {
-    fontSize: 12,
-    fontWeight: '600',
-    color: '#2563EB',
-  },
-  searchBox: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 8,
-    backgroundColor: '#F8FAFC',
-    margin: 12,
-    paddingHorizontal: 12,
-    paddingVertical: 8,
-    borderRadius: 8,
+    borderRadius: 12,
     borderWidth: 1,
     borderColor: '#E2E8F0',
+    padding: 18,
+    gap: 14,
   },
-  searchInput: {
-    flex: 1,
-    fontSize: 13,
+  cardTop: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    flexWrap: 'wrap',
+    gap: 8,
+    paddingBottom: 12,
+    borderBottomWidth: 1,
+    borderBottomColor: '#F1F5F9',
+  },
+  cardHeading: {
+    fontSize: 16,
+    fontWeight: '700',
     color: '#0F172A',
-    outlineStyle: 'none',
-  } as any,
-  invoicesList: {
-    paddingHorizontal: 14,
-    paddingVertical: 6,
+  },
+  cardSubheading: {
+    fontSize: 12,
+    color: '#64748B',
+  },
+  pillGroup: {
+    flexDirection: 'row',
+    gap: 6,
+  },
+  pill: {
+    paddingHorizontal: 10,
+    paddingVertical: 4,
+    borderRadius: 6,
+    backgroundColor: '#F1F5F9',
+    ...(Platform.OS === 'web' ? ({ cursor: 'pointer' } as any) : {}),
+  },
+  pillActive: {
+    backgroundColor: '#2563EB',
+  },
+  pillText: {
+    fontSize: 12,
+    fontWeight: '600',
+    color: '#64748B',
+  },
+  pillTextActive: {
+    color: '#FFFFFF',
+  },
+  invoiceList: {
+    gap: 8,
   },
   invoiceRow: {
     flexDirection: 'row',
-    alignItems: 'center',
     justifyContent: 'space-between',
-    paddingVertical: 11,
-    borderBottomWidth: 1,
-    borderBottomColor: '#F1F5F9',
+    alignItems: 'center',
+    paddingVertical: 10,
+    paddingHorizontal: 12,
+    borderRadius: 8,
+    backgroundColor: '#F8FAFC',
+    borderWidth: 1,
+    borderColor: '#F1F5F9',
+    ...(Platform.OS === 'web' ? ({ cursor: 'pointer' } as any) : {}),
   },
-  invoiceRowLeft: {
+  invLeft: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 12,
+    gap: 10,
     flex: 1,
   },
-  invBadge: {
-    backgroundColor: '#F1F5F9',
+  invNoBadge: {
+    backgroundColor: '#E2E8F0',
     paddingHorizontal: 8,
     paddingVertical: 4,
     borderRadius: 6,
   },
-  invBadgeText: {
-    fontSize: 12,
+  invNoText: {
+    fontSize: 11,
     fontWeight: '700',
     color: '#334155',
   },
-  invCustomerName: {
-    fontSize: 14,
-    fontWeight: '600',
+  invCust: {
+    fontSize: 13,
+    fontWeight: '700',
     color: '#0F172A',
   },
-  invTime: {
+  invDate: {
     fontSize: 11,
     color: '#64748B',
-    marginTop: 1,
   },
-  invoiceRowRight: {
+  invRight: {
     flexDirection: 'row',
     alignItems: 'center',
   },
@@ -1152,211 +756,103 @@ const dashStyles = StyleSheet.create({
     fontSize: 11,
     fontWeight: '600',
     color: '#DC2626',
-    marginTop: 1,
   },
-  invPaid: {
-    fontSize: 11,
-    color: '#16A34A',
-    marginTop: 1,
-  },
-  statusPill: {
+  statusBadge: {
     paddingHorizontal: 8,
     paddingVertical: 3,
     borderRadius: 6,
-    minWidth: 54,
+  },
+  statusBadgeText: {
+    fontSize: 11,
+    fontWeight: '700',
+  },
+  cardBottom: {
+    paddingTop: 8,
+    borderTopWidth: 1,
+    borderTopColor: '#F1F5F9',
     alignItems: 'center',
   },
-  statusPillText: {
-    fontSize: 11,
+  bottomLinkText: {
+    fontSize: 13,
     fontWeight: '600',
+    color: '#2563EB',
+  },
+  headerSmallBtn: {
+    paddingHorizontal: 10,
+    paddingVertical: 5,
+    borderRadius: 6,
+    borderWidth: 1,
+    borderColor: '#E2E8F0',
+    backgroundColor: '#FFFFFF',
+    ...(Platform.OS === 'web' ? ({ cursor: 'pointer' } as any) : {}),
+  },
+  headerSmallBtnText: {
+    fontSize: 12,
+    fontWeight: '600',
+    color: '#334155',
   },
   stockList: {
-    paddingHorizontal: 14,
-    paddingBottom: 6,
+    gap: 8,
   },
   stockRow: {
-    paddingVertical: 10,
-    borderBottomWidth: 1,
-    borderBottomColor: '#F1F5F9',
-  },
-  stockRowMain: {
     flexDirection: 'row',
-    alignItems: 'center',
     justifyContent: 'space-between',
-    marginBottom: 6,
+    alignItems: 'center',
+    paddingVertical: 10,
+    paddingHorizontal: 12,
+    borderRadius: 8,
+    backgroundColor: '#F8FAFC',
+    borderWidth: 1,
+    borderColor: '#F1F5F9',
   },
   stockName: {
-    fontSize: 14,
-    fontWeight: '600',
+    fontSize: 13,
+    fontWeight: '700',
     color: '#0F172A',
   },
-  stockWeight: {
-    fontSize: 11,
-    color: '#64748B',
-    marginTop: 1,
-  },
-  lowStockTag: {
+  lowTag: {
     backgroundColor: '#FEE2E2',
-    paddingHorizontal: 6,
+    paddingHorizontal: 5,
     paddingVertical: 1,
     borderRadius: 4,
   },
-  lowStockText: {
+  lowTagText: {
     fontSize: 10,
-    fontWeight: '600',
-    color: '#B91C1C',
+    fontWeight: '700',
+    color: '#DC2626',
+  },
+  stockMeta: {
+    fontSize: 11,
+    color: '#64748B',
+    marginTop: 2,
   },
   stockBags: {
     fontSize: 14,
     fontWeight: '700',
-    color: '#1B7F4B',
+    color: '#0F172A',
   },
   stockKg: {
     fontSize: 11,
     color: '#64748B',
-    marginTop: 1,
   },
-  progressBarTrack: {
-    height: 5,
-    backgroundColor: '#F1F5F9',
-    borderRadius: 3,
-    overflow: 'hidden',
-  },
-  progressBarFill: {
-    height: '100%',
-    borderRadius: 3,
-  },
-  panelFooter: {
-    padding: 12,
-    borderTopWidth: 1,
-    borderTopColor: '#F1F5F9',
-    alignItems: 'center',
-    backgroundColor: '#FAFAFA',
-  },
-  footerLink: {
-    paddingVertical: 2,
-  },
-  footerLinkText: {
-    fontSize: 13,
-    fontWeight: '600',
-    color: '#1B7F4B',
-  },
-  bottomGrid: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    gap: 14,
-  },
-  bottomCard: {
-    flex: 1,
-    minWidth: 280,
-    backgroundColor: '#FFFFFF',
-    borderRadius: 14,
-    padding: 14,
-    borderWidth: 1,
-    borderColor: '#E2E8E4',
-  },
-  bottomCardHeader: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    marginBottom: 10,
-    paddingBottom: 8,
-    borderBottomWidth: 1,
-    borderBottomColor: '#F1F5F9',
-  },
-  bottomCardTitle: {
-    fontSize: 14,
-    fontWeight: '700',
-    color: '#0F172A',
-  },
-  cardActionText: {
-    fontSize: 12,
-    color: '#2563EB',
-    fontWeight: '600',
-  },
-  accountsList: {
-    gap: 6,
-  },
-  accRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    paddingVertical: 7,
-    borderBottomWidth: 1,
-    borderBottomColor: '#F8FAFC',
-  },
-  accRowLeft: {
-    flexDirection: 'row',
+  emptyWrap: {
+    padding: 24,
     alignItems: 'center',
     gap: 10,
-    flex: 1,
   },
-  accIcon: {
-    width: 32,
-    height: 32,
-    borderRadius: 8,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  accName: {
+  emptyMessage: {
     fontSize: 13,
-    fontWeight: '600',
-    color: '#0F172A',
-  },
-  accSub: {
-    fontSize: 11,
-    color: '#64748B',
-  },
-  accBalance: {
-    fontSize: 14,
-    fontWeight: '700',
-    color: '#0F172A',
-  },
-  expenseTotalRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    marginTop: 6,
-    paddingTop: 8,
-    borderTopWidth: 1,
-    borderTopColor: '#F1F5F9',
-  },
-  expenseTotalLabel: {
-    fontSize: 12,
-    fontWeight: '600',
-    color: '#64748B',
-  },
-  expenseTotalVal: {
-    fontSize: 14,
-    fontWeight: '700',
-    color: '#D97706',
-  },
-  emptyState: {
-    paddingVertical: 28,
-    alignItems: 'center',
-    gap: 8,
-  },
-  emptyText: {
-    fontSize: 13,
-    color: '#64748B',
-  },
-  emptyBtn: {
-    backgroundColor: '#E8F5E9',
-    paddingHorizontal: 12,
-    paddingVertical: 6,
-    borderRadius: 6,
-  },
-  emptyBtnText: {
-    fontSize: 12,
-    fontWeight: '600',
-    color: '#1B7F4B',
-  },
-  emptyStateSmall: {
-    paddingVertical: 14,
-    alignItems: 'center',
-  },
-  emptyTextSmall: {
-    fontSize: 12,
     color: '#94A3B8',
+  },
+  emptyAddBtn: {
+    paddingHorizontal: 14,
+    paddingVertical: 8,
+    borderRadius: 6,
+    backgroundColor: '#2563EB',
+  },
+  emptyAddBtnText: {
+    fontSize: 12,
+    fontWeight: '700',
+    color: '#FFFFFF',
   },
 });

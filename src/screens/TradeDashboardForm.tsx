@@ -179,13 +179,66 @@ export function TradeDashboardForm({ mode, onDone }: TradeDashboardFormProps) {
     setPartyDropdownOpen(false);
   }, []);
 
+  // Find product by code, index, or ID
+  const findProductByCode = useCallback((codeQuery: string): { product: Product; code: string } | null => {
+    if (!codeQuery) return null;
+    const q = codeQuery.trim().toLowerCase();
+    // 1. Match numeric index (1, 2, 3...)
+    const num = parseInt(q, 10);
+    if (!isNaN(num)) {
+      if (num >= 1 && num <= products.length) {
+        return { product: products[num - 1], code: String(num) };
+      }
+      if (num >= 300 && num < 300 + products.length) {
+        return { product: products[num - 300], code: String(num) };
+      }
+    }
+    // 2. Match product ID (e.g. p1, p2)
+    const byIdIdx = products.findIndex(p => p.id.toLowerCase() === q);
+    if (byIdIdx !== -1) {
+      return { product: products[byIdIdx], code: String(byIdIdx + 1) };
+    }
+    // 3. Match product name
+    const byNameIdx = products.findIndex(p => p.name.toLowerCase().includes(q));
+    if (byNameIdx !== -1) {
+      return { product: products[byNameIdx], code: String(byNameIdx + 1) };
+    }
+    return null;
+  }, [products]);
+
+  // Code change handler: auto selects product name & rate
+  const handleCodeChange = useCallback((rowIdx: number, val: string) => {
+    setItems(prev => {
+      const copy = [...prev];
+      const match = findProductByCode(val);
+      if (match) {
+        copy[rowIdx] = {
+          ...copy[rowIdx],
+          code: val,
+          productId: match.product.id,
+          name: match.product.name,
+          rate: String(isSale ? match.product.price : (match.product.cost || 200)),
+          qty: copy[rowIdx].qty || '1',
+        };
+      } else {
+        copy[rowIdx] = {
+          ...copy[rowIdx],
+          code: val,
+          productId: '',
+          name: '',
+        };
+      }
+      return copy;
+    });
+  }, [findProductByCode, isSale]);
+
   // Product selection
   const onSelectProduct = useCallback((rowIdx: number, p: Product, pIdx: number) => {
     setItems(prev => {
       const copy = [...prev];
       copy[rowIdx] = {
         ...copy[rowIdx],
-        code: String(300 + pIdx),
+        code: String(pIdx + 1),
         productId: p.id,
         name: p.name,
         qty: copy[rowIdx].qty || '1',
@@ -194,10 +247,6 @@ export function TradeDashboardForm({ mode, onDone }: TradeDashboardFormProps) {
       return copy;
     });
     setActiveItemDropdownIdx(null);
-    setTimeout(() => {
-      inputRefs.current[`qty_${rowIdx}`]?.focus();
-      setFocusedField(`qty_${rowIdx}`);
-    }, 50);
   }, [isSale]);
 
   // Add new product row
@@ -224,42 +273,6 @@ export function TradeDashboardForm({ mode, onDone }: TradeDashboardFormProps) {
     }
     setItems(prev => prev.filter((_, i) => i !== idx));
   }, [items.length]);
-
-  // Keyboard navigation sequence
-  const getNavSequence = useCallback((): string[] => {
-    const seq = [
-      'orderNo',
-      'memoNo',
-      'partyCode',
-      'partyName',
-      'partyMobile',
-      'partyAddress',
-      'billDate',
-      'dueDate',
-    ];
-    items.forEach((_, idx) => {
-      seq.push(`code_${idx}`);
-      seq.push(`name_${idx}`);
-      seq.push(`qty_${idx}`);
-      seq.push(`rate_${idx}`);
-    });
-    seq.push('transportCost');
-    seq.push('landingCost');
-    seq.push('cashPaid');
-    seq.push('bankPaid');
-    seq.push('completeBtn');
-    return seq;
-  }, [items]);
-
-  const focusNextField = useCallback((currentKey: string) => {
-    const seq = getNavSequence();
-    const currentIdx = seq.indexOf(currentKey);
-    if (currentIdx >= 0 && currentIdx < seq.length - 1) {
-      const nextKey = seq[currentIdx + 1];
-      inputRefs.current[nextKey]?.focus();
-      setFocusedField(nextKey);
-    }
-  }, [getNavSequence]);
 
   // Save Draft to localStorage
   const handleSaveDraft = useCallback(() => {
@@ -395,26 +408,6 @@ export function TradeDashboardForm({ mode, onDone }: TradeDashboardFormProps) {
     if (Platform.OS !== 'web' || typeof window === 'undefined') return;
 
     const handleGlobalKeyDown = (e: KeyboardEvent) => {
-      if (e.key === 'F1') {
-        e.preventDefault();
-        setShowShortcutsHelp(prev => !prev);
-        return;
-      }
-      if (((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 's') || e.key === 'F8') {
-        e.preventDefault();
-        handleComplete();
-        return;
-      }
-      if (((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'd') || e.key === 'F9') {
-        e.preventDefault();
-        handleSaveDraft();
-        return;
-      }
-      if ((e.altKey && e.key.toLowerCase() === 'a') || e.key === 'Insert') {
-        e.preventDefault();
-        addNewRow(true);
-        return;
-      }
       if (e.key === 'Escape') {
         if (showShortcutsHelp) {
           setShowShortcutsHelp(false);
@@ -433,10 +426,7 @@ export function TradeDashboardForm({ mode, onDone }: TradeDashboardFormProps) {
 
     window.addEventListener('keydown', handleGlobalKeyDown);
     return () => window.removeEventListener('keydown', handleGlobalKeyDown);
-  }, [
-    handleComplete, handleSaveDraft, addNewRow, showShortcutsHelp,
-    partyDropdownOpen, activeItemDropdownIdx
-  ]);
+  }, [showShortcutsHelp, partyDropdownOpen, activeItemDropdownIdx]);
 
   const isInputFocused = (key: string) => focusedField === key;
 
@@ -821,11 +811,7 @@ export function TradeDashboardForm({ mode, onDone }: TradeDashboardFormProps) {
             const rowQty = parseNum(row.qty);
             const rowRate = parseNum(row.rate);
             const rowTotal = Math.round(rowQty * rowRate);
-
-            const filteredRowProducts = products.filter(p => {
-              const q = row.name.trim().toLowerCase();
-              return !q || p.name.toLowerCase().includes(q);
-            }).slice(0, 8);
+            const rowProduct = products.find(p => p.id === row.productId || p.name === row.name);
 
             return (
               <View key={row.id} style={styles.tableDataRow}>
@@ -837,26 +823,18 @@ export function TradeDashboardForm({ mode, onDone }: TradeDashboardFormProps) {
                 </View>
 
                 {/* Product Code */}
-                <View style={[styles.td, { width: 140 }]}>
+                <View style={[styles.td, { width: 140, position: 'relative', zIndex: 40 - rowIdx }]}>
                   <View style={[styles.tableInputDebossed, isInputFocused(`code_${rowIdx}`) && styles.inputFocusedGlow]}>
                     <TextInput
                       ref={el => (inputRefs.current[`code_${rowIdx}`] = el)}
                       value={row.code}
-                      onChangeText={txt => {
-                        setItems(prev => {
-                          const copy = [...prev];
-                          copy[rowIdx].code = txt;
-                          return copy;
-                        });
-                      }}
-                      onFocus={() => setFocusedField(`code_${rowIdx}`)}
-                      onSubmitEditing={() => {
-                        inputRefs.current[`name_${rowIdx}`]?.focus();
-                        setFocusedField(`name_${rowIdx}`);
+                      onChangeText={txt => handleCodeChange(rowIdx, txt)}
+                      onFocus={() => {
+                        setFocusedField(`code_${rowIdx}`);
+                        setActiveItemDropdownIdx(rowIdx);
                       }}
                       style={styles.tableTextInputNoBorder}
-                      placeholder="300"
-                      returnKeyType="next"
+                      placeholder={lang === 'bn' ? 'কোড (১, ২...)' : 'Code (1, 2...)'}
                     />
                     <TouchableOpacity
                       onPress={() => setActiveItemDropdownIdx(activeItemDropdownIdx === rowIdx ? null : rowIdx)}
@@ -865,76 +843,49 @@ export function TradeDashboardForm({ mode, onDone }: TradeDashboardFormProps) {
                       <AppIcon name={icons.search} size={16} iconColor="#1c70b9" />
                     </TouchableOpacity>
                   </View>
-                </View>
 
-                {/* Product Name with Autocomplete */}
-                <View style={[styles.td, { flex: 2, position: 'relative', zIndex: 30 - rowIdx }]}>
-                  <TextInput
-                    ref={el => (inputRefs.current[`name_${rowIdx}`] = el)}
-                    value={row.name}
-                    onChangeText={txt => {
-                      setItems(prev => {
-                        const copy = [...prev];
-                        copy[rowIdx].name = txt;
-                        return copy;
-                      });
-                      setActiveItemDropdownIdx(rowIdx);
-                    }}
-                    onFocus={() => {
-                      setFocusedField(`name_${rowIdx}`);
-                      setActiveItemDropdownIdx(rowIdx);
-                    }}
-                    onSubmitEditing={() => {
-                      if (activeItemDropdownIdx === rowIdx && filteredRowProducts[itemHighlightIdx]) {
-                        onSelectProduct(rowIdx, filteredRowProducts[itemHighlightIdx], itemHighlightIdx);
-                      } else {
-                        inputRefs.current[`qty_${rowIdx}`]?.focus();
-                        setFocusedField(`qty_${rowIdx}`);
-                      }
-                    }}
-                    onKeyPress={(e: any) => {
-                      if (activeItemDropdownIdx === rowIdx) {
-                        if (e.nativeEvent.key === 'ArrowDown') {
-                          setItemHighlightIdx(i => Math.min(filteredRowProducts.length - 1, i + 1));
-                        } else if (e.nativeEvent.key === 'ArrowUp') {
-                          setItemHighlightIdx(i => Math.max(0, i - 1));
-                        }
-                      }
-                    }}
-                    style={[styles.tableTextInput, isInputFocused(`name_${rowIdx}`) && styles.inputFocusedGlow]}
-                    placeholder="আতপ চাল"
-                    returnKeyType="next"
-                  />
-
-                  {/* Product Dropdown */}
+                  {/* Product Dropdown (from Code) */}
                   {activeItemDropdownIdx === rowIdx && (
                     <View style={styles.dropdownMenu3D}>
-                      <ScrollView style={{ maxHeight: 180 }} keyboardShouldPersistTaps="handled">
-                        {filteredRowProducts.length ? (
-                          filteredRowProducts.map((p, pIdx) => {
-                            const isHigh = pIdx === itemHighlightIdx;
-                            return (
-                              <TouchableOpacity
-                                key={p.id}
-                                onPress={() => onSelectProduct(rowIdx, p, pIdx)}
-                                style={[styles.dropdownItem, isHigh && styles.dropdownItemActive]}
-                              >
-                                <View style={{ flex: 1 }}>
-                                  <Text style={styles.dropdownItemText}>{p.name}</Text>
-                                  <Text style={styles.dropdownItemSub}>কোড: {300 + pIdx} • স্টক: {n(p.qty)} কেজি</Text>
-                                </View>
-                                <Text style={styles.dropdownItemDue}>{m(isSale ? p.price : p.cost || 200)}</Text>
-                              </TouchableOpacity>
-                            );
-                          })
-                        ) : (
-                          <View style={{ padding: 10 }}>
-                            <Text style={{ color: '#5B728F', fontSize: 13, textAlign: 'center' }}>কোন পণ্য পাওয়া যায়নি</Text>
-                          </View>
-                        )}
+                      <ScrollView style={{ maxHeight: 200 }} keyboardShouldPersistTaps="handled">
+                        {products.map((p, pIdx) => {
+                          const pCode = String(pIdx + 1);
+                          return (
+                            <TouchableOpacity
+                              key={p.id}
+                              onPress={() => onSelectProduct(rowIdx, p, pIdx)}
+                              style={styles.dropdownItem}
+                            >
+                              <View style={{ flex: 1 }}>
+                                <Text style={styles.dropdownItemText}>{p.name}</Text>
+                                <Text style={styles.dropdownItemSub}>
+                                  কোড: {toBnDigits(pCode)} ({pCode}) • স্টক: {n(p.qty)} কেজি
+                                </Text>
+                              </View>
+                              <Text style={styles.dropdownItemDue}>{m(isSale ? p.price : (p.cost || 200))}</Text>
+                            </TouchableOpacity>
+                          );
+                        })}
                       </ScrollView>
                     </View>
                   )}
+                </View>
+
+                {/* Product Name: AUTO-SELECTED DISPLAY (NO NEED TO MAKE IT INPUT FIELD) */}
+                <View style={[styles.td, { flex: 2 }]}>
+                  <View style={styles.productDisplayBox}>
+                    <Text
+                      style={[styles.productDisplayText, !row.name && styles.productDisplayEmpty]}
+                      numberOfLines={1}
+                    >
+                      {row.name || (lang === 'bn' ? '— কোড লিখলে নাম আসবে —' : '— Enter Code —')}
+                    </Text>
+                    {rowProduct ? (
+                      <Text style={styles.productStockText}>
+                        {lang === 'bn' ? `স্টক: ${n(rowProduct.qty)} কেজি` : `Stock: ${n(rowProduct.qty)} kg`}
+                      </Text>
+                    ) : null}
+                  </View>
                 </View>
 
                 {/* Quantity */}
@@ -950,10 +901,6 @@ export function TradeDashboardForm({ mode, onDone }: TradeDashboardFormProps) {
                       });
                     }}
                     onFocus={() => setFocusedField(`qty_${rowIdx}`)}
-                    onSubmitEditing={() => {
-                      inputRefs.current[`rate_${rowIdx}`]?.focus();
-                      setFocusedField(`rate_${rowIdx}`);
-                    }}
                     style={[
                       styles.tableTextInput,
                       { textAlign: 'center' },
@@ -961,7 +908,6 @@ export function TradeDashboardForm({ mode, onDone }: TradeDashboardFormProps) {
                     ]}
                     placeholder="1"
                     keyboardType="numeric"
-                    returnKeyType="next"
                   />
                 </View>
 
@@ -978,19 +924,6 @@ export function TradeDashboardForm({ mode, onDone }: TradeDashboardFormProps) {
                       });
                     }}
                     onFocus={() => setFocusedField(`rate_${rowIdx}`)}
-                    onSubmitEditing={() => {
-                      if (rowIdx === items.length - 1) {
-                        if (row.name.trim() || parseNum(row.qty) > 0) {
-                          addNewRow(true);
-                        } else {
-                          inputRefs.current['transportCost']?.focus();
-                          setFocusedField('transportCost');
-                        }
-                      } else {
-                        inputRefs.current[`code_${rowIdx + 1}`]?.focus();
-                        setFocusedField(`code_${rowIdx + 1}`);
-                      }
-                    }}
                     style={[
                       styles.tableTextInput,
                       { textAlign: 'center' },
@@ -998,7 +931,6 @@ export function TradeDashboardForm({ mode, onDone }: TradeDashboardFormProps) {
                     ]}
                     placeholder="200"
                     keyboardType="numeric"
-                    returnKeyType="next"
                   />
                 </View>
 
@@ -1011,14 +943,14 @@ export function TradeDashboardForm({ mode, onDone }: TradeDashboardFormProps) {
                   </View>
                 </View>
 
-                {/* Delete Button */}
+                {/* Direct Action (Delete) Button - NOT HIDDEN IN TRIPLE DOT */}
                 <View style={[styles.td, { width: 70, alignItems: 'center', justifyContent: 'center' }]}>
                   <TouchableOpacity
                     onPress={() => removeRow(rowIdx)}
-                    style={styles.deleteRowBtn3D}
+                    style={styles.deleteRowBtnDirect}
                     accessibilityLabel="পণ্য বাদ দিন"
                   >
-                    <AppIcon name={icons.del} size={18} iconColor="#E11D48" />
+                    <AppIcon name={icons.del} size={18} iconColor="#DC2626" />
                   </TouchableOpacity>
                 </View>
               </View>
@@ -1030,15 +962,12 @@ export function TradeDashboardForm({ mode, onDone }: TradeDashboardFormProps) {
             onPress={() => addNewRow(true)}
             style={styles.tableBottomAddBtn}
             activeOpacity={0.8}
-            accessibilityLabel="নতুন চালের সারি যোগ করুন (Alt+A)"
+            accessibilityLabel="নতুন চালের সারি যোগ করুন"
           >
             <View style={styles.tableBottomAddCircle}>
               <AppIcon name={icons.plus} size={14} iconColor="#15803D" />
             </View>
             <Text style={styles.tableBottomAddText}>+ নতুন পণ্যের সারি যোগ করুন</Text>
-            <View style={styles.tableBottomShortcutBadge}>
-              <Text style={styles.tableBottomShortcutText}>Alt+A</Text>
-            </View>
           </TouchableOpacity>
         </View>
 
@@ -1919,6 +1848,51 @@ const styles = StyleSheet.create({
     ...(Platform.OS === 'web' ? {
       cursor: 'pointer',
     } as any : {}),
+  },
+  deleteRowBtnDirect: {
+    width: 38,
+    height: 38,
+    borderRadius: 8,
+    backgroundColor: '#FEE2E2',
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderWidth: 1,
+    borderColor: '#FECACA',
+    ...(Platform.OS === 'web' ? ({ cursor: 'pointer' } as any) : {}),
+  },
+  productDisplayBox: {
+    backgroundColor: '#F8FAFC',
+    borderRadius: 8,
+    borderWidth: 1.5,
+    borderColor: '#CBD5E1',
+    paddingHorizontal: 10,
+    minHeight: 40,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+  },
+  productDisplayText: {
+    fontSize: 14,
+    fontWeight: '700',
+    color: '#0F1E36',
+    flex: 1,
+  },
+  productDisplayEmpty: {
+    color: '#94A3B8',
+    fontWeight: '500',
+    fontStyle: 'italic',
+  },
+  productStockText: {
+    fontSize: 11,
+    fontWeight: '700',
+    color: '#047857',
+    backgroundColor: '#ECFDF5',
+    paddingHorizontal: 6,
+    paddingVertical: 2,
+    borderRadius: 4,
+    borderWidth: 1,
+    borderColor: '#A7F3D0',
+    marginLeft: 6,
   },
 
   // ADDITIONAL COSTS & CALCULATION SUMMARY

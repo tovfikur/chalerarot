@@ -40,3 +40,7 @@ Inventory, Purchase, Sale and Expense Management System for Rice Wholesale Busin
    ```bash
    docker compose up -d --build
    ```
+   - **Frontend**: http://localhost:3001 (configurable via `FRONTEND_PORT`)
+   - **Backend API**: http://localhost:4000/api
+   - **PostgreSQL**: localhost:5432
+

@@ -24,11 +24,8 @@ const tabs: { r: string; k: Key; icon: IconName }[] = [
 const sidebar: { r: string; k: Key; icon: IconName; color: string; bg: string }[] = [
   { r: 'home', k: 'home', icon: icons.home, color: '#2563EB', bg: '#EFF6FF' },
   { r: 'purchase', k: 'purchase', icon: icons.purchase, color: '#0284C7', bg: '#F0F9FF' },
-  { r: 'return-purchase', k: 'purchaseReturn', icon: icons.retPurchase, color: '#EA580C', bg: '#FFF7ED' },
   { r: 'vendors', k: 'vendors', icon: icons.vendors, color: '#8B5CF6', bg: '#F5F3FF' },
-  { r: 'products', k: 'products', icon: icons.products, color: '#059669', bg: '#ECFDF5' },
   { r: 'sale', k: 'sale', icon: icons.sale, color: '#0D9488', bg: '#F0FDFA' },
-  { r: 'return-sale', k: 'saleReturn', icon: icons.retSale, color: '#E11D48', bg: '#FFF1F2' },
   { r: 'customers', k: 'customers', icon: icons.customers, color: '#0284C7', bg: '#F0F9FF' },
   { r: 'stock', k: 'stockDashboard', icon: icons.stock, color: '#D97706', bg: '#FFFBEB' },
   { r: 'expense', k: 'expenseDashboard', icon: icons.expense, color: '#C026D3', bg: '#FDF4FF' },
@@ -37,38 +34,32 @@ const sidebar: { r: string; k: Key; icon: IconName; color: string; bg: string }[
   { r: 'more', k: 'office', icon: icons.office, color: '#6366F1', bg: '#EEF2FF' },
   { r: 'trash', k: 'trash', icon: icons.del, color: '#DC2626', bg: '#FEF2F2' },
 ];
-// Desktop-only sidebar density. Pointer input, so rows can be tighter than the
-// 48px mobile touch target: 42px row + 2px gap keeps every label readable and
-// clickable while fitting all 14 menus without scrolling on a normal screen.
+// Desktop-only sidebar density.
 const SIDE_ROW_H = 40;
 const SIDE_ROW_GAP = 1;
 const tabOf = (r: string) => (tabs.some(x => x.r === r) ? r : 'more');
 // Sub-routes highlight their sidebar parent.
 const sideActive = (route: string, r: string) => {
   if (route === r) return true;
-  if (r === 'products' && route === 'stock') return false;
   if (r === 'accounts' && (route === 'collect' || route === 'pay')) return true;
-  // The generic `return` route (deep link / old bookmark) must not light up
-  // either return entry: the two return contexts are separate.
-  if ((r === 'return-sale' || r === 'return-purchase') && route === 'return') return false;
   if (r === 'more' && (route === 'collect' || route === 'pay')) return false;
   return false;
 };
 const titleKey: Record<string, Key> = {
-  collect: 'collect', pay: 'pay', products: 'products', customers: 'customers', vendors: 'vendors',
-  stock: 'stockDashboard', expense: 'expenseDashboard', trash: 'trash', return: 'ret', 'return-sale': 'saleReturn', 'return-purchase': 'purchaseReturn',
+  collect: 'collect', pay: 'pay', customers: 'customers', vendors: 'vendors',
+  stock: 'stockDashboard', expense: 'expenseDashboard', trash: 'trash',
   bank: 'bankCash',
 };
 
 // Hash routes for web so refresh + Back/Forward restore the page.
-// Native keeps plain in-memory navigation (window is undefined there).
-// `return` stays for old bookmarks; the sidebar uses the two split routes.
-const ROUTES = ['home', 'sale', 'purchase', 'accounts', 'more', 'products', 'customers', 'vendors', 'stock', 'expense', 'collect', 'pay', 'trash', 'return', 'return-sale', 'return-purchase', 'bank'] as const;
+const ROUTES = ['home', 'sale', 'purchase', 'accounts', 'more', 'customers', 'vendors', 'stock', 'expense', 'collect', 'pay', 'trash', 'bank'] as const;
 const isWeb = typeof window !== 'undefined' && typeof window.location !== 'undefined';
 const routeFromHash = (): string => {
   if (!isWeb) return 'home';
   const h = window.location.hash.replace(/^#\/?/, '').split('?')[0];
-  return (ROUTES as readonly string[]).includes(h) ? h : 'home';
+  if (h === 'products') return 'stock';
+  if (h === 'return-sale' || h === 'return-purchase' || h === 'return') return 'home';
+  return (ROUTES as readonly string[]).includes(h as any) ? h : 'home';
 };
 
 function Shell() {
@@ -88,9 +79,12 @@ function Shell() {
   const [returnFocus, setReturnFocus] = useState<{ kind: 'sale' | 'purchase'; id: string } | null>(null);
   const fd = useDateStr();
   const setRoute = (r: string) => {
-    setRouteState(r);
+    let target = r;
+    if (target === 'products') target = 'stock';
+    if (target === 'return-sale' || target === 'return-purchase' || target === 'return') target = 'home';
+    setRouteState(target);
     if (isWeb) {
-      const h = `#/${r === 'home' ? '' : r}`;
+      const h = `#/${target === 'home' ? '' : target}`;
       if (window.location.hash !== h) window.location.hash = h;
     }
   };
@@ -150,17 +144,14 @@ function Shell() {
   }
   const body = {
     home: <Home go={setRoute} />, sale: <Trade key="s" mode="sale" />, purchase: <Trade key="p" mode="purchase" />, accounts: <Accounts go={setRoute} focus={focus} onFocusDone={() => setFocus(null)} />, more: <More go={setRoute} />,
-    products: <Products />, customers: <Parties kind="c" focus={partyFocus?.kind === 'c' ? partyFocus.id : null} onFocusDone={() => setPartyFocus(null)} onReturn={(k, id) => openReturnFlow(k, id)} />, vendors: <Parties kind="v" focus={partyFocus?.kind === 'v' ? partyFocus.id : null} onFocusDone={() => setPartyFocus(null)} onReturn={(k, id) => openReturnFlow(k, id)} />, stock: <StockDashboard />, expense: <ExpenseDashboard go={setRoute} />, collect: <Money key="c" kind="c" done={home} />, pay: <Money key="v" kind="v" done={home} />, trash: <Trash />,
-    return: <ReturnHome focus={returnFocus} onFocusDone={() => setReturnFocus(null)} />,
-    'return-sale': <ReturnHome key="rs" initialKind="sale" focus={returnFocus} onFocusDone={() => setReturnFocus(null)} />,
-    'return-purchase': <ReturnHome key="rp" initialKind="purchase" focus={returnFocus} onFocusDone={() => setReturnFocus(null)} />,
+    customers: <Parties kind="c" focus={partyFocus?.kind === 'c' ? partyFocus.id : null} onFocusDone={() => setPartyFocus(null)} onReturn={() => setRoute('home')} />, vendors: <Parties kind="v" focus={partyFocus?.kind === 'v' ? partyFocus.id : null} onFocusDone={() => setPartyFocus(null)} onReturn={() => setRoute('home')} />, stock: <StockDashboard />, expense: <ExpenseDashboard go={setRoute} />, collect: <Money key="c" kind="c" done={home} />, pay: <Money key="v" kind="v" done={home} />, trash: <Trash />,
     bank: <BankCash />,
   }[route];
   const openInv = (kind: 'sale' | 'purchase', id: string) => { closeSearch(); setInv({ kind, id }); };
   const openParty = (kind: 'c' | 'v', id: string) => { closeSearch(); setPartyFocus({ kind, id }); setRoute(kind === 'c' ? 'customers' : 'vendors'); };
-  const openReturnFlow = (kind: 'sale' | 'purchase', id: string) => {
-    setInv(null); setReturnFocus({ kind, id });
-    setRoute(kind === 'sale' ? 'return-sale' : 'return-purchase');
+  const openReturnFlow = () => {
+    setInv(null);
+    setRoute('home');
   };
   const openRet = (id: string) => { closeSearch(); setRetView(id); };
   const gRow = { flexDirection: 'row' as const, alignItems: 'center' as const, gap: 8, paddingVertical: 10, paddingHorizontal: 12, borderBottomWidth: 1, borderBottomColor: color.line, minHeight: 60 };
