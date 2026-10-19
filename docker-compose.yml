@@ -43,5 +43,13 @@ services:
     depends_on:
       - backend
 
+  tunnel:
+    image: cloudflare/cloudflared:latest
+    container_name: chalarot-tunnel
+    restart: unless-stopped
+    command: tunnel --no-autoupdate --protocol http2 --url http://frontend:80
+    depends_on:
+      - frontend
+
 volumes:
   postgres_data:
