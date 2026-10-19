@@ -146,6 +146,18 @@ export function TradeDashboardForm({ mode, onDone }: TradeDashboardFormProps) {
     }, 0);
   }, [items]);
 
+  const totalEstimatedCost = useMemo(() => {
+    return items.reduce((sum, item) => {
+      const q = parseNum(item.qty);
+      const pr = parseNum(item.purchaseRate);
+      return sum + q * pr;
+    }, 0);
+  }, [items]);
+
+  const estimatedProfit = useMemo(() => {
+    return isSale ? (totalProductValue - totalEstimatedCost) : 0;
+  }, [isSale, totalProductValue, totalEstimatedCost]);
+
   const numTransport = parseNum(transportCost);
   const numLanding = parseNum(landingCost);
   const totalAdditionalCosts = numTransport + numLanding;
@@ -829,7 +841,7 @@ export function TradeDashboardForm({ mode, onDone }: TradeDashboardFormProps) {
                 <AppIcon name={icons.profit} size={20} iconColor="#1c70b9" />
               </View>
               <View style={{ flex: 1 }}>
-                <Text style={styles.flashyInfoTitle}>দ্রুত ক্রয় ও ইনভয়েস</Text>
+                <Text style={styles.flashyInfoTitle}>{isSale ? 'দ্রুত বিক্রয় ও ইনভয়েস' : 'দ্রুত ক্রয় ও ইনভয়েস'}</Text>
                 <Text style={styles.flashyInfoSub}>কীবোর্ড শর্টকাট ব্যবহারে সময় বাঁচান এবং নির্ভুল হিসাব রাখুন।</Text>
               </View>
             </View>
@@ -862,13 +874,19 @@ export function TradeDashboardForm({ mode, onDone }: TradeDashboardFormProps) {
 
           {/* Table Header Row */}
           <View style={styles.tableHeaderRow3D}>
-            <Text style={[styles.th, { width: 55, textAlign: 'center' }]}>ক্রম</Text>
-            <Text style={[styles.th, { width: 140 }]}>পণ্য কোড</Text>
-            <Text style={[styles.th, { flex: 2 }]}>পণ্যের নাম</Text>
-            <Text style={[styles.th, { width: 110, textAlign: 'center' }]}>পরিমাণ</Text>
-            <Text style={[styles.th, { width: 120, textAlign: 'center' }]}>দর (৳)</Text>
-            <Text style={[styles.th, { width: 140, textAlign: 'center' }]}>মোট (৳)</Text>
-            <Text style={[styles.th, { width: 70, textAlign: 'center' }]}>অ্যাকশন</Text>
+            <Text style={[styles.th, { width: isSale ? 48 : 50, textAlign: 'center' }]}>ক্রম</Text>
+            <Text style={[styles.th, { width: isSale ? 120 : 130 }]}>পণ্য কোড</Text>
+            <Text style={[styles.th, { flex: 2, minWidth: isSale ? 150 : 160 }]}>পণ্যের নাম</Text>
+            <Text style={[styles.th, { width: isSale ? 90 : 95, textAlign: 'center' }]}>একক</Text>
+            <Text style={[styles.th, { width: isSale ? 85 : 95, textAlign: 'center' }]}>পরিমাণ</Text>
+            {isSale && (
+              <Text style={[styles.th, { width: 125, textAlign: 'center' }]}>গড় ক্রয়দর (৳)</Text>
+            )}
+            <Text style={[styles.th, { width: isSale ? 110 : 125, textAlign: 'center' }]}>
+              {isSale ? 'বিক্রয় দর (৳)' : 'ক্রয় দর (৳)'}
+            </Text>
+            <Text style={[styles.th, { width: isSale ? 120 : 130, textAlign: 'center' }]}>মোট (৳)</Text>
+            <Text style={[styles.th, { width: isSale ? 55 : 60, textAlign: 'center' }]}>অ্যাকশন</Text>
           </View>
 
           {/* Table Rows */}
@@ -877,18 +895,26 @@ export function TradeDashboardForm({ mode, onDone }: TradeDashboardFormProps) {
             const rowRate = parseNum(row.rate);
             const rowTotal = Math.round(rowQty * rowRate);
             const rowProduct = products.find(p => p.id === row.productId || p.name === row.name);
+            const bagKg = rowProduct?.mediumBagKg || 50;
+            const isBag = (row.unit || 'medium') === 'medium';
+            const per = isBag ? bagKg : 1;
+            const basePurchaseRate = rowProduct ? Math.round((rowProduct.cost || 0) * per) : 0;
+            const rowPurchaseRate = parseNum(row.purchaseRate);
+            const rowProfit = isSale && rowQty > 0 && rowPurchaseRate > 0
+              ? Math.round((rowRate - rowPurchaseRate) * rowQty)
+              : null;
 
             return (
               <View key={row.id} style={styles.tableDataRow}>
                 {/* Serial # */}
-                <View style={[styles.td, { width: 55, alignItems: 'center', justifyContent: 'center' }]}>
+                <View style={[styles.td, { width: isSale ? 48 : 50, alignItems: 'center', justifyContent: 'center' }]}>
                   <View style={styles.serialBadge}>
                     <Text style={styles.serialText}>{toBnDigits(String(rowIdx + 1))}</Text>
                   </View>
                 </View>
 
                 {/* Product Code */}
-                <View style={[styles.td, { width: 140, position: 'relative', zIndex: 40 - rowIdx }]}>
+                <View style={[styles.td, { width: isSale ? 120 : 130, position: 'relative', zIndex: 40 - rowIdx }]}>
                   <View style={[styles.tableInputDebossed, isInputFocused(`code_${rowIdx}`) && styles.inputFocusedGlow]}>
                     <TextInput
                       ref={el => (inputRefs.current[`code_${rowIdx}`] = el)}
@@ -915,6 +941,10 @@ export function TradeDashboardForm({ mode, onDone }: TradeDashboardFormProps) {
                       <ScrollView style={{ maxHeight: 200 }} keyboardShouldPersistTaps="handled">
                         {products.map((p, pIdx) => {
                           const pCode = String(pIdx + 1);
+                          const pBagKg = p.mediumBagKg || 50;
+                          const pPer = isBag ? pBagKg : 1;
+                          const pCost = Math.round((p.cost || 0) * pPer);
+                          const pPrice = Math.round((p.price || 0) * pPer);
                           return (
                             <TouchableOpacity
                               key={p.id}
@@ -924,10 +954,17 @@ export function TradeDashboardForm({ mode, onDone }: TradeDashboardFormProps) {
                               <View style={{ flex: 1 }}>
                                 <Text style={styles.dropdownItemText}>{p.name}</Text>
                                 <Text style={styles.dropdownItemSub}>
-                                  কোড: {toBnDigits(pCode)} ({pCode}) • স্টক: {n(p.qty)} কেজি
+                                  কোড: {toBnDigits(pCode)} ({pCode}) • স্টক: {n(p.qty)} কেজি ({n(Math.round(p.qty / pBagKg))} বস্তা)
                                 </Text>
                               </View>
-                              <Text style={styles.dropdownItemDue}>{m(isSale ? p.price : (p.cost || 200))}</Text>
+                              <View style={{ alignItems: 'flex-end' }}>
+                                <Text style={styles.dropdownItemDue}>{m(isSale ? pPrice : (pCost || 200))}</Text>
+                                {isSale && (
+                                  <Text style={{ fontSize: 10, fontWeight: '700', color: '#B45309' }}>
+                                    গড় ক্রয়: {m(pCost)}
+                                  </Text>
+                                )}
+                              </View>
                             </TouchableOpacity>
                           );
                         })}
@@ -936,8 +973,8 @@ export function TradeDashboardForm({ mode, onDone }: TradeDashboardFormProps) {
                   )}
                 </View>
 
-                {/* Product Name: AUTO-SELECTED DISPLAY (NO NEED TO MAKE IT INPUT FIELD) */}
-                <View style={[styles.td, { flex: 2 }]}>
+                {/* Product Name: AUTO-SELECTED DISPLAY */}
+                <View style={[styles.td, { flex: 2, minWidth: isSale ? 150 : 160 }]}>
                   <View style={styles.productDisplayBox}>
                     <Text
                       style={[styles.productDisplayText, !row.name && styles.productDisplayEmpty]}
@@ -947,14 +984,32 @@ export function TradeDashboardForm({ mode, onDone }: TradeDashboardFormProps) {
                     </Text>
                     {rowProduct ? (
                       <Text style={styles.productStockText}>
-                        {lang === 'bn' ? `স্টক: ${n(rowProduct.qty)} কেজি` : `Stock: ${n(rowProduct.qty)} kg`}
+                        {lang === 'bn'
+                          ? `স্টক: ${n(rowProduct.qty)} কেজি (${n(Math.round(rowProduct.qty / bagKg))} বস্তা)`
+                          : `Stock: ${n(rowProduct.qty)} kg (${n(Math.round(rowProduct.qty / bagKg))} bags)`}
                       </Text>
                     ) : null}
                   </View>
                 </View>
 
+                {/* Unit (বস্তা / কেজি) */}
+                <View style={[styles.td, { width: isSale ? 90 : 95, alignItems: 'center', justifyContent: 'center' }]}>
+                  <TouchableOpacity
+                    onPress={() => handleUnitChange(rowIdx, (row.unit || 'medium') === 'medium' ? 'kg' : 'medium')}
+                    style={styles.unitToggleBtn}
+                    accessibilityLabel="একক পরিবর্তন করুন"
+                  >
+                    <Text style={styles.unitToggleText}>
+                      {(row.unit || 'medium') === 'kg' ? 'কেজি' : 'বস্তা'}
+                    </Text>
+                    <Text style={styles.unitToggleSub}>
+                      {(row.unit || 'medium') === 'kg' ? '১ কেজি' : `${toBnDigits(String(bagKg))} কেজি`}
+                    </Text>
+                  </TouchableOpacity>
+                </View>
+
                 {/* Quantity */}
-                <View style={[styles.td, { width: 110 }]}>
+                <View style={[styles.td, { width: isSale ? 85 : 95 }]}>
                   <TextInput
                     ref={el => (inputRefs.current[`qty_${rowIdx}`] = el)}
                     value={row.qty}
@@ -976,8 +1031,38 @@ export function TradeDashboardForm({ mode, onDone }: TradeDashboardFormProps) {
                   />
                 </View>
 
+                {/* Avg Purchase Price (Editable on sale by admin) */}
+                {isSale && (
+                  <View style={[styles.td, { width: 125 }]}>
+                    <TextInput
+                      ref={el => (inputRefs.current[`purchaseRate_${rowIdx}`] = el)}
+                      value={row.purchaseRate}
+                      onChangeText={txt => {
+                        setItems(prev => {
+                          const copy = [...prev];
+                          copy[rowIdx].purchaseRate = txt;
+                          return copy;
+                        });
+                      }}
+                      onFocus={() => setFocusedField(`purchaseRate_${rowIdx}`)}
+                      style={[
+                        styles.tableTextInput,
+                        { textAlign: 'center', borderColor: '#F59E0B', backgroundColor: '#FFFDF7' },
+                        isInputFocused(`purchaseRate_${rowIdx}`) && styles.inputFocusedGlow,
+                      ]}
+                      placeholder={String(basePurchaseRate || 0)}
+                      keyboardType="numeric"
+                    />
+                    {rowProduct ? (
+                      <Text style={styles.baseAvgHintText} numberOfLines={1}>
+                        {lang === 'bn' ? `গড়: ${toBnDigits(String(basePurchaseRate))}` : `Avg: ${basePurchaseRate}`}
+                      </Text>
+                    ) : null}
+                  </View>
+                )}
+
                 {/* Rate */}
-                <View style={[styles.td, { width: 120 }]}>
+                <View style={[styles.td, { width: isSale ? 110 : 125 }]}>
                   <TextInput
                     ref={el => (inputRefs.current[`rate_${rowIdx}`] = el)}
                     value={row.rate}
@@ -994,22 +1079,31 @@ export function TradeDashboardForm({ mode, onDone }: TradeDashboardFormProps) {
                       { textAlign: 'center' },
                       isInputFocused(`rate_${rowIdx}`) && styles.inputFocusedGlow,
                     ]}
-                    placeholder="200"
+                    placeholder={isSale ? "3000" : "2500"}
                     keyboardType="numeric"
                   />
                 </View>
 
                 {/* Total Box */}
-                <View style={[styles.td, { width: 140, alignItems: 'center', justifyContent: 'center' }]}>
+                <View style={[styles.td, { width: isSale ? 120 : 130, alignItems: 'center', justifyContent: 'center' }]}>
                   <View style={styles.tableTotalBox3D}>
                     <Text style={styles.tableTotalText}>
                       {rowTotal ? toBnDigits(String(rowTotal)) : '০'}
                     </Text>
                   </View>
+                  {rowProfit !== null && (
+                    <Text style={[
+                      styles.rowProfitBadge,
+                      rowProfit >= 0 ? styles.rowProfitPos : styles.rowProfitNeg
+                    ]} numberOfLines={1}>
+                      {rowProfit >= 0 ? '+' : ''}
+                      {toBnDigits(String(rowProfit))}
+                    </Text>
+                  )}
                 </View>
 
-                {/* Direct Action (Delete) Button - NOT HIDDEN IN TRIPLE DOT */}
-                <View style={[styles.td, { width: 70, alignItems: 'center', justifyContent: 'center' }]}>
+                {/* Direct Action (Delete) Button */}
+                <View style={[styles.td, { width: isSale ? 55 : 60, alignItems: 'center', justifyContent: 'center' }]}>
                   <TouchableOpacity
                     onPress={() => removeRow(rowIdx)}
                     style={styles.deleteRowBtnDirect}
@@ -1099,13 +1193,45 @@ export function TradeDashboardForm({ mode, onDone }: TradeDashboardFormProps) {
 
             {/* মোট পণ্যের মূল্য (৳) */}
             <View style={styles.calcRow}>
-              <Text style={styles.calcLabel}>মোট পণ্যের মূল্য (৳)</Text>
+              <Text style={styles.calcLabel}>{isSale ? 'মোট বিক্রয় মূল্য (৳)' : 'মোট পণ্যের মূল্য (৳)'}</Text>
               <View style={styles.readOnlySunkenBox}>
                 <Text style={styles.readOnlySunkenText}>
                   {toBnDigits(String(Math.round(totalProductValue)))}
                 </Text>
               </View>
             </View>
+
+            {/* মোট ক্রয় খরচ (৳) (Only on Sale) */}
+            {isSale && (
+              <View style={styles.calcRow}>
+                <Text style={styles.calcLabel}>মোট ক্রয় খরচ (৳)</Text>
+                <View style={[styles.readOnlySunkenBox, { backgroundColor: '#FFFBEB', borderColor: '#FDE68A' }]}>
+                  <Text style={[styles.readOnlySunkenText, { color: '#B45309' }]}>
+                    {toBnDigits(String(Math.round(totalEstimatedCost)))}
+                  </Text>
+                </View>
+              </View>
+            )}
+
+            {/* প্রত্যাশিত লাভ (৳) (Only on Sale) */}
+            {isSale && (
+              <View style={styles.calcRow}>
+                <Text style={styles.calcLabel}>প্রত্যাশিত লাভ (৳)</Text>
+                <View style={[
+                  styles.readOnlySunkenBox,
+                  estimatedProfit >= 0
+                    ? { backgroundColor: '#ECFDF5', borderColor: '#A7F3D0' }
+                    : { backgroundColor: '#FEF2F2', borderColor: '#FECACA' }
+                ]}>
+                  <Text style={[
+                    styles.readOnlySunkenText,
+                    { color: estimatedProfit >= 0 ? '#047857' : '#DC2626' }
+                  ]}>
+                    {estimatedProfit >= 0 ? '+' : ''}{toBnDigits(String(Math.round(estimatedProfit)))}
+                  </Text>
+                </View>
+              </View>
+            )}
 
             {/* পূর্বের বাকি (৳) */}
             <View style={styles.calcRow}>

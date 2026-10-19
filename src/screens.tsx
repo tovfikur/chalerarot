@@ -2026,7 +2026,7 @@ export function BankCash() {
             cursor: 'pointer' as any,
           }}
         >
-          <MaterialCommunityIcons name={icons.add} size={22} color="#FFFFFF" />
+          <AppIcon name={icons.add} size={22} iconColor="#FFFFFF" />
           <Text style={{ color: '#FFFFFF', fontSize: 16, fontWeight: '700' }}>{t('addAccount')}</Text>
         </TouchableOpacity>
 
@@ -2047,7 +2047,7 @@ export function BankCash() {
             cursor: 'pointer' as any,
           }}
         >
-          <MaterialCommunityIcons name={icons.transfer} size={22} color="#FFFFFF" />
+          <AppIcon name={icons.transfer} size={22} iconColor="#FFFFFF" />
           <Text style={{ color: '#FFFFFF', fontSize: 16, fontWeight: '700' }}>{t('transferMoney')}</Text>
         </TouchableOpacity>
       </View>
