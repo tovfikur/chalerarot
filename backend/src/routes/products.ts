@@ -22,13 +22,13 @@ const parsePrice = (v: unknown): number | null => {
 };
 const priceError = { error: 'Sale price must be a number greater than 0', code: 'PRICE_INVALID' };
 
-const productJson = (p: {
-  id: string; name: string; cost: number; price: number; openingQtyKg: number; qtyKg: number;
-  damagedQtyKg: number; uom?: string; stockValue: number; damagedValue: number;
+export const productJson = (p: {
+  id: string; code: string | null; name: string; description: string | null; uom: string; cost: number; price: number; openingQtyKg: number; qtyKg: number;
+  damagedQtyKg: number; stockValue: number; damagedValue: number;
   openingUnitCost: number; openingValue: number; smallBagKg: number; mediumBagKg: number; largeBagKg: number;
 }) => ({
-  id: p.id, name: p.name, cost: p.cost, price: p.price,
-  opening: p.openingQtyKg, qty: p.qtyKg, damagedQty: p.damagedQtyKg, uom: 'kg',
+  id: p.id, code: p.code ?? undefined, name: p.name, description: p.description ?? undefined, cost: p.cost, price: p.price,
+  opening: p.openingQtyKg, qty: p.qtyKg, damagedQty: p.damagedQtyKg, uom: p.uom,
   // Inventory value (weighted average cost of the stock on hand). This is
   // stock value, NOT available cash.
   stockValue: p.stockValue, damagedValue: p.damagedValue,
@@ -45,7 +45,7 @@ products.get('/', async (_req: Request, res: Response) => {
 // POST /api/products
 products.post('/', async (req: Request, res: Response) => {
   try {
-    const { name, cost, opening, smallBagKg, mediumBagKg, largeBagKg } = req.body ?? {};
+    const { code, name, description, uom, cost, opening, smallBagKg, mediumBagKg, largeBagKg } = req.body ?? {};
     if (!String(name ?? '').trim()) return res.status(400).json({ error: 'Product name is required' });
     const price = parsePrice((req.body ?? {}).price);
     if (price === null) return res.status(400).json(priceError);
@@ -59,7 +59,9 @@ products.post('/', async (req: Request, res: Response) => {
     const p = await db.$transaction(async tx => {
       const created = await tx.product.create({
         data: {
-          name: String(name).trim(), cost: c, price,
+          code: String(code ?? '').trim() || null,
+          name: String(name).trim(), description: String(description ?? '').trim() || null,
+          uom: String(uom ?? 'kg').trim() || 'kg', cost: c, price,
           openingQtyKg: o, qtyKg: o, openingUnitCost: c, openingValue,
           stockValue: openingValue, smallBagKg: sb, mediumBagKg: mb, largeBagKg: lb,
         },
@@ -75,6 +77,7 @@ products.post('/', async (req: Request, res: Response) => {
     // instead of refetching the whole product list.
     res.status(201).json({ id: p.id, product: productJson(p) });
   } catch (e) {
+    if ((e as { code?: string })?.code === 'P2002') return res.status(409).json({ error: 'Product code is already in use', code: 'PRODUCT_CODE_EXISTS' });
     res.status(500).json({ error: 'Failed to create product' });
   }
 });
@@ -82,7 +85,7 @@ products.post('/', async (req: Request, res: Response) => {
 // PUT /api/products/:id (opening change shifts current stock by the delta)
 products.put('/:id', async (req: Request, res: Response) => {
   try {
-    const { name, cost, price, opening, smallBagKg, mediumBagKg, largeBagKg } = req.body ?? {};
+    const { code, name, description, uom, cost, price, opening, smallBagKg, mediumBagKg, largeBagKg } = req.body ?? {};
     const cur = await db.product.findUnique({ where: { id: req.params.id } });
     if (!cur || cur.deletedAt) return res.status(404).json({ error: 'Product not found' });
     if (name !== undefined && !String(name).trim()) return res.status(400).json({ error: 'Product name is required' });
@@ -96,7 +99,10 @@ products.put('/:id', async (req: Request, res: Response) => {
     const day = businessToday();
     const updated = await db.$transaction(async tx => {
       const data: Record<string, unknown> = {
+        code: code === undefined ? cur.code : (String(code ?? '').trim() || null),
         name: name === undefined ? cur.name : String(name).trim(),
+        description: description === undefined ? cur.description : (String(description ?? '').trim() || null),
+        uom: uom === undefined ? cur.uom : (String(uom ?? '').trim() || 'kg'),
         price: nextPrice === undefined ? cur.price : nextPrice,
         openingQtyKg: o,
         smallBagKg: sb, mediumBagKg: mb, largeBagKg: lb,
@@ -121,6 +127,7 @@ products.put('/:id', async (req: Request, res: Response) => {
     });
     res.json({ id: updated.id, product: productJson(updated) });
   } catch (e) {
+    if ((e as { code?: string })?.code === 'P2002') return res.status(409).json({ error: 'Product code is already in use', code: 'PRODUCT_CODE_EXISTS' });
     res.status(500).json({ error: 'Failed to update product' });
   }
 });

@@ -10,7 +10,8 @@ import {
   Alert,
   Platform,
 } from 'react-native';
-import { useApp, today, Expense, type MoneyAccountRow } from '../store';
+import { useApp, today, type MoneyAccountRow } from '../store';
+import type { Expense } from '../api';
 import {
   useMoney,
   useNum,
@@ -177,11 +178,11 @@ export function ExpenseDashboard({ go }: ExpenseDashboardProps = {}) {
 
   // Convert raw store expenses to ExpenseRowData
   const allExpenseRows: ExpenseRowData[] = useMemo(() => {
-    return expenses.map((e, idx) => {
+    return expenses.map(e => {
       const type = resolveExpenseType(e.category, e.note);
       const typeLabel =
         type === 'operation' ? 'অপারেশন খরচ' : type === 'transport' ? 'পরিবহন খরচ' : 'লোডিং/ল্যান্ডিং';
-      const voucherNo = `EXP-${String(expenses.length - idx).padStart(4, '0')}`;
+      const voucherNo = e.voucherNo ?? '';
 
       // Extract payer / responsible from note if saved
       let payerName: string | undefined;
@@ -521,7 +522,7 @@ export function ExpenseDashboard({ go }: ExpenseDashboardProps = {}) {
         value: m(totalPeriodAmount),
         neg: true,
       },
-      printedAt: printedAtStamp(lang),
+      printedAt: printedAtStamp(lang === 'bn'),
       printLabel: lang === 'bn' ? 'প্রিন্ট করুন' : 'Print',
     };
     printReport(doc);

@@ -11,7 +11,7 @@ export const norm = (s: string) => (s ?? '').toLowerCase().trim();
 export const matchProduct = (p: Product, q: string) => {
   const nq = norm(q);
   if (!nq) return true;
-  return norm(p.name).includes(nq) || norm(p.id).includes(nq);
+  return norm(p.name).includes(nq) || norm(p.code ?? '').includes(nq) || norm(p.description ?? '').includes(nq) || norm(p.id).includes(nq);
 };
 
 export const matchParty = (p: Party, q: string) => {

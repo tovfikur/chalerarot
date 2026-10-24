@@ -10,7 +10,7 @@ import {
   Platform,
   Modal,
 } from 'react-native';
-import { useApp, Product, Party } from '../store';
+import { useApp, today, Product, Party } from '../store';
 import { color, useMoney, useNum, toBnDigits } from '../ui';
 import { parseNum } from '../bn';
 import { AppIcon, icons } from '../icons';
@@ -232,27 +232,9 @@ export function TradeDashboardForm({ mode, onDone }: TradeDashboardFormProps) {
   const findProductByCode = useCallback((codeQuery: string): { product: Product; code: string } | null => {
     if (!codeQuery) return null;
     const q = codeQuery.trim().toLowerCase();
-    // 1. Match numeric index (1, 2, 3...)
-    const num = parseInt(q, 10);
-    if (!isNaN(num)) {
-      if (num >= 1 && num <= products.length) {
-        return { product: products[num - 1], code: String(num) };
-      }
-      if (num >= 300 && num < 300 + products.length) {
-        return { product: products[num - 300], code: String(num) };
-      }
-    }
-    // 2. Match product ID (e.g. p1, p2)
-    const byIdIdx = products.findIndex(p => p.id.toLowerCase() === q);
-    if (byIdIdx !== -1) {
-      return { product: products[byIdIdx], code: String(byIdIdx + 1) };
-    }
-    // 3. Match product name
-    const byNameIdx = products.findIndex(p => p.name.toLowerCase().includes(q));
-    if (byNameIdx !== -1) {
-      return { product: products[byNameIdx], code: String(byNameIdx + 1) };
-    }
-    return null;
+    // Product codes are data entered by the user, never generated from list order.
+    const product = products.find(p => p.code?.trim().toLowerCase() === q);
+    return product ? { product, code: product.code!.trim() } : null;
   }, [products]);
 
   // Product selection fills identity only; prices remain blank until entered.
@@ -288,13 +270,13 @@ export function TradeDashboardForm({ mode, onDone }: TradeDashboardFormProps) {
   }, [findProductByCode]);
 
   // Product selection
-  const onSelectProduct = useCallback((rowIdx: number, p: Product, pIdx: number) => {
+  const onSelectProduct = useCallback((rowIdx: number, p: Product) => {
     setItems(prev => {
       const copy = [...prev];
       const u = copy[rowIdx].unit || 'medium';
       copy[rowIdx] = {
         ...copy[rowIdx],
-        code: String(pIdx + 1),
+        code: p.code?.trim() ?? '',
         productId: p.id,
         name: p.name,
         unit: u,
@@ -380,11 +362,9 @@ export function TradeDashboardForm({ mode, onDone }: TradeDashboardFormProps) {
   const getVisibleProducts = useCallback((query: string) => {
     const normalized = query.trim().toLowerCase();
     if (!normalized) return products;
-    return products.filter((product, index) =>
+    return products.filter(product =>
       product.name.toLowerCase().includes(normalized) ||
-      String(index + 1).startsWith(normalized) ||
-      String(index + 301).startsWith(normalized) ||
-      product.id.toLowerCase().includes(normalized)
+      (product.code ?? '').toLowerCase().includes(normalized)
     );
   }, [products]);
 
@@ -569,7 +549,7 @@ export function TradeDashboardForm({ mode, onDone }: TradeDashboardFormProps) {
         });
       }
 
-      const todayISO = isoDate || new Date().toISOString().slice(0, 10);
+      const todayISO = isoDate || today();
       if (numTransport > 0 && chosenAccountId) {
         await saveExpense({
           category: 'transport',
@@ -1199,8 +1179,7 @@ export function TradeDashboardForm({ mode, onDone }: TradeDashboardFormProps) {
                         const visibleProducts = getVisibleProducts(row.code);
                         if (visibleProducts.length) {
                           const selectedProduct = visibleProducts[itemHighlightIdx] || visibleProducts[0];
-                          const productIdx = products.findIndex(product => product.id === selectedProduct.id);
-                          onSelectProduct(rowIdx, selectedProduct, productIdx);
+                          onSelectProduct(rowIdx, selectedProduct);
                         }
                         setActiveItemDropdownIdx(null);
                         focusNextField(`code_${rowIdx}`);
@@ -1227,8 +1206,7 @@ export function TradeDashboardForm({ mode, onDone }: TradeDashboardFormProps) {
                     <View testID={`product-dropdown-${rowIdx + 1}`} style={[styles.dropdownMenu3D, styles.productDropdownMenu]}>
                       <ScrollView style={{ maxHeight: 200 }} keyboardShouldPersistTaps="handled">
                         {getVisibleProducts(row.code).length ? getVisibleProducts(row.code).map((p, visibleIdx) => {
-                          const pIdx = products.findIndex(product => product.id === p.id);
-                          const pCode = String(pIdx + 1);
+                          const pCode = p.code?.trim() ?? '';
                           const pBagKg = p.mediumBagKg || 50;
                           const pPer = isBag ? pBagKg : 1;
                           const pCost = Math.round((p.cost || 0) * pPer);
@@ -1237,7 +1215,7 @@ export function TradeDashboardForm({ mode, onDone }: TradeDashboardFormProps) {
                             <TouchableOpacity
                               key={p.id}
                               onPress={() => {
-                                onSelectProduct(rowIdx, p, pIdx);
+                                onSelectProduct(rowIdx, p);
                                 focusNextField(`code_${rowIdx}`);
                               }}
                               style={[styles.dropdownItem, itemHighlightIdx === visibleIdx && styles.dropdownItemActive]}
@@ -1251,7 +1229,7 @@ export function TradeDashboardForm({ mode, onDone }: TradeDashboardFormProps) {
                                 </Text>
                               </View>
                               <View style={{ alignItems: 'flex-end' }}>
-                                <Text style={styles.dropdownItemDue}>{m(isSale ? pPrice : (pCost || 200))}</Text>
+                                <Text style={styles.dropdownItemDue}>{m(isSale ? pPrice : pCost)}</Text>
                                 {isSale && (
                                   <Text style={{ fontSize: 10, fontWeight: '700', color: '#B45309' }}>
                                     গড় ক্রয়: {m(pCost)}

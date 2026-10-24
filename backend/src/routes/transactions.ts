@@ -5,6 +5,7 @@ import { accountBalance, accountBalances, lockAccounts, methodForAmount, moneyBa
 import { currentAvgCost, round2, writeMovement } from '../valuation';
 import { lifetimeFinance, periodFinance } from '../finance';
 import { settleAll, settleParty, syncPartyInvoices, buildSettlement } from '../settlement';
+import { productJson } from './products';
 
 const num = (v: unknown, d = 0) => {
   const n = typeof v === 'number' ? v : parseFloat(String(v ?? ''));
@@ -475,12 +476,7 @@ tx.get('/bootstrap', async (_req: Request, res: Response) => {
     vendorPayments.map(p => ({ partyId: p.vendorId, invoiceId: p.purchaseId, returnId: p.returnId, date: p.date, amount: p.amount, createdAt: p.createdAt })),
   );
   res.json({
-    products: products.map(p => ({
-      id: p.id, name: p.name, cost: p.cost, price: p.price,
-      opening: p.openingQtyKg, qty: p.qtyKg, damagedQty: p.damagedQtyKg, uom: 'kg',
-      stockValue: p.stockValue, damagedValue: p.damagedValue,
-      smallBagKg: p.smallBagKg, mediumBagKg: p.mediumBagKg, largeBagKg: p.largeBagKg,
-    })),
+    products: products.map(productJson),
     customers: customers.map(c => ({ id: c.id, code: c.code ?? undefined, name: c.name, mobile: c.mobile, address: c.address ?? undefined, opening: c.openingDue, next: c.nextDate ?? undefined })),
     vendors: vendors.map(v => ({ id: v.id, code: v.code ?? undefined, name: v.name, mobile: v.mobile, address: v.address ?? undefined, opening: v.openingPayable, next: v.nextDate ?? undefined })),
     sales: sales.map(s => {
@@ -494,7 +490,7 @@ tx.get('/bootstrap', async (_req: Request, res: Response) => {
     customerPayments: customerPayments.map(p => ({ id: p.id, customerId: p.customerId ?? 'cash', amount: p.amount, date: p.date, note: p.note ?? undefined, returnId: p.returnId ?? undefined, returnNo: p.returnId ? retNo.get(p.returnId) : undefined, createdAt: p.createdAt, saleId: p.saleId ?? undefined, method: p.returnId ? undefined : (inMethod.get(`p:${p.id}`) ?? (p.saleId ? inMethod.get(`s:${p.saleId}`) : undefined)), accountId: p.returnId ? undefined : inAccount.get(p.id)?.accountId, accountName: p.returnId ? undefined : inAccount.get(p.id)?.accountName })),
     vendorPayments: vendorPayments.map(p => ({ id: p.id, vendorId: p.vendorId, amount: p.amount, date: p.date, note: p.note ?? undefined, returnId: p.returnId ?? undefined, returnNo: p.returnId ? retNo.get(p.returnId) : undefined, createdAt: p.createdAt, purchaseId: p.purchaseId ?? undefined, accountId: p.returnId ? undefined : outAccount.get(p.id)?.accountId, accountName: p.returnId ? undefined : outAccount.get(p.id)?.accountName })),
     movements: movements.map(mv => ({ id: mv.id, productId: mv.productId, productName: mv.product.name, type: mv.type, qty: mv.qtyKg, date: mv.date })),
-    expenses: expenses.map(e => ({ id: e.id, category: e.category, customName: e.customName ?? undefined, amount: e.amount, date: e.date, note: e.note ?? undefined, method: expMethod.get(e.id)?.method, accountId: expMethod.get(e.id)?.moneyAccountId ?? undefined })),
+    expenses: expenses.map(e => ({ id: e.id, voucherNo: e.voucherNo ?? undefined, category: e.category, customName: e.customName ?? undefined, amount: e.amount, date: e.date, note: e.note ?? undefined, method: expMethod.get(e.id)?.method, accountId: expMethod.get(e.id)?.moneyAccountId ?? undefined })),
     returns: rets.map(r => ({ id: r.id, kind: r.kind, date: r.date, amount: r.totalAmount, profit: r.profitImpact, returnNo: r.returnNo ?? undefined })),
     money: balances,
     moneyAccounts: accountList,

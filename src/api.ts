@@ -32,7 +32,7 @@ async function req<T>(path: string, init?: RequestInit): Promise<T> {
 export type IdRes = { id: string };
 /** Product create/update response: the saved row (already mapped for the app). */
 export type ProductRes = { id: string; product: {
-  id: string; name: string; cost: number; price: number; opening: number; qty: number;
+  id: string; code?: string; name: string; description?: string; cost: number; price: number; opening: number; qty: number;
   damagedQty: number; uom: string; stockValue: number; damagedValue: number;
   openingUnitCost: number; openingValue: number;
   smallBagKg: number; mediumBagKg: number; largeBagKg: number;
@@ -65,7 +65,7 @@ export type PurchaseDetail = {
 export type MoneyMethod = 'cash' | 'bkash' | 'nagad' | 'bank';
 
 export type Expense = {
-  id: string; category: string; customName?: string;
+  id: string; voucherNo?: string; category: string; customName?: string;
   amount: number; date: string; note?: string; method?: MoneyMethod; accountId?: string;
 };
 

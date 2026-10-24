@@ -9,7 +9,10 @@ datasource db {
 
 model Product {
   id           String   @id @default(cuid())
+  code         String?  @unique
   name         String
+  description  String?
+  uom          String   @default("kg")
   // `cost` is the running WEIGHTED AVERAGE cost per KG (AVCO) of the stock on
   // hand. It is never used to re-value old documents.
   cost         Float    @default(0) // per KG
@@ -208,6 +211,7 @@ model StockMovement {
 
 model Expense {
   id         String   @id @default(cuid())
+  voucherNo  String?  @unique
   category   String // salary | rent | ... | other
   customName String?
   amount     Float

@@ -20,31 +20,60 @@ export function StockDashboard() {
 
   // Add Product Modal
   const [modalOpen, setModalOpen] = useState(false);
-  const [newCode, setNewCode] = useState(String(300 + products.length));
+  const [editingProduct, setEditingProduct] = useState<Product | null>(null);
+  const [newCode, setNewCode] = useState('');
   const [newName, setNewName] = useState('');
   const [newUnit, setNewUnit] = useState('বস্তা');
-  const [newBagKg, setNewBagKg] = useState('50');
+  const [newBagKg, setNewBagKg] = useState('');
   const [newOpeningBags, setNewOpeningBags] = useState('');
   const [newCostRate, setNewCostRate] = useState('');
+  const [newSalePrice, setNewSalePrice] = useState('');
   const [newDescription, setNewDescription] = useState('');
 
   // Item details modal (Eye action)
   const [viewProduct, setViewProduct] = useState<Product | null>(null);
 
+  const openNewProduct = () => {
+    setEditingProduct(null);
+    setNewCode('');
+    setNewName('');
+    setNewUnit('বস্তা');
+    setNewBagKg('');
+    setNewOpeningBags('');
+    setNewCostRate('');
+    setNewSalePrice('');
+    setNewDescription('');
+    setModalOpen(true);
+  };
+
+  const openEditProduct = (product: Product) => {
+    const bagKg = product.mediumBagKg || 50;
+    setEditingProduct(product);
+    setNewCode(product.code ?? '');
+    setNewName(product.name);
+    setNewUnit(product.uom || 'বস্তা');
+    setNewBagKg(String(bagKg));
+    setNewOpeningBags(String(product.opening / bagKg));
+    setNewCostRate(String(product.cost));
+    setNewSalePrice(String(product.price));
+    setNewDescription(product.description ?? '');
+    setModalOpen(true);
+  };
+
   // Compute stock figures
   const stockData = useMemo(() => {
-    return products.map((p, idx) => {
+    return products.map(p => {
       const bagWeight = p.mediumBagKg || 50;
       const bags = Math.round(p.qty / bagWeight) || 0;
       const totalKg = p.qty || 0;
-      const stockVal = p.stockValue || (p.qty * (p.cost || 0));
+      const stockVal = p.stockValue ?? (p.qty * (p.cost || 0));
 
       return {
         id: p.id,
-        code: String(300 + idx),
+        code: p.code ?? '',
         product: p,
         name: p.name,
-        unit: 'বস্তা',
+        unit: p.uom || 'বস্তা',
         bags,
         totalKg,
         stockVal,
@@ -79,17 +108,28 @@ export function StockDashboard() {
       return;
     }
 
-    const bagKg = parseFloat(newBagKg) || 50;
+    const bagKg = parseFloat(newBagKg);
+    if (!Number.isFinite(bagKg) || bagKg <= 0) {
+      Alert.alert(t('invalidBag'));
+      return;
+    }
     const openingBags = parseFloat(newOpeningBags) || 0;
     const cost = parseFloat(newCostRate) || 0;
+    const price = parseFloat(newSalePrice);
+    if (!Number.isFinite(price) || price <= 0) {
+      Alert.alert(t('invalidSalePrice'));
+      return;
+    }
     const openingKg = openingBags * bagKg;
 
     try {
       await saveProduct({
-        id: `p_${Date.now()}`,
+        id: editingProduct?.id ?? `p_${Date.now()}`,
+        code: newCode.trim(),
         name: newName.trim(),
+        description: newDescription.trim(),
         cost,
-        price: cost ? Math.round(cost * 1.08) : 0, // default markup
+        price: Math.round(price * 100) / 100,
         opening: openingKg,
         qty: openingKg,
         uom: newUnit,
@@ -99,9 +139,12 @@ export function StockDashboard() {
       });
 
       setModalOpen(false);
+      setEditingProduct(null);
       setNewName('');
+      setNewCode('');
       setNewOpeningBags('');
       setNewCostRate('');
+      setNewSalePrice('');
       setNewDescription('');
       Alert.alert(t('done'), 'নতুন পণ্য সফলভাবে যোগ করা হয়েছে।');
     } catch (err) {
@@ -131,7 +174,8 @@ export function StockDashboard() {
         </View>
         <View style={styles.headerRight}>
           <TouchableOpacity
-            onPress={() => setModalOpen(true)}
+            onPress={openNewProduct}
+            testID="stock-add-product"
             style={styles.headerAddBtn}
             activeOpacity={0.85}
           >
@@ -263,7 +307,7 @@ export function StockDashboard() {
               <Text style={[styles.th, { flex: 1.5, textAlign: 'right' }]}>মজুদ (বস্তা)</Text>
               <Text style={[styles.th, { flex: 1.5, textAlign: 'right' }]}>মজুদ (কেজি)</Text>
               <Text style={[styles.th, { flex: 1.5, textAlign: 'right' }]}>স্টক মূল্য (৳)</Text>
-              <Text style={[styles.th, { width: 80, textAlign: 'center' }]}>অ্যাকশন</Text>
+              <Text style={[styles.th, { width: 112, textAlign: 'center' }]}>অ্যাকশন</Text>
             </View>
 
             {/* Table Rows */}
@@ -299,12 +343,21 @@ export function StockDashboard() {
                   </Text>
                 </View>
 
-                <View style={[styles.td, { width: 80, alignItems: 'center', justifyContent: 'center' }]}>
+                <View style={[styles.td, { width: 112, alignItems: 'center', justifyContent: 'center', flexDirection: 'row', gap: 4 }]}>
                   <TouchableOpacity
                     onPress={() => setViewProduct(row.product)}
+                    testID={`view-product-${row.id}`}
                     style={styles.eyeActionButton}
                   >
                     <AppIcon name={icons.eye} size={18} iconColor="#006A4E" />
+                  </TouchableOpacity>
+                  <TouchableOpacity
+                    onPress={() => openEditProduct(row.product)}
+                    testID={`edit-product-${row.id}`}
+                    style={styles.eyeActionButton}
+                    accessibilityLabel={`Edit product ${row.name}`}
+                  >
+                    <AppIcon name={icons.edit} size={18} iconColor="#1c70b9" />
                   </TouchableOpacity>
                 </View>
               </View>
@@ -397,7 +450,7 @@ export function StockDashboard() {
             <View style={styles.modalHeader}>
               <View style={styles.modalTitleRow}>
                 <AppIcon name={icons.products} size={22} iconColor="#006A4E" />
-                <Text style={styles.modalTitle}>নতুন পণ্য যোগ করুন</Text>
+                <Text style={styles.modalTitle}>{editingProduct ? 'পণ্য সম্পাদনা' : 'নতুন পণ্য যোগ করুন'}</Text>
               </View>
               <TouchableOpacity onPress={() => setModalOpen(false)} style={styles.modalCloseBtn}>
                 <AppIcon name={icons.cancel} size={20} iconColor="#64748B" />
@@ -408,12 +461,12 @@ export function StockDashboard() {
             <ScrollView style={styles.modalBody} keyboardShouldPersistTaps="handled">
               <View style={styles.modalTwoCol}>
                 <View style={styles.modalCol}>
-                  <Text style={styles.modalLabel}>পণ্য কোড *</Text>
+                  <Text style={styles.modalLabel}>পণ্য কোড</Text>
                   <TextInput
                     value={newCode}
                     onChangeText={setNewCode}
+                    testID="stock-product-code"
                     style={styles.modalInput}
-                    placeholder="308"
                   />
                 </View>
                 <View style={styles.modalCol}>
@@ -421,6 +474,7 @@ export function StockDashboard() {
                   <TextInput
                     value={newName}
                     onChangeText={setNewName}
+                    testID="stock-product-name"
                     style={styles.modalInput}
                     placeholder="খুদ চাল"
                   />
@@ -440,8 +494,8 @@ export function StockDashboard() {
                   <TextInput
                     value={newBagKg}
                     onChangeText={setNewBagKg}
+                    testID="stock-product-bag-kg"
                     style={styles.modalInput}
-                    placeholder="৫০"
                     keyboardType="numeric"
                   />
                 </View>
@@ -453,8 +507,8 @@ export function StockDashboard() {
                   <TextInput
                     value={newOpeningBags}
                     onChangeText={setNewOpeningBags}
+                    testID="stock-product-opening"
                     style={styles.modalInput}
-                    placeholder="100"
                     keyboardType="numeric"
                   />
                 </View>
@@ -463,8 +517,18 @@ export function StockDashboard() {
                   <TextInput
                     value={newCostRate}
                     onChangeText={setNewCostRate}
+                    testID="stock-product-cost"
                     style={styles.modalInput}
-                    placeholder="60"
+                    keyboardType="numeric"
+                  />
+                </View>
+                <View style={styles.modalCol}>
+                  <Text style={styles.modalLabel}>বিক্রয়মূল্য (৳) *</Text>
+                  <TextInput
+                    value={newSalePrice}
+                    onChangeText={setNewSalePrice}
+                    testID="stock-product-price"
+                    style={styles.modalInput}
                     keyboardType="numeric"
                   />
                 </View>
@@ -475,6 +539,7 @@ export function StockDashboard() {
                 <TextInput
                   value={newDescription}
                   onChangeText={setNewDescription}
+                  testID="stock-product-description"
                   style={[styles.modalInput, { height: 75, textAlignVertical: 'top' }]}
                   placeholder="পণ্যের অতিরিক্ত বিবরণ লিখুন..."
                   multiline
@@ -489,7 +554,7 @@ export function StockDashboard() {
                 <Text style={styles.modalCancelBtnText}>বাতিল</Text>
               </TouchableOpacity>
 
-              <TouchableOpacity onPress={handleSaveProduct} style={styles.modalSaveBtn}>
+              <TouchableOpacity onPress={handleSaveProduct} testID="stock-save-product" style={styles.modalSaveBtn}>
                 <AppIcon name={icons.save} size={18} iconColor="#fff" />
                 <Text style={styles.modalSaveBtnText}>সংরক্ষণ করুন</Text>
               </TouchableOpacity>
@@ -510,6 +575,8 @@ export function StockDashboard() {
                 </TouchableOpacity>
               </View>
               <View style={{ padding: 20, gap: 10 }}>
+                {viewProduct.code ? <Text style={{ fontSize: 14, color: '#334155' }}>Code: {viewProduct.code}</Text> : null}
+                {viewProduct.description ? <Text testID="product-details-description" style={{ fontSize: 14, color: '#334155' }}>{viewProduct.description}</Text> : null}
                 <Text style={{ fontSize: 14, color: '#334155' }}>
                   বর্তমান মজুদ: <Text style={{ fontWeight: '700' }}>{n(viewProduct.qty)} কেজি</Text>
                 </Text>

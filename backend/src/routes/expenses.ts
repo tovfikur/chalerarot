@@ -17,10 +17,10 @@ const num = (v: unknown, d = 0) => {
 };
 
 const shape = (
-  e: { id: string; category: string; customName: string | null; amount: number; date: string; note: string | null },
+  e: { id: string; voucherNo: string | null; category: string; customName: string | null; amount: number; date: string; note: string | null },
   mv?: { method: string; moneyAccountId: string | null },
 ) => ({
-  id: e.id, category: e.category, customName: e.customName ?? undefined,
+  id: e.id, voucherNo: e.voucherNo ?? undefined, category: e.category, customName: e.customName ?? undefined,
   amount: e.amount, date: e.date, note: e.note ?? undefined,
   method: mv?.method, accountId: mv?.moneyAccountId ?? undefined,
 });
@@ -82,11 +82,15 @@ expenses.post('/', async (req: Request, res: Response) => {
   const e = await db.$transaction(async t => {
     const acc = await resolveAccount(t, { accountId: body.accountId ? String(body.accountId) : null, method: body.method ? String(body.method) : null });
     const created = await t.expense.create({ data: clean });
+    const saved = await t.expense.update({
+      where: { id: created.id },
+      data: { voucherNo: `EXP-${created.id.slice(-8).toUpperCase()}` },
+    });
     await recordMovement(t, {
       accountId: acc.id, method: acc.type, direction: 'out', amount: clean.amount, date: clean.date,
       sourceType: 'expense', sourceId: created.id, note: clean.note,
     });
-    return created;
+    return saved;
   });
   res.status(201).json({ id: e.id });
 });

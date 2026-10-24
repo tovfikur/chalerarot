@@ -677,14 +677,14 @@ function TxnHistory({ kind, onNew, focus, onFocusDone }: {
   // Newest first by default: a transaction just completed is the first row.
   [sales, purchases, customers, vendors, isSale, t]);
 
-  const today = new Date().toISOString().slice(0, 10);
+  const todayDate = today();
   const needle = q.trim().toLowerCase();
   const base = useMemo(() => rowsAll.filter(r => {
-    if (period === 'today' && r.date !== today) return false;
+    if (period === 'today' && r.date !== todayDate) return false;
     if (status === 'paid' && r.status !== 'paid') return false;
     if (status === 'due' && r.status === 'paid') return false;
     return true;
-  }), [rowsAll, period, status]);
+  }), [rowsAll, period, status, todayDate]);
   const shown = base.filter(r => !needle || r.no.toLowerCase().includes(needle) || r.partyName.toLowerCase().includes(needle));
   const rows = useMemo(() => [...shown].sort((a, b) => (a.date < b.date ? 1 : a.date > b.date ? -1 : 0)), [shown]);
 
@@ -906,14 +906,14 @@ export function Products() {
   const { t, products, saveProduct, deleteProduct } = useApp(); const m = useMoney(); const n = useNum();
   const { kg } = useUnitLabel();
   const [f, setF] = useState<Product | null>(null);
-  const [v, setV] = useState({ name: '', cost: '', price: '', opening: '', sb: '25', mb: '40', lb: '50' });
+  const [v, setV] = useState({ code: '', name: '', description: '', cost: '', price: '', opening: '', sb: '25', mb: '40', lb: '50' });
   const [pq, setPq] = useState('');
   const listed = products.filter(p => matchProduct(p, pq));
   const open = (p?: Product) => {
     setF(p ?? { id: '', name: '', cost: 0, price: 0, opening: 0, qty: 0, uom: 'kg', smallBagKg: 25, mediumBagKg: 40, largeBagKg: 50 });
     setV(p
-      ? { name: p.name, cost: String(p.cost), price: String(p.price), opening: String(p.opening || ''), sb: String(p.smallBagKg > 0 ? p.smallBagKg : 25), mb: String(p.mediumBagKg > 0 ? p.mediumBagKg : 40), lb: String(p.largeBagKg > 0 ? p.largeBagKg : 50) }
-      : { name: '', cost: '', price: '', opening: '', sb: '25', mb: '40', lb: '50' });
+      ? { code: p.code ?? '', name: p.name, description: p.description ?? '', cost: String(p.cost), price: String(p.price), opening: String(p.opening || ''), sb: String(p.smallBagKg > 0 ? p.smallBagKg : 25), mb: String(p.mediumBagKg > 0 ? p.mediumBagKg : 40), lb: String(p.largeBagKg > 0 ? p.largeBagKg : 50) }
+      : { code: '', name: '', description: '', cost: '', price: '', opening: '', sb: '25', mb: '40', lb: '50' });
   };
   const save = () => {
     if (!v.name.trim()) return Alert.alert(t('invalid'));
@@ -925,7 +925,7 @@ export function Products() {
     const o = num(v.opening), id = f!.id || 'p' + Date.now();
     (async () => {
       try {
-        await saveProduct({ id, name: v.name, cost: num(v.cost), price: Math.round(price * 100) / 100, opening: o, qty: f!.id ? f!.qty + (o - f!.opening) : o, uom: f!.uom || 'kg', smallBagKg: num(v.sb), mediumBagKg: num(v.mb), largeBagKg: num(v.lb) });
+        await saveProduct({ id, code: v.code.trim(), name: v.name, description: v.description.trim(), cost: num(v.cost), price: Math.round(price * 100) / 100, opening: o, qty: f!.id ? f!.qty + (o - f!.opening) : o, uom: f!.uom || 'kg', smallBagKg: num(v.sb), mediumBagKg: num(v.mb), largeBagKg: num(v.lb) });
         setF(null);
       } catch (e) {
         Alert.alert(e instanceof Error ? e.message : t('invalid'));
@@ -947,7 +947,8 @@ export function Products() {
   };
   if (f) return <Screen><Card>
     <FormGrid>
-      <Field label={t('productName')} value={v.name} onChange={x => setV({ ...v, name: x })} /><Field label={t('costPerKg')} value={v.cost} onChange={x => setV({ ...v, cost: x })} num />
+      <Field label={t('code')} value={v.code} onChange={x => setV({ ...v, code: x })} /><Field label={t('productName')} value={v.name} onChange={x => setV({ ...v, name: x })} />
+      <Field label={t('descNote')} value={v.description} onChange={x => setV({ ...v, description: x })} /><Field label={t('costPerKg')} value={v.cost} onChange={x => setV({ ...v, cost: x })} num />
       <Field label={t('pricePerKg')} value={v.price} onChange={x => setV({ ...v, price: x })} num /><Field label={`${t('openingStock')} (${kg})`} value={v.opening} onChange={x => setV({ ...v, opening: x })} num />
     </FormGrid>
     <Muted>{t('bagWeight')}</Muted>
@@ -956,7 +957,7 @@ export function Products() {
       <Field label={`${t('mediumBag')} (${kg})`} value={v.mb} onChange={x => setV({ ...v, mb: x })} num />
       <Field label={`${t('largeBag')} (${kg})`} value={v.lb} onChange={x => setV({ ...v, lb: x })} num />
     </FormGrid>
-    <Btn icon={icons.save} label={t('save')} onPress={save} /><Btn kind="ghost" icon={icons.cancel} label={t('cancel')} onPress={() => setF(null)} /></Card></Screen>;
+    <Btn icon={icons.save} label={t('save')} testID="save-product" onPress={save} /><Btn kind="ghost" icon={icons.cancel} label={t('cancel')} onPress={() => setF(null)} /></Card></Screen>;
   return <Screen>
     <ListPageHeader title={t('products')} addLabel={t('add')} onAdd={() => open()} />
     <SearchDropdown
@@ -971,7 +972,8 @@ export function Products() {
     />
     <RGrid mobile={1} tablet={2} desktop={3}>
       {listed.length ? listed.map(p => <Card key={p.id}><Title>{p.name}</Title>
-        <Row icon={icons.stock} left={t('currentStock')} right={`${n(p.qty)} ${kg}`} neg={p.qty <= 0} /><Row left={t('cost')} right={m(p.cost)} /><Row left={t('price')} right={m(p.price)} />
+        {p.code ? <Row left={t('code')} right={p.code} /> : null}<Row icon={icons.stock} left={t('currentStock')} right={`${n(p.qty)} ${kg}`} neg={p.qty <= 0} /><Row left={t('cost')} right={m(p.cost)} /><Row left={t('price')} right={m(p.price)} />
+        {p.description ? <Muted>{p.description}</Muted> : null}
         {(p.damagedQty ?? 0) > 0 ? <Row left={t('damagedStock')} right={`${n(p.damagedQty ?? 0)} ${kg}`} neg /> : null}
         <Muted>{t('bagWeight')}: {n(p.smallBagKg)} / {n(p.mediumBagKg)} / {n(p.largeBagKg)} {kg}</Muted>
         <View style={{ flexDirection: 'row', gap: 8 }}><View style={{ flex: 1 }}><Btn kind="ghost" icon={icons.edit} label={t('edit')} onPress={() => open(p)} /></View>
@@ -1624,7 +1626,7 @@ export function Accounts({ go, focus, onFocusDone }: { go?: Nav; focus?: { kind:
   return <AccountsDashboard go={go} focus={focus} onFocusDone={onFocusDone} />;
 }
 
-function FilterModal({ init, onClose, onApply }: { init: AcctFilter; onClose: () => void; onApply: (f: AcctFilter) => void }) {
+export function FilterModal({ init, onClose, onApply }: { init: AcctFilter; onClose: () => void; onApply: (f: AcctFilter) => void }) {
   const { t } = useApp();
   const td = today();
   const [from, setFrom] = useState(init.from);
@@ -1678,12 +1680,7 @@ const DOW_KEYS = ['dow0', 'dow1', 'dow2', 'dow3', 'dow4', 'dow5', 'dow6'] as con
 // still be yesterday during 00:00–06:00 Dhaka time, which would wrongly ban
 // the current business day — date constraints always use this instead.
 const dhakaToday = (): string => {
-  try {
-    const s = new Date().toLocaleDateString('en-CA', { timeZone: 'Asia/Dhaka' });
-    return /^\d{4}-\d{2}-\d{2}$/.test(s) ? s : today();
-  } catch {
-    return today();
-  }
+  return today();
 };
 
 export function MonthCal({ selected, onPick, minDate, maxDate }: {

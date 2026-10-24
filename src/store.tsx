@@ -4,7 +4,7 @@ import { api, Expense, MoneyAccountRow, MoneyBalance, MoneyMethod, MoneyTransfer
 
 export type { MoneyAccountRow, MoneyBalance, MoneyMethod, MoneyTransfer, PeriodFinance };
 
-export type Product = { id: string; name: string; cost: number; price: number; opening: number; qty: number; uom: string; smallBagKg: number; mediumBagKg: number; largeBagKg: number; damagedQty?: number };
+export type Product = { id: string; code?: string; name: string; description?: string; cost: number; price: number; opening: number; qty: number; uom: string; smallBagKg: number; mediumBagKg: number; largeBagKg: number; damagedQty?: number; stockValue?: number; damagedValue?: number };
 export const UOMS = ['kg', 'বস্তা', 'ton', 'pcs'];
 export const uomLabel = (uom: string | undefined, kgLabel: string) => (!uom || uom === 'kg' ? kgLabel : uom);
 export type Party = { id: string; name: string; mobile: string; address?: string; opening: number; next?: string; code?: string };
@@ -17,7 +17,13 @@ export type SaleRec = { id: string; date: string; profit: number; total: number;
 /** Completed purchase, straight from the bootstrap payload (no extra request). */
 export type PurchaseRec = { id: string; vendorId: string; date: string; total: number; paid: number; due: number; status: SettlementStatus; invoiceNo?: string };
 
-export const today = () => new Date().toISOString().slice(0, 10);
+export const today = () => {
+  const parts = new Intl.DateTimeFormat('en-CA', {
+    timeZone: 'Asia/Dhaka', year: 'numeric', month: '2-digit', day: '2-digit',
+  }).formatToParts(new Date());
+  const value = (key: string) => parts.find(p => p.type === key)?.value ?? '';
+  return `${value('year')}-${value('month')}-${value('day')}`;
+};
 
 // Service interface is unchanged in shape; implementations now persist via REST.
 export interface Service {
@@ -128,11 +134,11 @@ export function AppProvider({ children }: { children: ReactNode }) {
 
   const svc: Service = {
     saveProduct: async p => {
-      const body = { name: p.name, cost: p.cost, price: p.price, opening: p.opening, smallBagKg: p.smallBagKg, mediumBagKg: p.mediumBagKg, largeBagKg: p.largeBagKg };
+      const body = { code: p.code?.trim() ?? '', name: p.name, description: p.description?.trim() ?? '', uom: p.uom || 'kg', cost: p.cost, price: p.price, opening: p.opening, smallBagKg: p.smallBagKg, mediumBagKg: p.mediumBagKg, largeBagKg: p.largeBagKg };
       const cur = products.find(x => x.id === p.id);
       const r = cur ? await api.updateProduct(p.id, body) : await api.createProduct(body);
-      // Changing only the sale price (or name/bag weights) touches nothing that
-      // other screens derive, so patch this single product locally instead of
+      // Changes to descriptive fields, code, unit, sale price, or bag weights
+      // touch no valuation, so patch this product locally instead of
       // refetching the whole product list. A cost or opening change revalues
       // stock, so that path still refreshes everything.
       const valuationTouched = !cur || p.cost !== cur.cost || p.opening !== cur.opening;

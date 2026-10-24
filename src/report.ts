@@ -158,7 +158,8 @@ export function printReport(d: ReportDoc): boolean {
 }
 
 /** "04-10-2026" style stamp for the printed footer, localised digits. */
-export function printedAtStamp(bn: boolean): string {
+export function printedAtStamp(locale: boolean | 'bn' | 'en'): string {
+  const bn = locale === true || locale === 'bn';
   const now = new Date();
   const p = (n: number) => String(n).padStart(2, '0');
   const s = `${p(now.getDate())}-${p(now.getMonth() + 1)}-${now.getFullYear()} ${p(now.getHours())}:${p(now.getMinutes())}`;
