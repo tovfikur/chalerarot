@@ -3,7 +3,7 @@ import { expect, test } from '@playwright/test';
 const bootstrap = {
   products: [{ id: 'p1', name: 'Test rice', cost: 900, price: 1200, opening: 40, qty: 40, uom: 'kg', smallBagKg: 25, mediumBagKg: 50, largeBagKg: 50 }],
   customers: [{ id: 'c1', code: '340', name: 'Test customer', mobile: '01700000000', opening: 0 }],
-  vendors: [{ id: 'v1', code: '340', name: 'Test vendor', mobile: '01800000000', opening: 0 }],
+  vendors: [{ id: 'v1', code: 'VEN-982', name: 'Test vendor', mobile: '01800000000', opening: 0 }],
   sales: [], purchases: [], customerPayments: [], vendorPayments: [], movements: [], expenses: [], returns: [],
   money: [], moneyAccounts: [], transfers: [], finance: { today: {}, lifetime: {} },
 };
@@ -176,9 +176,10 @@ test('completes the purchase workflow with keyboard navigation', async ({ page }
   await memo.press('Enter');
 
   const vendorCode = page.getByLabel('Vendor code');
-  await vendorCode.fill('340');
+  await vendorCode.fill('VEN-982');
   await vendorCode.press('ArrowDown');
   await vendorCode.press('Enter');
+  await expect(vendorCode).toHaveValue('VEN-982');
   await page.getByLabel('Invoice date').press('Enter');
 
   const productCode = page.getByLabel('Product code 1');
@@ -206,4 +207,33 @@ test('completes the purchase workflow with keyboard navigation', async ({ page }
     vendorId: 'v1',
     lines: [{ productId: 'p1', unit: 'medium', enteredQty: 2, rate: 60 }],
   });
+});
+
+test('saves and reloads the vendor code entered in the party form', async ({ page }) => {
+  let savedVendor: Record<string, unknown> | undefined;
+  const vendors = [...bootstrap.vendors];
+  await page.route('**/api/**', async route => {
+    const path = new URL(route.request().url()).pathname;
+    if (path.endsWith('/bootstrap')) return route.fulfill({ json: { ...bootstrap, vendors } });
+    if (path.endsWith('/vendors') && route.request().method() === 'POST') {
+      savedVendor = route.request().postDataJSON();
+      vendors.push({ id: 'v-new', ...savedVendor } as typeof bootstrap.vendors[number]);
+      return route.fulfill({ status: 201, json: { id: 'v-new' } });
+    }
+    if (path.endsWith('/reminders')) return route.fulfill({ json: { reminders: [] } });
+    return route.fulfill({ json: [] });
+  });
+
+  const bootstrapResponse = page.waitForResponse(response => response.url().endsWith('/api/bootstrap'));
+  await page.goto('/');
+  await bootstrapResponse;
+  await page.evaluate(() => new Promise<void>(resolve => requestAnimationFrame(() => requestAnimationFrame(() => resolve()))));
+  await page.getByTestId('nav-vendors').click();
+  await page.getByTestId('list-page-add').click();
+  await page.getByLabel('Party code').fill('VEND-ALPHA-01');
+  await page.getByLabel('Party name').fill('Code persistence test');
+  await page.getByTestId('save-party').click();
+
+  await expect.poll(() => savedVendor?.code).toBe('VEND-ALPHA-01');
+  await expect(page.getByText('VEND-ALPHA-01')).toBeVisible();
 });

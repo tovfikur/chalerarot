@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
-import { View, Text, TextInput, Alert, TouchableOpacity, Pressable, Modal, ActivityIndicator, ScrollView, Share } from 'react-native';
+import { View, Text, TextInput, Alert, TouchableOpacity, Pressable, Modal, ActivityIndicator, ScrollView, Share, Platform } from 'react-native';
 import { useApp, today, Party, Product, type PeriodFinance } from './store';
 import { BagUnit, CartLine, kgPerUnit, toKg, lineTotal } from './bags';
 import { Card, Title, Muted, Btn, Field, Chips, Row, Empty, Screen, SectionHead, PageHeader, ListPageHeader, ListTable, type TableColumn, type TableSort, AccountPicker, ACCOUNT_TYPES, methodIcon, methodName, useMoney, useNum, useDateStr, color } from './ui';
@@ -1016,10 +1016,8 @@ export function Parties({ kind, focus, onFocusDone, onReturn }: { kind: 'c' | 'v
   const [pq, setPq] = useState('');
   const balFs = useFs(30, 24);
   const getPartyCode = useCallback((p: Party) => {
-    if (p.code && p.code.trim()) return p.code.trim();
-    const idx = list.findIndex(x => x.id === p.id);
-    return idx !== -1 ? String(340 + idx) : '';
-  }, [list]);
+    return p.code?.trim() ?? '';
+  }, []);
   const listed = list.filter(p => {
     const code = getPartyCode(p);
     const codeMatch = pq.trim() ? code.includes(pq.trim()) : false;
@@ -1101,7 +1099,7 @@ export function Parties({ kind, focus, onFocusDone, onReturn }: { kind: 'c' | 'v
   const open = (p?: Party) => {
     pushSub();
     setF(p ?? { id: '', name: '', mobile: '', opening: 0 });
-    const autoCode = p ? (p.code || '') : String(340 + list.length);
+    const autoCode = p?.code?.trim() ?? '';
     setV({
       name: p?.name ?? '',
       mobile: p?.mobile ?? '',
@@ -1136,13 +1134,11 @@ export function Parties({ kind, focus, onFocusDone, onReturn }: { kind: 'c' | 'v
   const money = (v: number) => <Text style={{ fontSize: 14, fontWeight: '600', color: color.text }}>{m(v)}</Text>;
   const partyColumns: TableColumn<Party>[] = useMemo(() => [
     {
-      key: 'code', label: t('code'), flex: 0.8, align: 'center',
-      sort: p => {
-        const idx = list.findIndex(x => x.id === p.id);
-        return idx !== -1 ? 340 + idx : 0;
-      },
+      key: 'code', label: t('code'), flex: 0.8,
+      sort: p => p.code?.trim() ?? '',
       render: (p, fs) => {
         const code = getPartyCode(p);
+        if (!code) return null;
         return (
           <View style={{
             backgroundColor: '#EFF6FF',
@@ -1186,13 +1182,13 @@ export function Parties({ kind, focus, onFocusDone, onReturn }: { kind: 'c' | 'v
   if (f) return <Screen scrollRef={scrollRef} onScrollY={onScrollY}><BackLink label={sel ? t('back') : backLabel} onPress={back} />
     <Card>
     <FormGrid>
-      <Field label={t('code')} value={v.code} onChange={x => setV({ ...v, code: x })} />
-      <Field label={t('name')} value={v.name} onChange={x => setV({ ...v, name: x })} />
+      <Field label={t('code')} accessibilityLabel="Party code" value={v.code} onChange={x => setV({ ...v, code: x })} />
+      <Field label={t('name')} accessibilityLabel="Party name" value={v.name} onChange={x => setV({ ...v, name: x })} />
       <Field label={t('mobile')} value={v.mobile} onChange={x => setV({ ...v, mobile: x })} num />
       <Field label={t('address')} value={v.address} onChange={x => setV({ ...v, address: x })} />
       <Field label={isC ? t('opening') : t('currentPayable')} value={v.opening} onChange={x => setV({ ...v, opening: x })} num />
     </FormGrid>
-    <Btn icon={icons.save} label={t('save')} onPress={() => {
+    <Btn icon={icons.save} label={t('save')} testID="save-party" onPress={() => {
       if (!v.name.trim()) return Alert.alert(t('invalid'));
       (async () => {
         try {
@@ -1352,9 +1348,9 @@ export function Parties({ kind, focus, onFocusDone, onReturn }: { kind: 'c' | 'v
           return (
             <Card key={p.id}>
               <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 6 }}>
-                <View style={{ backgroundColor: '#EFF6FF', paddingHorizontal: 7, paddingVertical: 2, borderRadius: 5, borderWidth: 1, borderColor: '#BFDBFE' }}>
+                {code ? <View style={{ backgroundColor: '#EFF6FF', paddingHorizontal: 7, paddingVertical: 2, borderRadius: 5, borderWidth: 1, borderColor: '#BFDBFE' }}>
                   <Text style={{ fontSize: 12, fontWeight: '700', color: '#1D4ED8' }}>কোড: {code}</Text>
-                </View>
+                </View> : null}
               </View>
               <Row icon={isC ? icons.customers : icons.vendors} left={p.name} sub={p.mobile} right={m(bal(kind, p.id).balance)} neg={bal(kind, p.id).balance > 0} />
               <Btn kind="ghost" icon={icons.history} label={t('history')} onPress={() => openDetail(p)} />

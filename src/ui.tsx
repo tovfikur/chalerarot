@@ -65,10 +65,10 @@ export const Muted = ({ children }: { children: ReactNode }) => {
   const fs = useFs(14, 13);
   return <Text style={[s.muted, { fontSize: fs }]}>{children}</Text>;
 };
-export const Btn = ({ label, onPress, kind = 'primary', icon }: { label: string; onPress: () => void; kind?: 'primary' | 'ghost' | 'danger'; icon?: IconName }) => {
+export const Btn = ({ label, onPress, kind = 'primary', icon, testID }: { label: string; onPress: () => void; kind?: 'primary' | 'ghost' | 'danger'; icon?: IconName; testID?: string }) => {
   const fs = useFs(17, 15);
   return (
-    <TouchableOpacity onPress={onPress} style={[s.btn, kind === 'ghost' && s.ghost, kind === 'danger' && s.dangerBtn]}>
+    <TouchableOpacity onPress={onPress} testID={testID} style={[s.btn, kind === 'ghost' && s.ghost, kind === 'danger' && s.dangerBtn]}>
       <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
         {icon ? <MaterialCommunityIcons name={icon} size={20} color={kind === 'ghost' ? '#1c70b9' : '#fff'} /> : null}
         <Text style={[s.btnT, kind === 'ghost' && { color: '#0F2B48' }, { fontSize: fs }]}>{label}</Text>
@@ -76,12 +76,12 @@ export const Btn = ({ label, onPress, kind = 'primary', icon }: { label: string;
     </TouchableOpacity>
   );
 };
-export const Field = ({ label, value, onChange, num }: { label: string; value: string; onChange: (v: string) => void; num?: boolean }) => {
+export const Field = ({ label, value, onChange, num, accessibilityLabel }: { label: string; value: string; onChange: (v: string) => void; num?: boolean; accessibilityLabel?: string }) => {
   const fs = useFs(17, 15);
   return (
     <View style={{ marginBottom: 10 }}>
       <Muted>{label}</Muted>
-      <TextInput value={value} onChangeText={onChange} keyboardType={num ? 'numeric' : 'default'} inputMode={num ? 'decimal' : undefined} style={[s.input, { fontSize: fs }]} />
+      <TextInput value={value} onChangeText={onChange} accessibilityLabel={accessibilityLabel ?? label} keyboardType={num ? 'numeric' : 'default'} inputMode={num ? 'decimal' : undefined} style={[s.input, { fontSize: fs }]} />
     </View>
   );
 };
@@ -279,6 +279,7 @@ export const ListPageHeader = ({
           {onAdd && addLabel ? (
             <TouchableOpacity
               onPress={onAdd}
+              testID="list-page-add"
               style={s.pageHeaderAddBtn}
               activeOpacity={0.85}
             >

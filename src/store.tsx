@@ -144,7 +144,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
     },
     deleteProduct: async id => { await api.deleteProduct(id); await refresh(); },
     saveParty: async (k, p) => {
-      const body = { name: p.name, mobile: p.mobile, address: p.address, opening: p.opening, next: p.next };
+      const body = { code: p.code?.trim() ?? '', name: p.name, mobile: p.mobile, address: p.address, opening: p.opening, next: p.next };
       const list = k === 'c' ? customers : vendors;
       if (list.some(x => x.id === p.id)) await api.updateParty(k, p.id, body);
       else await api.createParty(k, body);

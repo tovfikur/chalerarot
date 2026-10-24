@@ -195,15 +195,15 @@ export function TradeDashboardForm({ mode, onDone }: TradeDashboardFormProps) {
     const q = partyName.trim().toLowerCase();
     const codeQ = partyCode.trim().toLowerCase();
     if (!q && !codeQ) return parties.slice(0, 8);
-    return parties.filter((p, idx) => {
-      const pCode = (p.code && p.code.trim()) ? p.code.trim().toLowerCase() : String(340 + idx);
+    return parties.filter(p => {
+      const pCode = p.code?.trim().toLowerCase() ?? '';
       const matchesName = !q || p.name.toLowerCase().includes(q);
-      const matchesCode = !codeQ || pCode.includes(codeQ) || String(idx + 1) === codeQ;
+      const matchesCode = !codeQ || pCode.includes(codeQ);
       return matchesName || matchesCode;
     }).slice(0, 8);
   }, [parties, partyName, partyCode]);
 
-  // Find party by code (custom code, 340+ or 1..N), ID, mobile, or name from database
+  // Match the code stored with the party; never substitute a row number for a missing code.
   const findPartyByCode = useCallback((codeQuery: string): { party: Party; code: string; index: number } | null => {
     if (!codeQuery) return null;
     const q = codeQuery.trim().toLowerCase();
@@ -215,58 +215,18 @@ export function TradeDashboardForm({ mode, onDone }: TradeDashboardFormProps) {
       return { party: p, code: p.code!.trim(), index: byCustomCodeIdx };
     }
 
-    // 1. Numeric matching
-    const num = parseInt(q, 10);
-    if (!isNaN(num)) {
-      // 340+ base code
-      if (num >= 340 && num < 340 + parties.length) {
-        const idx = num - 340;
-        return { party: parties[idx], code: (parties[idx].code || String(num)), index: idx };
-      }
-      // 1-based index (1, 2, 3...)
-      if (num >= 1 && num <= parties.length) {
-        const idx = num - 1;
-        return { party: parties[idx], code: (parties[idx].code || String(340 + idx)), index: idx };
-      }
-    }
-
-    // 2. Party ID (e.g. v1, v2, c1, c2)
-    const byIdIdx = parties.findIndex(p => p.id.toLowerCase() === q);
-    if (byIdIdx !== -1) {
-      const p = parties[byIdIdx];
-      return { party: p, code: (p.code || String(340 + byIdIdx)), index: byIdIdx };
-    }
-
-    // 3. Mobile
-    const cleanQ = q.replace(/\D/g, '');
-    if (cleanQ.length >= 3) {
-      const byMobileIdx = parties.findIndex(p => p.mobile && p.mobile.replace(/\D/g, '').includes(cleanQ));
-      if (byMobileIdx !== -1) {
-        const p = parties[byMobileIdx];
-        return { party: p, code: (p.code || String(340 + byMobileIdx)), index: byMobileIdx };
-      }
-    }
-
-    // 4. Exact or prefix name
-    const byNameIdx = parties.findIndex(p => p.name.toLowerCase() === q || p.name.toLowerCase().startsWith(q));
-    if (byNameIdx !== -1) {
-      const p = parties[byNameIdx];
-      return { party: p, code: (p.code || String(340 + byNameIdx)), index: byNameIdx };
-    }
-
     return null;
   }, [parties]);
 
-  const onSelectParty = useCallback((p: Party, idx?: number) => {
-    const fullIdx = idx !== undefined && idx >= 0 ? idx : parties.findIndex(x => x.id === p.id);
-    const resolvedCode = (p.code && p.code.trim()) ? p.code.trim() : String(340 + (fullIdx !== -1 ? fullIdx : 0));
+  const onSelectParty = useCallback((p: Party, _idx?: number) => {
+    const resolvedCode = p.code?.trim() ?? '';
     setSelectedPartyId(p.id);
     setPartyCode(resolvedCode);
     setPartyName(p.name);
     setPartyMobile(p.mobile || '');
     setPartyAddress(p.address || '');
     setPartyDropdownOpen(false);
-  }, [parties]);
+  }, []);
 
   // Find product by code, index, or ID
   const findProductByCode = useCallback((codeQuery: string): { product: Product; code: string } | null => {
@@ -850,6 +810,11 @@ export function TradeDashboardForm({ mode, onDone }: TradeDashboardFormProps) {
                         setPartyName(match.party.name);
                         setPartyMobile(match.party.mobile || '');
                         setPartyAddress(match.party.address || '');
+                      } else {
+                        setSelectedPartyId('');
+                        setPartyName('');
+                        setPartyMobile('');
+                        setPartyAddress('');
                       }
                     } else if (!v.trim()) {
                       setSelectedPartyId('');
@@ -891,7 +856,6 @@ export function TradeDashboardForm({ mode, onDone }: TradeDashboardFormProps) {
                     }
                   }}
                   style={styles.textInput}
-                  keyboardType="numeric"
                   returnKeyType="next"
                 />
                 <TouchableOpacity
@@ -913,7 +877,7 @@ export function TradeDashboardForm({ mode, onDone }: TradeDashboardFormProps) {
                       filteredParties.map((p, idx) => {
                         const isHighlighted = idx === partyHighlightIdx;
                         const fullIdx = parties.findIndex(x => x.id === p.id);
-                        const pDisplayCode = String(340 + (fullIdx !== -1 ? fullIdx : idx));
+                        const pDisplayCode = p.code?.trim() ?? '';
                         return (
                           <TouchableOpacity
                             key={p.id}
@@ -925,7 +889,7 @@ export function TradeDashboardForm({ mode, onDone }: TradeDashboardFormProps) {
                           >
                             <View style={{ flex: 1 }}>
                               <Text style={styles.dropdownItemText}>{p.name}</Text>
-                              <Text style={styles.dropdownItemSub}>{p.mobile || 'কোন নম্বর নেই'} • কোড: {pDisplayCode}</Text>
+                              <Text style={styles.dropdownItemSub}>{[p.mobile, pDisplayCode ? `কোড: ${pDisplayCode}` : ''].filter(Boolean).join(' • ')}</Text>
                             </View>
                             <Text style={styles.dropdownItemDue}>{m(bal(isSale ? 'c' : 'v', p.id).balance)}</Text>
                           </TouchableOpacity>
@@ -1110,7 +1074,7 @@ export function TradeDashboardForm({ mode, onDone }: TradeDashboardFormProps) {
               onRequestClose={() => setDateCalendarOpen(false)}
             >
               <View style={styles.modalOverlay}>
-                <View testID="invoice-calendar-modal" accessibilityRole="dialog" style={[styles.shortcutModalBox, { maxWidth: 400 }]}>
+                <View testID="invoice-calendar-modal" style={[styles.shortcutModalBox, { maxWidth: 400 }]}>
                   <View style={styles.modalHeader3D}>
                     <Text style={styles.modalTitle}>তারিখ নির্বাচন</Text>
                     <TouchableOpacity

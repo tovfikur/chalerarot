@@ -17,7 +17,7 @@ export const matchProduct = (p: Product, q: string) => {
 export const matchParty = (p: Party, q: string) => {
   const nq = norm(q);
   if (!nq) return true;
-  return norm(p.name).includes(nq) || norm(p.mobile).includes(nq);
+  return norm(p.name).includes(nq) || norm(p.mobile).includes(nq) || norm(p.code ?? '').includes(nq);
 };
 
 export function NoResult() {
