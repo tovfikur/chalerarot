@@ -809,7 +809,7 @@ function NewPurchase({ onDone }: { onDone: () => void }) {
   const sel = products.find(x => x.id === pid);
   const paidAmt = num(paid);
   const total = cart.reduce((s, l) => s + lineTotal(l), 0), due = total - paidAmt;
-  const pick = (id: string) => { setPid(id); const p = products.find(x => x.id === id)!; setRate(String(p.cost)); setUnit('kg'); setQv(''); };
+  const pick = (id: string) => { setPid(id); setRate(''); setUnit('kg'); setQv(''); };
   const entered = parseNum(qv);
   const addItem = () => {
     if (!sel || !(entered > 0) || !(num(rate) > 0)) return Alert.alert(t('invalid'));
@@ -1012,10 +1012,11 @@ export function Parties({ kind, focus, onFocusDone, onReturn }: { kind: 'c' | 'v
   const [inv, setInv] = useState<{ kind: 'sale' | 'purchase'; id: string } | null>(null);
   const [retId, setRetId] = useState<string | null>(null);
   const [payOpen, setPayOpen] = useState(false);
-  const [v, setV] = useState({ name: '', mobile: '', address: '', opening: '' });
+  const [v, setV] = useState({ name: '', mobile: '', address: '', opening: '', code: '' });
   const [pq, setPq] = useState('');
   const balFs = useFs(30, 24);
   const getPartyCode = useCallback((p: Party) => {
+    if (p.code && p.code.trim()) return p.code.trim();
     const idx = list.findIndex(x => x.id === p.id);
     return idx !== -1 ? String(340 + idx) : '';
   }, [list]);
@@ -1097,7 +1098,18 @@ export function Parties({ kind, focus, onFocusDone, onReturn }: { kind: 'c' | 'v
     onFocusDone?.();
   }, [focus]);
   const openDetail = (p: Party) => { pushSub(); setSel(p); };
-  const open = (p?: Party) => { pushSub(); setF(p ?? { id: '', name: '', mobile: '', opening: 0 }); setV({ name: p?.name ?? '', mobile: p?.mobile ?? '', address: p?.address ?? '', opening: p ? String(p.opening) : '' }); };
+  const open = (p?: Party) => {
+    pushSub();
+    setF(p ?? { id: '', name: '', mobile: '', opening: 0 });
+    const autoCode = p ? (p.code || '') : String(340 + list.length);
+    setV({
+      name: p?.name ?? '',
+      mobile: p?.mobile ?? '',
+      address: p?.address ?? '',
+      opening: p ? String(p.opening) : '',
+      code: autoCode,
+    });
+  };
   const [confirmDel, setConfirmDel] = useState(false);
   const [blocked, setBlocked] = useState<{ title: Key; body: string } | null>(null);
   const doDelete = async () => {
@@ -1174,14 +1186,17 @@ export function Parties({ kind, focus, onFocusDone, onReturn }: { kind: 'c' | 'v
   if (f) return <Screen scrollRef={scrollRef} onScrollY={onScrollY}><BackLink label={sel ? t('back') : backLabel} onPress={back} />
     <Card>
     <FormGrid>
-      <Field label={t('name')} value={v.name} onChange={x => setV({ ...v, name: x })} /><Field label={t('mobile')} value={v.mobile} onChange={x => setV({ ...v, mobile: x })} num />
-      <Field label={t('address')} value={v.address} onChange={x => setV({ ...v, address: x })} /><Field label={isC ? t('opening') : t('currentPayable')} value={v.opening} onChange={x => setV({ ...v, opening: x })} num />
+      <Field label={t('code')} value={v.code} onChange={x => setV({ ...v, code: x })} />
+      <Field label={t('name')} value={v.name} onChange={x => setV({ ...v, name: x })} />
+      <Field label={t('mobile')} value={v.mobile} onChange={x => setV({ ...v, mobile: x })} num />
+      <Field label={t('address')} value={v.address} onChange={x => setV({ ...v, address: x })} />
+      <Field label={isC ? t('opening') : t('currentPayable')} value={v.opening} onChange={x => setV({ ...v, opening: x })} num />
     </FormGrid>
     <Btn icon={icons.save} label={t('save')} onPress={() => {
       if (!v.name.trim()) return Alert.alert(t('invalid'));
       (async () => {
         try {
-          await saveParty(kind, { ...f, id: f.id || kind + Date.now(), name: v.name, mobile: v.mobile, address: v.address, opening: num(v.opening) });
+          await saveParty(kind, { ...f, id: f.id || kind + Date.now(), code: v.code.trim(), name: v.name, mobile: v.mobile, address: v.address, opening: num(v.opening) });
           setF(null); setSel(null);
         } catch (e) {
           Alert.alert(e instanceof Error ? e.message : t('invalid'));

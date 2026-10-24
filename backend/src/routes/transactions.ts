@@ -481,8 +481,8 @@ tx.get('/bootstrap', async (_req: Request, res: Response) => {
       stockValue: p.stockValue, damagedValue: p.damagedValue,
       smallBagKg: p.smallBagKg, mediumBagKg: p.mediumBagKg, largeBagKg: p.largeBagKg,
     })),
-    customers: customers.map(c => ({ id: c.id, name: c.name, mobile: c.mobile, address: c.address ?? undefined, opening: c.openingDue, next: c.nextDate ?? undefined })),
-    vendors: vendors.map(v => ({ id: v.id, name: v.name, mobile: v.mobile, address: v.address ?? undefined, opening: v.openingPayable, next: v.nextDate ?? undefined })),
+    customers: customers.map(c => ({ id: c.id, code: c.code ?? undefined, name: c.name, mobile: c.mobile, address: c.address ?? undefined, opening: c.openingDue, next: c.nextDate ?? undefined })),
+    vendors: vendors.map(v => ({ id: v.id, code: v.code ?? undefined, name: v.name, mobile: v.mobile, address: v.address ?? undefined, opening: v.openingPayable, next: v.nextDate ?? undefined })),
     sales: sales.map(s => {
       const st = saleSet.get(s.id);
       return { id: s.id, customerId: s.customerId ?? undefined, date: s.date, total: s.total, paid: st?.paid ?? s.paid, due: st?.due ?? s.due, status: st?.status ?? 'due', profit: s.profit, cogs: cogsBySale.get(s.id) ?? 0, invoiceNo: s.invoiceNo ?? undefined, createdAt: s.createdAt };

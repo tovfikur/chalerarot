@@ -7,7 +7,7 @@ export type { MoneyAccountRow, MoneyBalance, MoneyMethod, MoneyTransfer, PeriodF
 export type Product = { id: string; name: string; cost: number; price: number; opening: number; qty: number; uom: string; smallBagKg: number; mediumBagKg: number; largeBagKg: number; damagedQty?: number };
 export const UOMS = ['kg', 'বস্তা', 'ton', 'pcs'];
 export const uomLabel = (uom: string | undefined, kgLabel: string) => (!uom || uom === 'kg' ? kgLabel : uom);
-export type Party = { id: string; name: string; mobile: string; address?: string; opening: number; next?: string };
+export type Party = { id: string; name: string; mobile: string; address?: string; opening: number; next?: string; code?: string };
 export type Tx = { id: string; partyId: string; kind: 'sale' | 'purchase' | 'payment' | 'sreturn' | 'preturn'; amount: number; date: string; note?: string; ref?: string; method?: string; returnId?: string; returnId2?: never; createdAt?: string; saleId?: string; purchaseId?: string; account?: string };
 export type Line = { productId: string; qty: number; rate: number };
 export type SaleLineIn = { productId: string; unit: string; enteredQty: number; rate: number; unitCost?: number };

@@ -275,7 +275,7 @@ export function HomeDashboard({
               </Text>
             </View>
           </View>
-          <Text style={styles.kpiTitle}>{lang === 'bn' ? 'গুদামে মোট চালের মূল্য' : 'Godown Stock'}</Text>
+          <Text style={styles.kpiTitle}>{lang === 'bn' ? 'মোট চালের মজুদ মূল্য' : 'Total Stock Value'}</Text>
           <Text style={[styles.kpiAmount, { color: '#4C1D95' }]}>{m(totalStockVal)}</Text>
           <View style={styles.kpiFooterWrap}>
             <Text style={[styles.kpiFooterLink, { color: '#7C3AED' }]}>

@@ -436,6 +436,7 @@ function Shell() {
               return (
                 <TouchableOpacity
                   key={x.r}
+                  testID={`nav-${x.r}`}
                   onPress={() => setRoute(x.r)}
                   style={{
                     flexDirection: 'row',
@@ -519,7 +520,7 @@ function Shell() {
         {tabs.map(x => {
           const active = tabOf(route) === x.r;
           return (
-            <TouchableOpacity key={x.r} onPress={() => setRoute(x.r)} style={{ flex: 1, alignItems: 'center', paddingVertical: 8, minHeight: 56, gap: 2 }}>
+            <TouchableOpacity key={x.r} testID={`nav-${x.r}`} onPress={() => setRoute(x.r)} style={{ flex: 1, alignItems: 'center', paddingVertical: 8, minHeight: 56, gap: 2 }}>
               <AppIcon name={x.icon} size={TAB_ICON_SIZE} iconColor={active ? color.primary : color.muted} />
               <Text style={{ fontSize: 12, color: active ? color.primary : color.muted, fontWeight: active ? '700' : '400' }}>{t(x.k)}</Text>
             </TouchableOpacity>

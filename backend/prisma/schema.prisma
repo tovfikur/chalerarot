@@ -41,6 +41,7 @@ model Product {
 
 model Customer {
   id         String   @id @default(cuid())
+  code       String?
   name       String
   mobile     String   @default("")
   address    String?
@@ -60,6 +61,7 @@ model Customer {
 
 model Vendor {
   id             String   @id @default(cuid())
+  code           String?
   name           String
   mobile         String   @default("")
   address        String?

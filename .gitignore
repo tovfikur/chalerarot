@@ -25,6 +25,8 @@ backend/.env.*
 npm-debug.log*
 yarn-debug.log*
 yarn-error.log*
+playwright-report/
+test-results/
 
 # System Files
 .DS_Store

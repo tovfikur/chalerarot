@@ -13,8 +13,6 @@ export function StockDashboard() {
 
   // Search & filter
   const [searchQuery, setSearchQuery] = useState('');
-  const [selectedWarehouse, setSelectedWarehouse] = useState('প্রধান গুদাম');
-  const [warehouseDropdownOpen, setWarehouseDropdownOpen] = useState(false);
 
   // Pagination
   const [page, setPage] = useState(1);
@@ -34,15 +32,12 @@ export function StockDashboard() {
   const [viewProduct, setViewProduct] = useState<Product | null>(null);
 
   // Compute stock figures
-  // Physical stock = Product.qtyKg converted into bags (qtyKg / 50)
-  // Transit stock = calculated from recent purchases or movements
   const stockData = useMemo(() => {
     return products.map((p, idx) => {
       const bagWeight = p.mediumBagKg || 50;
-      const physicalBags = Math.round(p.qty / bagWeight) || 0;
-      // Simulated transit bags for realism based on order index
-      const transitBags = Math.round((idx % 4 === 1 ? physicalBags * 0.2 : idx % 4 === 2 ? physicalBags * 0.15 : 0));
-      const totalBags = physicalBags + transitBags;
+      const bags = Math.round(p.qty / bagWeight) || 0;
+      const totalKg = p.qty || 0;
+      const stockVal = p.stockValue || (p.qty * (p.cost || 0));
 
       return {
         id: p.id,
@@ -50,17 +45,17 @@ export function StockDashboard() {
         product: p,
         name: p.name,
         unit: 'বস্তা',
-        physicalBags,
-        transitBags,
-        totalBags,
+        bags,
+        totalKg,
+        stockVal,
       };
     });
   }, [products]);
 
   // Aggregate KPI summary
-  const totalPhysical = useMemo(() => stockData.reduce((s, it) => s + it.physicalBags, 0), [stockData]);
-  const totalTransit = useMemo(() => stockData.reduce((s, it) => s + it.transitBags, 0), [stockData]);
-  const totalAll = totalPhysical + totalTransit;
+  const totalBags = useMemo(() => stockData.reduce((s, it) => s + it.bags, 0), [stockData]);
+  const totalKg = useMemo(() => stockData.reduce((s, it) => s + it.totalKg, 0), [stockData]);
+  const totalValuation = useMemo(() => stockData.reduce((s, it) => s + it.stockVal, 0), [stockData]);
 
   // Filtered rows
   const filteredRows = useMemo(() => {
@@ -125,13 +120,13 @@ export function StockDashboard() {
           </View>
           <View>
             <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
-              <Text style={styles.headerTitle}>মজুদ পণ্য ও গুদাম স্টক</Text>
+              <Text style={styles.headerTitle}>মজুদ চাল ও স্টক বিবরণ</Text>
               <View style={styles.liveTag}>
                 <View style={styles.liveDot} />
                 <Text style={styles.liveTagText}>সক্রিয়</Text>
               </View>
             </View>
-            <Text style={styles.headerSub}>পাইকারি চালের মজুদ, ফিজিক্যাল ও ট্রানজিট স্টক</Text>
+            <Text style={styles.headerSub}>পাইকারি চালের বর্তমান স্টক হিসাব</Text>
           </View>
         </View>
         <View style={styles.headerRight}>
@@ -148,36 +143,36 @@ export function StockDashboard() {
 
       {/* KPI Cards (3 Cards) */}
       <View style={styles.kpiRow}>
-        {/* Card 1: Physical Stock */}
+        {/* Card 1: Total Bags */}
         <View style={styles.kpiCard}>
           <View style={[styles.kpiIconWrap, { backgroundColor: '#E8F5E9' }]}>
             <AppIcon name={icons.stock} size={26} iconColor="#1B7F4B" />
           </View>
           <View style={styles.kpiInfo}>
-            <Text style={styles.kpiLabel}>মোট ফিজিক্যাল মজুদ</Text>
-            <Text style={styles.kpiValue}>{toBnDigits(totalPhysical.toLocaleString('en-IN'))} বস্তা</Text>
+            <Text style={styles.kpiLabel}>মোট মজুদ (বস্তা)</Text>
+            <Text style={styles.kpiValue}>{toBnDigits(totalBags.toLocaleString('en-IN'))} বস্তা</Text>
           </View>
         </View>
 
-        {/* Card 2: In-Transit Stock */}
+        {/* Card 2: Total KG */}
         <View style={styles.kpiCard}>
           <View style={[styles.kpiIconWrap, { backgroundColor: '#E3F2FD' }]}>
-            <AppIcon name={icons.vendors} size={26} iconColor="#1976D2" />
+            <AppIcon name={icons.products} size={26} iconColor="#1976D2" />
           </View>
           <View style={styles.kpiInfo}>
-            <Text style={styles.kpiLabel}>মোট অন-ট্রানজিট মজুদ</Text>
-            <Text style={styles.kpiValue}>{toBnDigits(totalTransit.toLocaleString('en-IN'))} বস্তা</Text>
+            <Text style={styles.kpiLabel}>মোট মজুদ (কেজি)</Text>
+            <Text style={styles.kpiValue}>{toBnDigits(Math.round(totalKg).toLocaleString('en-IN'))} কেজি</Text>
           </View>
         </View>
 
-        {/* Card 3: Total Stock */}
+        {/* Card 3: Total Valuation */}
         <View style={styles.kpiCard}>
           <View style={[styles.kpiIconWrap, { backgroundColor: '#FEF3C7' }]}>
-            <AppIcon name={icons.products} size={26} iconColor="#D97706" />
+            <AppIcon name={icons.profit} size={26} iconColor="#D97706" />
           </View>
           <View style={styles.kpiInfo}>
-            <Text style={styles.kpiLabel}>সর্বমোট মজুদ</Text>
-            <Text style={styles.kpiValue}>{toBnDigits(totalAll.toLocaleString('en-IN'))} বস্তা</Text>
+            <Text style={styles.kpiLabel}>মোট মজুদ মূল্যায়ন</Text>
+            <Text style={styles.kpiValue}>৳{toBnDigits(Math.round(totalValuation).toLocaleString('en-IN'))}</Text>
           </View>
         </View>
       </View>
@@ -231,34 +226,6 @@ export function StockDashboard() {
             <AppIcon name={icons.excel} size={18} iconColor="#15803D" />
             <Text style={[styles.outlineActionBtnText, { color: '#15803D' }]}>এক্সেল ডাউনলোড</Text>
           </TouchableOpacity>
-
-          <View style={{ position: 'relative', zIndex: 40 }}>
-            <TouchableOpacity
-              onPress={() => setWarehouseDropdownOpen(prev => !prev)}
-              style={styles.warehouseSelector}
-            >
-              <AppIcon name={icons.stock} size={18} iconColor="#334155" />
-              <Text style={styles.warehouseSelectorText}>গুদাম: {selectedWarehouse}</Text>
-              <AppIcon name={icons.chevR} size={18} iconColor="#64748B" />
-            </TouchableOpacity>
-
-            {warehouseDropdownOpen && (
-              <View style={styles.dropdownPopup}>
-                {['প্রধান গুদাম', 'উত্তর গুদাম', 'দক্ষিণ গুদাম'].map(wh => (
-                  <TouchableOpacity
-                    key={wh}
-                    onPress={() => {
-                      setSelectedWarehouse(wh);
-                      setWarehouseDropdownOpen(false);
-                    }}
-                    style={styles.dropdownPopupItem}
-                  >
-                    <Text style={styles.dropdownPopupItemText}>{wh}</Text>
-                  </TouchableOpacity>
-                ))}
-              </View>
-            )}
-          </View>
         </View>
       </View>
 
@@ -293,9 +260,9 @@ export function StockDashboard() {
               <Text style={[styles.th, { flex: 1.2 }]}>পণ্য কোড</Text>
               <Text style={[styles.th, { flex: 2.2 }]}>পণ্যের নাম</Text>
               <Text style={[styles.th, { flex: 1, textAlign: 'center' }]}>একক</Text>
-              <Text style={[styles.th, { flex: 1.5, textAlign: 'right' }]}>ফিজিক্যাল মজুদ (বস্তা)</Text>
-              <Text style={[styles.th, { flex: 1.5, textAlign: 'right' }]}>অন-ট্রানজিট মজুদ (বস্তা)</Text>
-              <Text style={[styles.th, { flex: 1.5, textAlign: 'right' }]}>সর্বমোট মজুদ (বস্তা)</Text>
+              <Text style={[styles.th, { flex: 1.5, textAlign: 'right' }]}>মজুদ (বস্তা)</Text>
+              <Text style={[styles.th, { flex: 1.5, textAlign: 'right' }]}>মজুদ (কেজি)</Text>
+              <Text style={[styles.th, { flex: 1.5, textAlign: 'right' }]}>স্টক মূল্য (৳)</Text>
               <Text style={[styles.th, { width: 80, textAlign: 'center' }]}>অ্যাকশন</Text>
             </View>
 
@@ -319,16 +286,16 @@ export function StockDashboard() {
                 </View>
 
                 <View style={[styles.td, { flex: 1.5, alignItems: 'flex-end' }]}>
-                  <Text style={styles.cellText}>{toBnDigits(row.physicalBags.toLocaleString('en-IN'))}</Text>
+                  <Text style={[styles.cellBold, { color: '#0F172A' }]}>{toBnDigits(row.bags.toLocaleString('en-IN'))}</Text>
                 </View>
 
                 <View style={[styles.td, { flex: 1.5, alignItems: 'flex-end' }]}>
-                  <Text style={styles.cellText}>{toBnDigits(row.transitBags.toLocaleString('en-IN'))}</Text>
+                  <Text style={styles.cellText}>{toBnDigits(Math.round(row.totalKg).toLocaleString('en-IN'))}</Text>
                 </View>
 
                 <View style={[styles.td, { flex: 1.5, alignItems: 'flex-end' }]}>
-                  <Text style={[styles.cellBold, { color: '#0F172A' }]}>
-                    {toBnDigits(row.totalBags.toLocaleString('en-IN'))}
+                  <Text style={[styles.cellBold, { color: '#1B7F4B' }]}>
+                    ৳{toBnDigits(Math.round(row.stockVal).toLocaleString('en-IN'))}
                   </Text>
                 </View>
 

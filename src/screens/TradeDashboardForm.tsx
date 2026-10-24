@@ -76,9 +76,9 @@ export function TradeDashboardForm({ mode, onDone }: TradeDashboardFormProps) {
   // Input refs for keyboard navigation
   const inputRefs = useRef<Record<string, TextInput | null>>({});
 
-  // Auto-generated order no & memo no (with serial persistence)
-  const [orderNo, setOrderNo] = useState(() => String(Math.floor(100 + Math.random() * 900)));
-  const [memoNo, setMemoNo] = useState('90876');
+  // Auto-generated order no & memo no (no hardcoded default values)
+  const [orderNo, setOrderNo] = useState('');
+  const [memoNo, setMemoNo] = useState('');
 
   // Party selection state
   const [selectedPartyId, setSelectedPartyId] = useState<string>('');
@@ -89,14 +89,15 @@ export function TradeDashboardForm({ mode, onDone }: TradeDashboardFormProps) {
   const [partyDropdownOpen, setPartyDropdownOpen] = useState(false);
   const [partyHighlightIdx, setPartyHighlightIdx] = useState(0);
 
-  // Date persists in session until changed by user
-  const [billDate, setBillDateState] = useState(() => getSessionBillDate());
+  // Date persists in session or when locked by user
+  const [isDateLocked, setIsDateLocked] = useState(false);
+  const [billDate, setBillDateState] = useState('');
   const setBillDate = useCallback((val: string) => {
     setBillDateState(val);
     setSessionBillDate(val);
   }, []);
 
-  // Products table items
+  // Products table items (empty, no default pre-selected product)
   const [items, setItems] = useState<FormItemLine[]>([
     { id: 'item_1', code: '', productId: '', name: '', unit: 'medium', qty: '', purchaseRate: '', rate: '' },
   ]);
@@ -104,16 +105,18 @@ export function TradeDashboardForm({ mode, onDone }: TradeDashboardFormProps) {
   const [itemHighlightIdx, setItemHighlightIdx] = useState(0);
 
   // Additional costs (Transport, Landing)
-  const [transportCost, setTransportCost] = useState('0');
-  const [landingCost, setLandingCost] = useState('0');
+  const [transportCost, setTransportCost] = useState('');
+  const [landingCost, setLandingCost] = useState('');
 
-  // Payments (Cash, Bank)
-  const [cashPaid, setCashPaid] = useState('0');
-  const [bankPaid, setBankPaid] = useState('0');
+  // Payments (Cash, Bank) & Discount (no default '0' strings)
+  const [cashPaid, setCashPaid] = useState('');
+  const [bankPaid, setBankPaid] = useState('');
+  const [discount, setDiscount] = useState('');
 
   // Split Confirmation Modal state
   const [reviewSplitOpen, setReviewSplitOpen] = useState(false);
   const [submitting, setSubmitting] = useState(false);
+  const [formError, setFormError] = useState('');
 
   // Success modal state
   const [successTxn, setSuccessTxn] = useState<{ id: string; invoiceNo: string; total: number } | null>(null);
@@ -123,46 +126,6 @@ export function TradeDashboardForm({ mode, onDone }: TradeDashboardFormProps) {
 
   // Copy feedback toast
   const [copiedToast, setCopiedToast] = useState<string | null>(null);
-
-  // Initialize matching product/party if available from store
-  useEffect(() => {
-    if (parties.length > 0 && !selectedPartyId) {
-      const match = parties[0];
-      if (match) {
-        setSelectedPartyId(match.id);
-        setPartyCode('1');
-        setPartyName(match.name);
-        setPartyMobile(match.mobile || '');
-        setPartyAddress(match.address || '');
-      }
-    }
-  }, [parties, selectedPartyId]);
-
-  useEffect(() => {
-    if (products.length > 0 && items.length > 0 && !items[0].productId && !items[0].name) {
-      const match = products[0];
-      if (match) {
-        const u = items[0].unit || 'medium';
-        const per = kgPerUnit(match, u);
-        const costVal = Math.round((match.cost || 0) * per);
-        const priceVal = isSale
-          ? Math.round((match.price || 0) * per)
-          : (costVal || 0);
-
-        setItems(prev => [
-          {
-            ...prev[0],
-            productId: match.id,
-            name: match.name,
-            code: '1',
-            unit: u,
-            purchaseRate: String(costVal || 0),
-            rate: String(priceVal),
-          },
-        ]);
-      }
-    }
-  }, [products, items, isSale]);
 
   // Previous balance for selected party
   const prevDue = useMemo(() => {
@@ -198,13 +161,14 @@ export function TradeDashboardForm({ mode, onDone }: TradeDashboardFormProps) {
 
   const numCash = parseNum(cashPaid);
   const numBank = parseNum(bankPaid);
+  const numDiscount = parseNum(discount);
   const totalPaid = numCash + numBank;
 
-  // Grand total calculation: (Products Total + Previous Due) - Total Paid
-  const grandTotal = useMemo(() => {
-    const net = (totalProductValue + prevDue) - totalPaid;
-    return Math.max(0, net);
-  }, [totalProductValue, prevDue, totalPaid]);
+  // Invoice due: product value minus payments and discount
+  const invoiceDue = Math.max(0, totalProductValue - totalPaid - numDiscount);
+  // Total due: invoice due + previous due
+  const totalDue = invoiceDue + prevDue;
+  const grandTotal = totalDue;
 
   // Copy helper
   const copyToClipboard = useCallback((text: string, label: string) => {
@@ -218,20 +182,27 @@ export function TradeDashboardForm({ mode, onDone }: TradeDashboardFormProps) {
   // Filtered lists for autocomplete
   const filteredParties = useMemo(() => {
     const q = partyName.trim().toLowerCase();
-    const codeQ = partyCode.trim();
+    const codeQ = partyCode.trim().toLowerCase();
     if (!q && !codeQ) return parties.slice(0, 8);
     return parties.filter((p, idx) => {
-      const pCode = String(340 + idx);
+      const pCode = (p.code && p.code.trim()) ? p.code.trim().toLowerCase() : String(340 + idx);
       const matchesName = !q || p.name.toLowerCase().includes(q);
       const matchesCode = !codeQ || pCode.includes(codeQ) || String(idx + 1) === codeQ;
       return matchesName || matchesCode;
     }).slice(0, 8);
   }, [parties, partyName, partyCode]);
 
-  // Find party by code (340+ or 1..N), ID, mobile, or name from database
+  // Find party by code (custom code, 340+ or 1..N), ID, mobile, or name from database
   const findPartyByCode = useCallback((codeQuery: string): { party: Party; code: string; index: number } | null => {
     if (!codeQuery) return null;
     const q = codeQuery.trim().toLowerCase();
+
+    // 0. Match explicit custom code first
+    const byCustomCodeIdx = parties.findIndex(p => p.code && p.code.trim().toLowerCase() === q);
+    if (byCustomCodeIdx !== -1) {
+      const p = parties[byCustomCodeIdx];
+      return { party: p, code: p.code!.trim(), index: byCustomCodeIdx };
+    }
 
     // 1. Numeric matching
     const num = parseInt(q, 10);
@@ -239,19 +210,20 @@ export function TradeDashboardForm({ mode, onDone }: TradeDashboardFormProps) {
       // 340+ base code
       if (num >= 340 && num < 340 + parties.length) {
         const idx = num - 340;
-        return { party: parties[idx], code: String(num), index: idx };
+        return { party: parties[idx], code: (parties[idx].code || String(num)), index: idx };
       }
       // 1-based index (1, 2, 3...)
       if (num >= 1 && num <= parties.length) {
         const idx = num - 1;
-        return { party: parties[idx], code: String(340 + idx), index: idx };
+        return { party: parties[idx], code: (parties[idx].code || String(340 + idx)), index: idx };
       }
     }
 
     // 2. Party ID (e.g. v1, v2, c1, c2)
     const byIdIdx = parties.findIndex(p => p.id.toLowerCase() === q);
     if (byIdIdx !== -1) {
-      return { party: parties[byIdIdx], code: String(340 + byIdIdx), index: byIdIdx };
+      const p = parties[byIdIdx];
+      return { party: p, code: (p.code || String(340 + byIdIdx)), index: byIdIdx };
     }
 
     // 3. Mobile
@@ -259,14 +231,16 @@ export function TradeDashboardForm({ mode, onDone }: TradeDashboardFormProps) {
     if (cleanQ.length >= 3) {
       const byMobileIdx = parties.findIndex(p => p.mobile && p.mobile.replace(/\D/g, '').includes(cleanQ));
       if (byMobileIdx !== -1) {
-        return { party: parties[byMobileIdx], code: String(340 + byMobileIdx), index: byMobileIdx };
+        const p = parties[byMobileIdx];
+        return { party: p, code: (p.code || String(340 + byMobileIdx)), index: byMobileIdx };
       }
     }
 
     // 4. Exact or prefix name
     const byNameIdx = parties.findIndex(p => p.name.toLowerCase() === q || p.name.toLowerCase().startsWith(q));
     if (byNameIdx !== -1) {
-      return { party: parties[byNameIdx], code: String(340 + byNameIdx), index: byNameIdx };
+      const p = parties[byNameIdx];
+      return { party: p, code: (p.code || String(340 + byNameIdx)), index: byNameIdx };
     }
 
     return null;
@@ -274,8 +248,9 @@ export function TradeDashboardForm({ mode, onDone }: TradeDashboardFormProps) {
 
   const onSelectParty = useCallback((p: Party, idx?: number) => {
     const fullIdx = idx !== undefined && idx >= 0 ? idx : parties.findIndex(x => x.id === p.id);
+    const resolvedCode = (p.code && p.code.trim()) ? p.code.trim() : String(340 + (fullIdx !== -1 ? fullIdx : 0));
     setSelectedPartyId(p.id);
-    setPartyCode(String(340 + (fullIdx !== -1 ? fullIdx : 0)));
+    setPartyCode(resolvedCode);
     setPartyName(p.name);
     setPartyMobile(p.mobile || '');
     setPartyAddress(p.address || '');
@@ -309,28 +284,22 @@ export function TradeDashboardForm({ mode, onDone }: TradeDashboardFormProps) {
     return null;
   }, [products]);
 
-  // Code change handler: auto selects product name, unit, purchaseRate & rate
+  // Product selection fills identity only; prices remain blank until entered.
   const handleCodeChange = useCallback((rowIdx: number, val: string) => {
     setItems(prev => {
       const copy = [...prev];
       const match = findProductByCode(val);
       if (match) {
         const u = copy[rowIdx].unit || 'medium';
-        const per = kgPerUnit(match.product, u);
-        const costVal = Math.round((match.product.cost || 0) * per);
-        const priceVal = isSale
-          ? Math.round((match.product.price || 0) * per)
-          : (costVal || 200);
-
         copy[rowIdx] = {
           ...copy[rowIdx],
           code: val,
           productId: match.product.id,
           name: match.product.name,
           unit: u,
-          qty: copy[rowIdx].qty || '',
-          purchaseRate: String(costVal || (isSale ? 0 : 200)),
-          rate: String(priceVal),
+          qty: '',
+          purchaseRate: '',
+          rate: '',
         };
       } else {
         copy[rowIdx] = {
@@ -338,59 +307,47 @@ export function TradeDashboardForm({ mode, onDone }: TradeDashboardFormProps) {
           code: val,
           productId: '',
           name: '',
+          qty: '',
           purchaseRate: '',
+          rate: '',
         };
       }
       return copy;
     });
-  }, [findProductByCode, isSale]);
+  }, [findProductByCode]);
 
   // Product selection
   const onSelectProduct = useCallback((rowIdx: number, p: Product, pIdx: number) => {
     setItems(prev => {
       const copy = [...prev];
       const u = copy[rowIdx].unit || 'medium';
-      const per = kgPerUnit(p, u);
-      const costVal = Math.round((p.cost || 0) * per);
-      const priceVal = isSale
-        ? Math.round((p.price || 0) * per)
-        : (costVal || 200);
-
       copy[rowIdx] = {
         ...copy[rowIdx],
         code: String(pIdx + 1),
         productId: p.id,
         name: p.name,
         unit: u,
-        qty: copy[rowIdx].qty || '',
-        purchaseRate: String(costVal || (isSale ? 0 : 200)),
-        rate: String(priceVal),
+        qty: '',
+        purchaseRate: '',
+        rate: '',
       };
       return copy;
     });
     setActiveItemDropdownIdx(null);
-  }, [isSale]);
+  }, []);
 
   // Unit change handler (toggle between 'medium' [বস্তা] and 'kg' [কেজি])
   const handleUnitChange = useCallback((rowIdx: number, newUnit: BagUnit) => {
     setItems(prev => {
       const copy = [...prev];
       const row = copy[rowIdx];
-      const p = products.find(x => x.id === row.productId || x.name === row.name);
-      const newPer = p ? kgPerUnit(p, newUnit) : (newUnit === 'kg' ? 1 : 50);
-
-      const newCost = p ? Math.round((p.cost || 0) * newPer) : 0;
-      const newPrice = p ? (isSale ? Math.round((p.price || 0) * newPer) : (newCost || 200)) : 0;
-
       copy[rowIdx] = {
         ...row,
         unit: newUnit,
-        purchaseRate: String(newCost || row.purchaseRate),
-        rate: String(newPrice || row.rate),
       };
       return copy;
     });
-  }, [products, isSale]);
+  }, []);
 
   // Add new product row
   const addNewRow = useCallback((autoFocus = true) => {
@@ -524,38 +481,57 @@ export function TradeDashboardForm({ mode, onDone }: TradeDashboardFormProps) {
 
   // Open Split Confirmation Modal after preliminary validation
   const handleOpenConfirm = useCallback(() => {
+    setFormError('');
     const validLines = items.filter(it => it.name.trim() && parseNum(it.qty) > 0);
     if (!validLines.length) {
-      Alert.alert(t('invalid'), 'অনুগ্রহ করে অন্তত একটি পণ্যের নাম ও পরিমাণ (কেজি/বস্তা) দিন।');
+      setFormError('Add at least one selected product with a quantity greater than zero.');
       return;
     }
 
-    if (!selectedPartyId && !parties.length) {
-      Alert.alert(t('invalid'), isSale ? 'অনুগ্রহ করে কাস্টমার নির্বাচন করুন।' : 'অনুগ্রহ করে সরবরাহকারী নির্বাচন করুন।');
+    if (!selectedPartyId) {
+      setFormError(isSale ? 'Select a customer before creating this invoice.' : 'Select a vendor before creating this invoice.');
       return;
     }
 
+    if (validLines.some(it => !(parseNum(it.rate) > 0))) {
+      setFormError(isSale ? 'Enter a sale rate greater than zero for every product.' : 'Enter a purchase rate greater than zero for every product.');
+      return;
+    }
     setReviewSplitOpen(true);
   }, [items, isSale, selectedPartyId, parties, t]);
 
   // Final submission handler that creates the invoice
   const executeTransaction = useCallback(async () => {
     if (submitting) return;
+    setFormError('');
     const validLines = items.filter(it => it.name.trim() && parseNum(it.qty) > 0);
     if (!validLines.length) {
-      Alert.alert(t('invalid'), 'অনুগ্রহ করে অন্তত একটি পণ্যের নাম ও পরিমাণ দিন।');
+      setFormError('Add at least one selected product with a quantity greater than zero.');
       return;
     }
 
-    const effectivePartyId = selectedPartyId || (parties[0]?.id ?? '');
+    if (!selectedPartyId) {
+      setFormError(isSale ? 'Select a customer before saving this invoice.' : 'Select a vendor before saving this invoice.');
+      return;
+    }
+    if (validLines.some(it => !(parseNum(it.rate) > 0))) {
+      setFormError(isSale ? 'Enter a sale rate greater than zero for every product.' : 'Enter a purchase rate greater than zero for every product.');
+      return;
+    }
+
+    const effectivePartyId = selectedPartyId;
     const cashAcc = moneyAccounts.find(a => a.type === 'cash') || moneyAccounts[0];
     const bankAcc = moneyAccounts.find(a => a.type === 'bank') || moneyAccounts[0];
     const chosenAccountId = numBank > 0 ? bankAcc?.id : cashAcc?.id;
 
     setSubmitting(true);
     try {
+      let targetDate = billDate.trim();
+      if (!targetDate) {
+        targetDate = getSessionBillDate();
+      }
       let isoDate: string | undefined = undefined;
-      const dParts = billDate.trim().match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})$/);
+      const dParts = targetDate.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})$/);
       if (dParts) {
         isoDate = `${dParts[3]}-${dParts[2].padStart(2, '0')}-${dParts[1].padStart(2, '0')}`;
       }
@@ -564,7 +540,7 @@ export function TradeDashboardForm({ mode, onDone }: TradeDashboardFormProps) {
         let pId = l.productId;
         let prod = products.find(p => p.id === pId);
         if (!pId || !prod) {
-          prod = products.find(p => p.name.toLowerCase() === l.name.toLowerCase()) || products[0];
+          prod = products.find(p => p.name.toLowerCase() === l.name.toLowerCase());
           pId = prod?.id || '';
         }
         if (!prod || !pId) {
@@ -572,7 +548,7 @@ export function TradeDashboardForm({ mode, onDone }: TradeDashboardFormProps) {
         }
         const unit = (l.unit || 'medium') as BagUnit;
         const per = kgPerUnit(prod, unit);
-        const enteredQty = parseNum(l.qty) || 1;
+        const enteredQty = parseNum(l.qty);
         const enteredRate = parseNum(l.rate);
         const enteredPurchaseRate = parseNum(l.purchaseRate);
 
@@ -596,7 +572,7 @@ export function TradeDashboardForm({ mode, onDone }: TradeDashboardFormProps) {
         res = await sale({
           customerId: effectivePartyId || undefined,
           lines: processedLines,
-          discount: 0,
+          discount: numDiscount,
           paid: totalPaid,
           accountId: chosenAccountId,
           date: isoDate,
@@ -644,13 +620,13 @@ export function TradeDashboardForm({ mode, onDone }: TradeDashboardFormProps) {
         total: res.total || totalProductValue,
       });
     } catch (err) {
-      Alert.alert(t('invalid'), err instanceof Error ? err.message : 'লেনদেন সম্পন্ন করা সম্ভব হয়নি।');
+      setFormError(err instanceof Error ? err.message : 'Could not complete the transaction.');
     } finally {
       setSubmitting(false);
     }
   }, [
     items, isSale, selectedPartyId, parties, moneyAccounts, numBank, products,
-    totalPaid, billDate, sale, purchase, numTransport,
+    totalPaid, numDiscount, billDate, sale, purchase, numTransport,
     numLanding, mode, memoNo, totalProductValue, saveExpense, t, submitting
   ]);
 
@@ -784,6 +760,11 @@ export function TradeDashboardForm({ mode, onDone }: TradeDashboardFormProps) {
         </View>
 
         {/* ROW 1: TWO COLUMNS (ক্রয়ের তথ্য & তারিখ) */}
+        {formError ? (
+          <View accessibilityRole="alert" style={{ backgroundColor: '#FEF2F2', borderWidth: 1, borderColor: '#FCA5A5', borderRadius: 10, padding: 12, marginBottom: 12 }}>
+            <Text style={{ color: '#991B1B', fontSize: 14, fontWeight: '700' }}>{formError}</Text>
+          </View>
+        ) : null}
         <View style={styles.twoColRow}>
           {/* Left Card: Purchase Info */}
           <View style={[styles.card3D, styles.colLeft]}>
@@ -823,6 +804,7 @@ export function TradeDashboardForm({ mode, onDone }: TradeDashboardFormProps) {
               <View style={[styles.inputDebossed, isInputFocused('partyCode') && styles.inputFocusedGlow]}>
                 <TextInput
                   ref={el => (inputRefs.current['partyCode'] = el)}
+                  accessibilityLabel={isSale ? 'Customer code' : 'Vendor code'}
                   value={partyCode}
                   onChangeText={v => {
                     setPartyCode(v);
@@ -992,22 +974,84 @@ export function TradeDashboardForm({ mode, onDone }: TradeDashboardFormProps) {
               <Text style={styles.cardHeaderTitle}>তারিখ বিবরণ</Text>
             </View>
 
-            {/* Bill Date */}
+            {/* Bill Date with Lock / Unlock and Set Buttons */}
             <View style={styles.formGroup}>
-              <Text style={styles.fieldLabel}>{isSale ? 'বিক্রয়ের তারিখ' : 'বিলের তারিখ'}</Text>
-              <View style={[styles.inputDebossed, isInputFocused('billDate') && styles.inputFocusedGlow]}>
+              <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 6 }}>
+                <Text style={styles.fieldLabel}>{isSale ? 'বিক্রয়ের তারিখ' : 'বিলের তারিখ'}</Text>
+
+                {/* Lock / Unlock and Set Buttons */}
+                <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+                  {/* Set Button */}
+                  <TouchableOpacity
+                    onPress={() => {
+                      const todayStr = getSessionBillDate();
+                      setBillDate(todayStr);
+                    }}
+                    style={{
+                      flexDirection: 'row',
+                      alignItems: 'center',
+                      gap: 4,
+                      backgroundColor: '#EFF6FF',
+                      borderWidth: 1,
+                      borderColor: '#93C5FD',
+                      borderRadius: 6,
+                      paddingHorizontal: 8,
+                      paddingVertical: 3,
+                      cursor: 'pointer' as any,
+                    }}
+                  >
+                    <AppIcon name={icons.calendar} size={13} iconColor="#1D4ED8" />
+                    <Text style={{ fontSize: 12, fontWeight: '700', color: '#1D4ED8' }}>সেট (আজ)</Text>
+                  </TouchableOpacity>
+
+                  {/* Lock / Unlock Toggle Button */}
+                  <TouchableOpacity
+                    onPress={() => {
+                      if (!isDateLocked && !billDate.trim()) {
+                        setBillDate(getSessionBillDate());
+                      }
+                      setIsDateLocked(prev => !prev);
+                    }}
+                    style={{
+                      flexDirection: 'row',
+                      alignItems: 'center',
+                      gap: 4,
+                      backgroundColor: isDateLocked ? '#FEF2F2' : '#F8FAFC',
+                      borderWidth: 1,
+                      borderColor: isDateLocked ? '#FCA5A5' : '#CBD5E1',
+                      borderRadius: 6,
+                      paddingHorizontal: 8,
+                      paddingVertical: 3,
+                      cursor: 'pointer' as any,
+                    }}
+                  >
+                    <AppIcon name={isDateLocked ? icons.lock : icons.accounts} size={13} iconColor={isDateLocked ? '#DC2626' : '#475569'} />
+                    <Text style={{ fontSize: 12, fontWeight: '700', color: isDateLocked ? '#DC2626' : '#475569' }}>
+                      {isDateLocked ? '🔒 লক' : '🔓 আনলক'}
+                    </Text>
+                  </TouchableOpacity>
+                </View>
+              </View>
+
+              <View style={[
+                styles.inputDebossed,
+                isInputFocused('billDate') && styles.inputFocusedGlow,
+                isDateLocked && { backgroundColor: '#F1F5F9', borderColor: '#CBD5E1' }
+              ]}>
                 <TextInput
                   ref={el => (inputRefs.current['billDate'] = el)}
                   value={billDate}
+                  editable={!isDateLocked}
                   onChangeText={setBillDate}
                   onFocus={() => setFocusedField('billDate')}
                   onSubmitEditing={() => focusNextField('billDate')}
-                  style={styles.textInput}
-                  placeholder={getSessionBillDate()}
+                  style={[styles.textInput, isDateLocked && { color: '#64748B' }]}
+                  placeholder="DD/MM/YYYY"
+                  placeholderTextColor="#94A3B8"
                   returnKeyType="next"
                 />
                 <View style={styles.tactileInnerBtn}>
-                  <AppIcon name={icons.calendar} size={18} iconColor="#1c70b9" />
+                  <AppIcon name={isDateLocked ? icons.lock : icons.calendar} size={18} iconColor={isDateLocked ? '#94A3B8' : '#1c70b9'} />
                 </View>
               </View>
             </View>
@@ -1091,10 +1135,11 @@ export function TradeDashboardForm({ mode, onDone }: TradeDashboardFormProps) {
                 </View>
 
                 {/* Product Code */}
-                <View style={[styles.td, { width: isSale ? 120 : 130, position: 'relative', zIndex: 40 - rowIdx }]}>
+                <View style={[styles.td, { width: isSale ? 120 : 130, position: 'relative', zIndex: activeItemDropdownIdx === rowIdx ? 500 : 0, elevation: activeItemDropdownIdx === rowIdx ? 12 : 0 }]}>
                   <View style={[styles.tableInputDebossed, isInputFocused(`code_${rowIdx}`) && styles.inputFocusedGlow]}>
                     <TextInput
                       ref={el => (inputRefs.current[`code_${rowIdx}`] = el)}
+                      accessibilityLabel={`Product code ${rowIdx + 1}`}
                       value={row.code}
                       onChangeText={txt => handleCodeChange(rowIdx, txt)}
                       onFocus={() => {
@@ -1202,6 +1247,7 @@ export function TradeDashboardForm({ mode, onDone }: TradeDashboardFormProps) {
                 <View style={[styles.td, { width: isSale ? 85 : 95 }]}>
                   <TextInput
                     ref={el => (inputRefs.current[`qty_${rowIdx}`] = el)}
+                    accessibilityLabel={`Quantity ${rowIdx + 1}`}
                     value={row.qty}
                     onChangeText={txt => {
                       setItems(prev => {
@@ -1229,6 +1275,7 @@ export function TradeDashboardForm({ mode, onDone }: TradeDashboardFormProps) {
                   <View style={[styles.td, { width: 125 }]}>
                     <TextInput
                       ref={el => (inputRefs.current[`purchaseRate_${rowIdx}`] = el)}
+                      accessibilityLabel={`Purchase cost ${rowIdx + 1}`}
                       value={row.purchaseRate}
                       onChangeText={txt => {
                         setItems(prev => {
@@ -1245,7 +1292,7 @@ export function TradeDashboardForm({ mode, onDone }: TradeDashboardFormProps) {
                         { textAlign: 'center', borderColor: '#F59E0B', backgroundColor: '#FFFDF7' },
                         isInputFocused(`purchaseRate_${rowIdx}`) && styles.inputFocusedGlow,
                       ]}
-                      placeholder={String(basePurchaseRate || 0)}
+                      placeholder=""
                       keyboardType="numeric"
                       returnKeyType="next"
                     />
@@ -1261,6 +1308,7 @@ export function TradeDashboardForm({ mode, onDone }: TradeDashboardFormProps) {
                 <View style={[styles.td, { width: isSale ? 110 : 125 }]}>
                   <TextInput
                     ref={el => (inputRefs.current[`rate_${rowIdx}`] = el)}
+                    accessibilityLabel={`${isSale ? 'Sale rate' : 'Purchase rate'} ${rowIdx + 1}`}
                     value={row.rate}
                     onChangeText={txt => {
                       setItems(prev => {
@@ -1277,7 +1325,7 @@ export function TradeDashboardForm({ mode, onDone }: TradeDashboardFormProps) {
                       { textAlign: 'center' },
                       isInputFocused(`rate_${rowIdx}`) && styles.inputFocusedGlow,
                     ]}
-                    placeholder={isSale ? "3000" : "2500"}
+                    placeholder=""
                     keyboardType="numeric"
                     returnKeyType="next"
                   />
@@ -1353,6 +1401,7 @@ export function TradeDashboardForm({ mode, onDone }: TradeDashboardFormProps) {
 
           <TouchableOpacity
             onPress={handleOpenConfirm}
+            testID="complete-invoice"
             style={styles.completeButton3D}
             accessibilityLabel={isSale ? 'বিক্রয় নিশ্চিত করুন' : 'ক্রয় নিশ্চিত করুন'}
           >
@@ -1475,120 +1524,148 @@ export function TradeDashboardForm({ mode, onDone }: TradeDashboardFormProps) {
                   ) : null}
                 </View>
 
-                {/* RIGHT SIDE: Other Details (Party, Date, Memo, Payments, Final Total) */}
+                {/* RIGHT SIDE: Total Invoice Value, Cash, Bank, Discount, Invoice Due, Previous Due, Line, Total Due */}
                 <View style={{ flex: 1, backgroundColor: '#FFFFFF', borderRadius: 12, padding: 14, borderWidth: 1.5, borderColor: '#CBD5E1', justifyContent: 'space-between' }}>
                   <View>
-                    <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, marginBottom: 12, borderBottomWidth: 1.5, borderBottomColor: '#E2E8F0', paddingBottom: 8 }}>
+                    {/* Header: Party & Memo Info */}
+                    <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, marginBottom: 10, borderBottomWidth: 1.5, borderBottomColor: '#E2E8F0', paddingBottom: 8 }}>
                       <AppIcon name={icons.accounts} size={20} iconColor="#1c70b9" />
-                      <Text style={{ fontSize: 16, fontWeight: '700', color: '#0F1E36' }}>লেনদেন ও পার্টির তথ্য</Text>
+                      <Text style={{ fontSize: 16, fontWeight: '700', color: '#0F1E36' }}>পেমেন্ট ও হিসাব বিবরণ</Text>
                     </View>
 
-                    <View style={{ gap: 8 }}>
+                    <View style={{ gap: 4, marginBottom: 10 }}>
                       <View style={{ flexDirection: 'row', justifyContent: 'space-between' }}>
-                        <Text style={{ fontSize: 14, color: '#64748B' }}>{isSale ? 'কাস্টমার' : 'সরবরাহকারী'}:</Text>
-                        <Text style={{ fontSize: 15, fontWeight: '700', color: '#0F172A' }}>{partyName || 'ক্যাশ'}</Text>
+                        <Text style={{ fontSize: 13, color: '#64748B' }}>{isSale ? 'কাস্টমার' : 'সরবরাহকারী'}:</Text>
+                        <Text style={{ fontSize: 14, fontWeight: '700', color: '#0F172A' }}>{partyName || 'ক্যাশ'}</Text>
                       </View>
                       {partyMobile ? (
                         <View style={{ flexDirection: 'row', justifyContent: 'space-between' }}>
-                          <Text style={{ fontSize: 14, color: '#64748B' }}>মোবাইল:</Text>
-                          <Text style={{ fontSize: 14, color: '#334155' }}>{partyMobile}</Text>
+                          <Text style={{ fontSize: 13, color: '#64748B' }}>মোবাইল:</Text>
+                          <Text style={{ fontSize: 13, color: '#334155' }}>{partyMobile}</Text>
                         </View>
                       ) : null}
                       <View style={{ flexDirection: 'row', justifyContent: 'space-between' }}>
-                        <Text style={{ fontSize: 14, color: '#64748B' }}>তারিখ:</Text>
-                        <Text style={{ fontSize: 14, fontWeight: '600', color: '#334155' }}>{billDate}</Text>
+                        <Text style={{ fontSize: 13, color: '#64748B' }}>তারিখ:</Text>
+                        <Text style={{ fontSize: 13, fontWeight: '600', color: '#334155' }}>{billDate || 'আজ'}</Text>
                       </View>
-                      <View style={{ flexDirection: 'row', justifyContent: 'space-between' }}>
-                        <Text style={{ fontSize: 14, color: '#64748B' }}>মেমো নং:</Text>
-                        <Text style={{ fontSize: 14, fontWeight: '700', color: '#1c70b9' }}>{memoNo}</Text>
-                      </View>
+                      {memoNo ? (
+                        <View style={{ flexDirection: 'row', justifyContent: 'space-between' }}>
+                          <Text style={{ fontSize: 13, color: '#64748B' }}>মেমো নং:</Text>
+                          <Text style={{ fontSize: 13, fontWeight: '700', color: '#1c70b9' }}>{memoNo}</Text>
+                        </View>
+                      ) : null}
+                    </View>
 
-                      {/* Payment inputs if user wants to record payment right here */}
-                      <View style={{ marginTop: 8, paddingTop: 8, borderTopWidth: 1, borderTopColor: '#F1F5F9' }}>
-                        <Text style={{ fontSize: 13, fontWeight: '700', color: '#475569', marginBottom: 6 }}>পরিশোধের পরিমাণ</Text>
-                        <View style={{ flexDirection: 'row', gap: 8 }}>
-                          <View style={{ flex: 1 }}>
-                            <Text style={{ fontSize: 12, color: '#64748B', marginBottom: 2 }}>ক্যাশ (৳)</Text>
-                            <TextInput
-                              ref={el => (inputRefs.current['modal_cashPaid'] = el)}
-                              value={cashPaid}
-                              onChangeText={setCashPaid}
-                              keyboardType="numeric"
-                              placeholder="0"
-                              onSubmitEditing={() => inputRefs.current['modal_bankPaid']?.focus()}
-                              style={{ borderWidth: 1.5, borderColor: '#CBD5E1', borderRadius: 8, paddingHorizontal: 8, height: 38, fontSize: 14, backgroundColor: '#F8FAFC' }}
-                              returnKeyType="next"
-                            />
-                          </View>
-                          <View style={{ flex: 1 }}>
-                            <Text style={{ fontSize: 12, color: '#64748B', marginBottom: 2 }}>ব্যাংক (৳)</Text>
-                            <TextInput
-                              ref={el => (inputRefs.current['modal_bankPaid'] = el)}
-                              value={bankPaid}
-                              onChangeText={setBankPaid}
-                              keyboardType="numeric"
-                              placeholder="0"
-                              onSubmitEditing={executeTransaction}
-                              style={{ borderWidth: 1.5, borderColor: '#CBD5E1', borderRadius: 8, paddingHorizontal: 8, height: 38, fontSize: 14, backgroundColor: '#F8FAFC' }}
-                              returnKeyType="done"
-                            />
-                          </View>
+                    {/* 1. TOTAL INVOICE VALUE */}
+                    <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', backgroundColor: '#F8FAFC', paddingVertical: 10, paddingHorizontal: 12, borderRadius: 8, borderWidth: 1.5, borderColor: '#E2E8F0', marginBottom: 10 }}>
+                      <Text style={{ fontSize: 14, fontWeight: '800', color: '#1E293B' }}>মোট ইনভয়েস মূল্য:</Text>
+                      <Text style={{ fontSize: 18, fontWeight: '900', color: '#0F172A' }}>৳{toBnDigits(String(Math.round(totalProductValue)))}</Text>
+                    </View>
+
+                    {/* 2. CASH */}
+                    <View style={{ marginBottom: 8 }}>
+                      <Text style={{ fontSize: 13, fontWeight: '700', color: '#475569', marginBottom: 3 }}>ক্যাশ পরিশোধ (৳):</Text>
+                      <TextInput
+                        ref={el => (inputRefs.current['modal_cashPaid'] = el)}
+                        value={cashPaid}
+                        onChangeText={setCashPaid}
+                        keyboardType="numeric"
+                        placeholder="0"
+                        placeholderTextColor="#94A3B8"
+                        onSubmitEditing={() => inputRefs.current['modal_bankPaid']?.focus()}
+                        style={{ borderWidth: 1.5, borderColor: '#CBD5E1', borderRadius: 8, paddingHorizontal: 10, height: 38, fontSize: 15, backgroundColor: '#FFFFFF', fontWeight: '700', color: '#0F172A' }}
+                        returnKeyType="next"
+                      />
+                    </View>
+
+                    {/* 3. BANK */}
+                    <View style={{ marginBottom: 8 }}>
+                      <Text style={{ fontSize: 13, fontWeight: '700', color: '#475569', marginBottom: 3 }}>ব্যাংক পরিশোধ (৳):</Text>
+                      <TextInput
+                        ref={el => (inputRefs.current['modal_bankPaid'] = el)}
+                        value={bankPaid}
+                        onChangeText={setBankPaid}
+                        keyboardType="numeric"
+                        placeholder="0"
+                        placeholderTextColor="#94A3B8"
+                        onSubmitEditing={() => inputRefs.current['modal_discount']?.focus()}
+                        style={{ borderWidth: 1.5, borderColor: '#CBD5E1', borderRadius: 8, paddingHorizontal: 10, height: 38, fontSize: 15, backgroundColor: '#FFFFFF', fontWeight: '700', color: '#0F172A' }}
+                        returnKeyType="next"
+                      />
+                    </View>
+
+                    {/* 4. DISCOUNT */}
+                    <View style={{ marginBottom: 10 }}>
+                      <Text style={{ fontSize: 13, fontWeight: '700', color: '#475569', marginBottom: 3 }}>ছাড় / ডিসকাউন্ট (৳):</Text>
+                      <TextInput
+                        ref={el => (inputRefs.current['modal_discount'] = el)}
+                        value={discount}
+                        onChangeText={setDiscount}
+                        keyboardType="numeric"
+                        placeholder="0"
+                        placeholderTextColor="#94A3B8"
+                        onSubmitEditing={executeTransaction}
+                        style={{ borderWidth: 1.5, borderColor: '#CBD5E1', borderRadius: 8, paddingHorizontal: 10, height: 38, fontSize: 15, backgroundColor: '#FFFFFF', fontWeight: '700', color: '#B45309' }}
+                        returnKeyType="done"
+                      />
+                    </View>
+
+                    {/* Optional Transport & Landing Costs */}
+                    <View style={{ marginBottom: 8, padding: 8, backgroundColor: '#F8FAFC', borderRadius: 8, borderWidth: 1, borderColor: '#E2E8F0' }}>
+                      <Text style={{ fontSize: 12, fontWeight: '700', color: '#64748B', marginBottom: 4 }}>অতিরিক্ত খরচ (ঐচ্ছিক)</Text>
+                      <View style={{ flexDirection: 'row', gap: 8 }}>
+                        <View style={{ flex: 1 }}>
+                          <Text style={{ fontSize: 11, color: '#64748B', marginBottom: 2 }}>পরিবহন (৳)</Text>
+                          <TextInput
+                            ref={el => (inputRefs.current['modal_transportCost'] = el)}
+                            value={transportCost}
+                            onChangeText={setTransportCost}
+                            keyboardType="numeric"
+                            placeholder="0"
+                            placeholderTextColor="#94A3B8"
+                            style={{ borderWidth: 1, borderColor: '#CBD5E1', borderRadius: 6, paddingHorizontal: 8, height: 32, fontSize: 13, backgroundColor: '#FFFFFF' }}
+                          />
+                        </View>
+                        <View style={{ flex: 1 }}>
+                          <Text style={{ fontSize: 11, color: '#64748B', marginBottom: 2 }}>ল্যান্ডিং (৳)</Text>
+                          <TextInput
+                            ref={el => (inputRefs.current['modal_landingCost'] = el)}
+                            value={landingCost}
+                            onChangeText={setLandingCost}
+                            keyboardType="numeric"
+                            placeholder="0"
+                            placeholderTextColor="#94A3B8"
+                            style={{ borderWidth: 1, borderColor: '#CBD5E1', borderRadius: 6, paddingHorizontal: 8, height: 32, fontSize: 13, backgroundColor: '#FFFFFF' }}
+                          />
                         </View>
                       </View>
+                    </View>
 
-                      {/* Additional Costs inputs */}
-                      <View style={{ marginTop: 6 }}>
-                        <Text style={{ fontSize: 13, fontWeight: '700', color: '#475569', marginBottom: 6 }}>অতিরিক্ত খরচ (ঐচ্ছিক)</Text>
-                        <View style={{ flexDirection: 'row', gap: 8 }}>
-                          <View style={{ flex: 1 }}>
-                            <Text style={{ fontSize: 12, color: '#64748B', marginBottom: 2 }}>পরিবহন (৳)</Text>
-                            <TextInput
-                              ref={el => (inputRefs.current['modal_transportCost'] = el)}
-                              value={transportCost}
-                              onChangeText={setTransportCost}
-                              keyboardType="numeric"
-                              placeholder="0"
-                              onSubmitEditing={() => inputRefs.current['modal_landingCost']?.focus()}
-                              style={{ borderWidth: 1.5, borderColor: '#CBD5E1', borderRadius: 8, paddingHorizontal: 8, height: 38, fontSize: 14, backgroundColor: '#F8FAFC' }}
-                              returnKeyType="next"
-                            />
-                          </View>
-                          <View style={{ flex: 1 }}>
-                            <Text style={{ fontSize: 12, color: '#64748B', marginBottom: 2 }}>ল্যান্ডিং (৳)</Text>
-                            <TextInput
-                              ref={el => (inputRefs.current['modal_landingCost'] = el)}
-                              value={landingCost}
-                              onChangeText={setLandingCost}
-                              keyboardType="numeric"
-                              placeholder="0"
-                              onSubmitEditing={executeTransaction}
-                              style={{ borderWidth: 1.5, borderColor: '#CBD5E1', borderRadius: 8, paddingHorizontal: 8, height: 38, fontSize: 14, backgroundColor: '#F8FAFC' }}
-                              returnKeyType="done"
-                            />
-                          </View>
-                        </View>
-                      </View>
+                    {/* 5. TOTAL INVOICE DUE */}
+                    <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingVertical: 5 }}>
+                      <Text style={{ fontSize: 14, fontWeight: '700', color: '#475569' }}>মোট ইনভয়েস বাকি:</Text>
+                      <Text style={{ fontSize: 16, fontWeight: '800', color: '#B45309' }}>৳{toBnDigits(String(Math.round(invoiceDue)))}</Text>
                     </View>
-                  </View>
 
-                  {/* Summary & Create Invoice Button */}
-                  <View style={{ marginTop: 14, paddingTop: 12, borderTopWidth: 1.5, borderTopColor: '#E2E8F0' }}>
-                    <View style={{ flexDirection: 'row', justifyContent: 'space-between', marginBottom: 6 }}>
-                      <Text style={{ fontSize: 14, color: '#64748B' }}>পূর্বের বাকি:</Text>
-                      <Text style={{ fontSize: 15, fontWeight: '600', color: '#DC2626' }}>৳{toBnDigits(String(Math.round(prevDue)))}</Text>
+                    {/* 6. TOTAL PREVIOUS DUE */}
+                    <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingVertical: 5 }}>
+                      <Text style={{ fontSize: 14, fontWeight: '700', color: '#64748B' }}>পূর্বের মোট বাকি:</Text>
+                      <Text style={{ fontSize: 16, fontWeight: '800', color: '#DC2626' }}>৳{toBnDigits(String(Math.round(prevDue)))}</Text>
                     </View>
-                    <View style={{ flexDirection: 'row', justifyContent: 'space-between', marginBottom: 6 }}>
-                      <Text style={{ fontSize: 14, color: '#64748B' }}>মোট পরিশোধ:</Text>
-                      <Text style={{ fontSize: 15, fontWeight: '700', color: '#15803D' }}>৳{toBnDigits(String(Math.round(totalPaid)))}</Text>
-                    </View>
-                    <View style={{ flexDirection: 'row', justifyContent: 'space-between', marginBottom: 12, backgroundColor: '#EFF6FF', padding: 8, borderRadius: 8 }}>
-                      <Text style={{ fontSize: 15, fontWeight: '700', color: '#1E3A8A' }}>সর্বমোট নিট বাকি:</Text>
-                      <Text style={{ fontSize: 18, fontWeight: '800', color: '#1E3A8A' }}>৳{toBnDigits(String(Math.round(grandTotal)))}</Text>
+
+                    {/* 7. A CLEAR SEPARATOR LINE */}
+                    <View style={{ height: 2, backgroundColor: '#94A3B8', marginVertical: 8 }} />
+
+                    {/* 8. TOTAL DUE */}
+                    <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', backgroundColor: '#EFF6FF', paddingVertical: 10, paddingHorizontal: 12, borderRadius: 10, borderWidth: 1.5, borderColor: '#93C5FD', marginBottom: 12 }}>
+                      <Text style={{ fontSize: 16, fontWeight: '800', color: '#1E3A8A' }}>সর্বমোট বাকি:</Text>
+                      <Text style={{ fontSize: 22, fontWeight: '900', color: '#1E3A8A' }}>৳{toBnDigits(String(Math.round(totalDue)))}</Text>
                     </View>
 
                     {/* CONFIRM AND CREATE INVOICE BUTTON */}
                     <TouchableOpacity
                       onPress={executeTransaction}
+                      testID="execute-invoice"
                       disabled={submitting}
                       style={{
                         backgroundColor: '#16A34A',
@@ -2076,7 +2153,8 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'space-between',
     paddingHorizontal: 12,
-    paddingVertical: 10,
+    paddingVertical: 14,
+    minHeight: 60,
     borderBottomWidth: 1,
     borderBottomColor: '#F0F6FC',
   },

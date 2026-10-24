@@ -7,11 +7,11 @@ const num = (v: unknown, d = 0) => {
   return Number.isFinite(n) ? n : d;
 };
 
-const shapeC = (c: { id: string; name: string; mobile: string; address: string | null; openingDue: number; nextDate: string | null }) => ({
-  id: c.id, name: c.name, mobile: c.mobile, address: c.address ?? undefined, opening: c.openingDue, next: c.nextDate ?? undefined,
+const shapeC = (c: { id: string; code?: string | null; name: string; mobile: string; address: string | null; openingDue: number; nextDate: string | null }) => ({
+  id: c.id, code: c.code ?? undefined, name: c.name, mobile: c.mobile, address: c.address ?? undefined, opening: c.openingDue, next: c.nextDate ?? undefined,
 });
-const shapeV = (v: { id: string; name: string; mobile: string; address: string | null; openingPayable: number; nextDate: string | null }) => ({
-  id: v.id, name: v.name, mobile: v.mobile, address: v.address ?? undefined, opening: v.openingPayable, next: v.nextDate ?? undefined,
+const shapeV = (v: { id: string; code?: string | null; name: string; mobile: string; address: string | null; openingPayable: number; nextDate: string | null }) => ({
+  id: v.id, code: v.code ?? undefined, name: v.name, mobile: v.mobile, address: v.address ?? undefined, opening: v.openingPayable, next: v.nextDate ?? undefined,
 });
 
 export const customers = Router();
@@ -24,10 +24,17 @@ customers.get('/', async (_req: Request, res: Response) => {
 });
 
 customers.post('/', async (req: Request, res: Response) => {
-  const { name, mobile, address, opening, next } = req.body ?? {};
+  const { code, name, mobile, address, opening, next } = req.body ?? {};
   if (!String(name ?? '').trim()) return res.status(400).json({ error: 'Name is required' });
   const c = await db.customer.create({
-    data: { name: String(name).trim(), mobile: String(mobile ?? ''), address: address ?? null, openingDue: num(opening), nextDate: next ?? null },
+    data: {
+      code: code ? String(code).trim() : null,
+      name: String(name).trim(),
+      mobile: String(mobile ?? ''),
+      address: address ?? null,
+      openingDue: num(opening),
+      nextDate: next ?? null,
+    },
   });
   res.status(201).json({ id: c.id });
 });
@@ -35,11 +42,12 @@ customers.post('/', async (req: Request, res: Response) => {
 customers.put('/:id', async (req: Request, res: Response) => {
   const cur = await db.customer.findUnique({ where: { id: req.params.id } });
   if (!cur || cur.deletedAt) return res.status(404).json({ error: 'Customer not found' });
-  const { name, mobile, address, opening, next } = req.body ?? {};
+  const { code, name, mobile, address, opening, next } = req.body ?? {};
   if (name !== undefined && !String(name).trim()) return res.status(400).json({ error: 'Name is required' });
   const u = await db.customer.update({
     where: { id: cur.id },
     data: {
+      code: code === undefined ? cur.code : (code ? String(code).trim() : null),
       name: name === undefined ? cur.name : String(name).trim(),
       mobile: mobile === undefined ? cur.mobile : String(mobile),
       address: address === undefined ? cur.address : (address ?? null),
@@ -90,10 +98,17 @@ vendors.get('/', async (_req: Request, res: Response) => {
 });
 
 vendors.post('/', async (req: Request, res: Response) => {
-  const { name, mobile, address, opening, next } = req.body ?? {};
+  const { code, name, mobile, address, opening, next } = req.body ?? {};
   if (!String(name ?? '').trim()) return res.status(400).json({ error: 'Name is required' });
   const v = await db.vendor.create({
-    data: { name: String(name).trim(), mobile: String(mobile ?? ''), address: address ?? null, openingPayable: num(opening), nextDate: next ?? null },
+    data: {
+      code: code ? String(code).trim() : null,
+      name: String(name).trim(),
+      mobile: String(mobile ?? ''),
+      address: address ?? null,
+      openingPayable: num(opening),
+      nextDate: next ?? null,
+    },
   });
   res.status(201).json({ id: v.id });
 });
@@ -101,11 +116,12 @@ vendors.post('/', async (req: Request, res: Response) => {
 vendors.put('/:id', async (req: Request, res: Response) => {
   const cur = await db.vendor.findUnique({ where: { id: req.params.id } });
   if (!cur || cur.deletedAt) return res.status(404).json({ error: 'Vendor not found' });
-  const { name, mobile, address, opening, next } = req.body ?? {};
+  const { code, name, mobile, address, opening, next } = req.body ?? {};
   if (name !== undefined && !String(name).trim()) return res.status(400).json({ error: 'Name is required' });
   const u = await db.vendor.update({
     where: { id: cur.id },
     data: {
+      code: code === undefined ? cur.code : (code ? String(code).trim() : null),
       name: name === undefined ? cur.name : String(name).trim(),
       mobile: mobile === undefined ? cur.mobile : String(mobile),
       address: address === undefined ? cur.address : (address ?? null),

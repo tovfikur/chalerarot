@@ -185,7 +185,7 @@ export function SearchableSelect<T extends { id: string; name: string }>({
   }
   const vis = q.trim() ? items.filter(i => match(i, q)) : items;
   return (
-    <View style={{ zIndex: 10 }}>
+    <View style={{ position: 'relative', zIndex: open ? 100 : 1, elevation: open ? 12 : 0 }}>
       <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4, borderWidth: 1.5, borderColor: focused || open ? color.primary : color.line, borderRadius: 12, backgroundColor: '#fff', paddingHorizontal: 12, minHeight: 52, marginBottom: 0 }}>
         <AppIcon name={icons.search} size={20} iconColor={focused || open ? color.primary : color.muted} />
         <TextInput
@@ -265,7 +265,7 @@ export function SearchDropdown<T extends { id: string; name: string }>({
   const fs = useFs(17, 15);
   const vis = query.trim() ? items.filter(i => match(i, query)) : items;
   return (
-    <View style={{ zIndex: 10 }}>
+    <View style={{ position: 'relative', zIndex: open ? 100 : 1, elevation: open ? 12 : 0 }}>
       <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4, borderWidth: 1.5, borderColor: focused || open ? color.primary : color.line, borderRadius: 12, backgroundColor: '#fff', paddingHorizontal: 12, minHeight: 52, marginBottom: 0 }}>
         <AppIcon name={icons.search} size={20} iconColor={focused || open ? color.primary : color.muted} />
         <TextInput
