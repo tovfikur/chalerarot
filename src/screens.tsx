@@ -1690,7 +1690,7 @@ const dhakaToday = (): string => {
   }
 };
 
-function MonthCal({ selected, onPick, minDate, maxDate }: {
+export function MonthCal({ selected, onPick, minDate, maxDate }: {
   selected: string; onPick: (date: string) => void; minDate?: string; maxDate?: string;
 }) {
   const { t } = useApp(); const n = useNum();
@@ -1749,7 +1749,7 @@ function MonthCal({ selected, onPick, minDate, maxDate }: {
           }
           return (
             <View key={ds} style={{ width: `${100 / 7}%`, alignItems: 'center', justifyContent: 'center', paddingVertical: 2 }}>
-              <TouchableOpacity onPress={() => onPick(ds)} style={{ minHeight: 44, minWidth: 44, alignItems: 'center', justifyContent: 'center', borderRadius: 22, backgroundColor: isSel ? color.primary : 'transparent', borderWidth: isToday && !isSel ? 1.5 : 0, borderColor: color.primary }}>
+              <TouchableOpacity onPress={() => onPick(ds)} accessibilityRole="button" accessibilityLabel={`Choose ${ds}`} style={{ minHeight: 44, minWidth: 44, alignItems: 'center', justifyContent: 'center', borderRadius: 22, backgroundColor: isSel ? color.primary : 'transparent', borderWidth: isToday && !isSel ? 1.5 : 0, borderColor: color.primary }}>
                 {dayText}
               </TouchableOpacity>
             </View>

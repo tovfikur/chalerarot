@@ -28,6 +28,12 @@ test('creates a sale invoice with explicit rates and selected party', async ({ p
   await page.evaluate(() => new Promise<void>(resolve => requestAnimationFrame(() => requestAnimationFrame(() => resolve()))));
   await page.getByTestId('nav-sale').click();
 
+  await page.getByLabel('Open calendar').click();
+  const calendar = page.getByTestId('invoice-calendar-modal');
+  await expect(calendar).toBeVisible();
+  await page.getByLabel(/^Choose \d{4}-\d{2}-15$/).click();
+  await expect(page.getByLabel('Invoice date')).toHaveValue(/\d{2}\/\d{2}\/\d{4}/);
+
   await page.getByLabel('Product code 1').fill('1');
   const rate = page.getByLabel('Sale rate 1');
   await expect(rate).toHaveValue('');
@@ -90,6 +96,13 @@ test('completes the sale workflow with keyboard navigation', async ({ page }) =>
 
   const date = page.getByLabel('Invoice date');
   await expect(date).toBeFocused();
+  const calendarButton = page.getByLabel('Open calendar');
+  await calendarButton.focus();
+  await page.keyboard.press('Enter');
+  await expect(page.getByTestId('invoice-calendar-modal')).toBeVisible();
+  await page.keyboard.press('Escape');
+  await expect(page.getByTestId('invoice-calendar-modal')).toBeHidden();
+  await date.focus();
   await date.press('Enter');
 
   const productCode = page.getByLabel('Product code 1');

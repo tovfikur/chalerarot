@@ -14,7 +14,7 @@ import { useApp, Product, Party } from '../store';
 import { color, useMoney, useNum, toBnDigits } from '../ui';
 import { parseNum } from '../bn';
 import { AppIcon, icons } from '../icons';
-import { SuccessModal } from '../screens';
+import { MonthCal, SuccessModal } from '../screens';
 import { BagUnit, kgPerUnit } from '../bags';
 
 export interface FormItemLine {
@@ -61,6 +61,16 @@ export const setSessionBillDate = (val: string): void => {
   } catch {}
 };
 
+const toCalendarDate = (value: string): string => {
+  const parts = value.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})$/);
+  return parts ? `${parts[3]}-${parts[2].padStart(2, '0')}-${parts[1].padStart(2, '0')}` : '';
+};
+
+const fromCalendarDate = (value: string): string => {
+  const parts = value.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+  return parts ? `${parts[3]}/${parts[2]}/${parts[1]}` : '';
+};
+
 export function TradeDashboardForm({ mode, onDone }: TradeDashboardFormProps) {
   const isSale = mode === 'sale';
   const { t, lang, products, vendors, customers, bal, purchase, sale, moneyAccounts, saveExpense } = useApp();
@@ -92,6 +102,7 @@ export function TradeDashboardForm({ mode, onDone }: TradeDashboardFormProps) {
   // Date persists in session or when locked by user
   const [isDateLocked, setIsDateLocked] = useState(false);
   const [billDate, setBillDateState] = useState('');
+  const [dateCalendarOpen, setDateCalendarOpen] = useState(false);
   const setBillDate = useCallback((val: string) => {
     setBillDateState(val);
     setSessionBillDate(val);
@@ -658,6 +669,11 @@ export function TradeDashboardForm({ mode, onDone }: TradeDashboardFormProps) {
           e.preventDefault();
           return;
         }
+        if (dateCalendarOpen) {
+          setDateCalendarOpen(false);
+          e.preventDefault();
+          return;
+        }
         if (partyDropdownOpen) {
           setPartyDropdownOpen(false);
           e.preventDefault();
@@ -706,7 +722,7 @@ export function TradeDashboardForm({ mode, onDone }: TradeDashboardFormProps) {
     window.addEventListener('keydown', handleGlobalKeyDown);
     return () => window.removeEventListener('keydown', handleGlobalKeyDown);
   }, [
-    showShortcutsHelp, reviewSplitOpen, partyDropdownOpen, activeItemDropdownIdx,
+    showShortcutsHelp, reviewSplitOpen, dateCalendarOpen, partyDropdownOpen, activeItemDropdownIdx,
     executeTransaction, handleOpenConfirm, handleSaveDraft, addNewRow
   ]);
 
@@ -1074,11 +1090,51 @@ export function TradeDashboardForm({ mode, onDone }: TradeDashboardFormProps) {
                   placeholderTextColor="#94A3B8"
                   returnKeyType="next"
                 />
-                <View style={styles.tactileInnerBtn}>
+                <TouchableOpacity
+                  onPress={() => !isDateLocked && setDateCalendarOpen(true)}
+                  disabled={isDateLocked}
+                  accessibilityRole="button"
+                  accessibilityLabel="Open calendar"
+                  testID="open-invoice-calendar"
+                  style={styles.tactileInnerBtn}
+                >
                   <AppIcon name={isDateLocked ? icons.lock : icons.calendar} size={18} iconColor={isDateLocked ? '#94A3B8' : '#1c70b9'} />
-                </View>
+                </TouchableOpacity>
               </View>
             </View>
+
+            <Modal
+              visible={dateCalendarOpen}
+              transparent
+              animationType="fade"
+              onRequestClose={() => setDateCalendarOpen(false)}
+            >
+              <View style={styles.modalOverlay}>
+                <View testID="invoice-calendar-modal" accessibilityRole="dialog" style={[styles.shortcutModalBox, { maxWidth: 400 }]}>
+                  <View style={styles.modalHeader3D}>
+                    <Text style={styles.modalTitle}>তারিখ নির্বাচন</Text>
+                    <TouchableOpacity
+                      onPress={() => setDateCalendarOpen(false)}
+                      accessibilityRole="button"
+                      accessibilityLabel="Close calendar"
+                      style={{ minWidth: 40, minHeight: 40, alignItems: 'center', justifyContent: 'center' }}
+                    >
+                      <AppIcon name={icons.cancel} size={22} iconColor="#fff" />
+                    </TouchableOpacity>
+                  </View>
+                  <View style={{ padding: 14 }}>
+                    <MonthCal
+                      selected={toCalendarDate(billDate) || toCalendarDate(getSessionBillDate())}
+                      onPick={date => {
+                        const formatted = fromCalendarDate(date);
+                        if (formatted) setBillDate(formatted);
+                        setDateCalendarOpen(false);
+                      }}
+                    />
+                  </View>
+                </View>
+              </View>
+            </Modal>
 
             {/* Decorative Flashy Skeuomorphic Widget */}
             <View style={styles.flashyInfoBanner}>
