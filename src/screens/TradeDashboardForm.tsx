@@ -1159,6 +1159,7 @@ export function TradeDashboardForm({ mode, onDone }: TradeDashboardFormProps) {
 
             <TouchableOpacity
               onPress={() => addNewRow(true)}
+              testID="add-product-row"
               style={styles.addProductBtnModern}
               activeOpacity={0.85}
               accessibilityLabel="পণ্য যোগ করুন (Alt+A)"
@@ -1259,7 +1260,7 @@ export function TradeDashboardForm({ mode, onDone }: TradeDashboardFormProps) {
 
                   {/* Product Dropdown (from Code) */}
                   {activeItemDropdownIdx === rowIdx && (
-                    <View style={styles.dropdownMenu3D}>
+                    <View testID={`product-dropdown-${rowIdx + 1}`} style={[styles.dropdownMenu3D, styles.productDropdownMenu]}>
                       <ScrollView style={{ maxHeight: 200 }} keyboardShouldPersistTaps="handled">
                         {getVisibleProducts(row.code).length ? getVisibleProducts(row.code).map((p, visibleIdx) => {
                           const pIdx = products.findIndex(product => product.id === p.id);
@@ -2231,6 +2232,11 @@ const styles = StyleSheet.create({
       boxShadow: '0 12px 30px rgba(28, 112, 185, 0.18), inset 0 1px 0 #FFFFFF',
     } as any : {}),
   },
+  productDropdownMenu: {
+    top: 44,
+    width: 440,
+    maxWidth: Platform.OS === 'web' ? 'min(560px, calc(100vw - 32px))' as any : 440,
+  },
   dropdownItem: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -2356,48 +2362,6 @@ const styles = StyleSheet.create({
   shortcutKeyText: {
     color: '#BAE6FD',
     fontSize: 11,
-    fontWeight: '800',
-    fontFamily: Platform.OS === 'web' ? 'monospace' : undefined,
-  },
-  tableBottomAddBtn: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    gap: 8,
-    marginTop: 10,
-    paddingVertical: 10,
-    paddingHorizontal: 14,
-    borderRadius: 8,
-    borderWidth: 1.5,
-    borderColor: '#93C5FD',
-    borderStyle: 'dashed',
-    backgroundColor: '#EFF6FF',
-    ...(Platform.OS === 'web' ? {
-      cursor: 'pointer',
-    } as any : {}),
-  },
-  tableBottomAddCircle: {
-    width: 20,
-    height: 20,
-    borderRadius: 10,
-    backgroundColor: '#DBEAFE',
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  tableBottomAddText: {
-    color: '#0F3B63',
-    fontSize: 13,
-    fontWeight: '700',
-  },
-  tableBottomShortcutBadge: {
-    backgroundColor: '#DBEAFE',
-    paddingHorizontal: 6,
-    paddingVertical: 2,
-    borderRadius: 4,
-  },
-  tableBottomShortcutText: {
-    color: '#1E40AF',
-    fontSize: 10.5,
     fontWeight: '800',
     fontFamily: Platform.OS === 'web' ? 'monospace' : undefined,
   },

@@ -35,6 +35,9 @@ test('creates a sale invoice with explicit rates and selected party', async ({ p
   await expect(page.getByLabel('Invoice date')).toHaveValue(/\d{2}\/\d{2}\/\d{4}/);
 
   await page.getByLabel('Product code 1').fill('1');
+  await expect(page.getByTestId('add-product-row')).toHaveCount(1);
+  const productDropdown = await page.getByTestId('product-dropdown-1').boundingBox();
+  expect(productDropdown?.width ?? 0).toBeGreaterThan(320);
   const rate = page.getByLabel('Sale rate 1');
   await expect(rate).toHaveValue('');
   await page.getByLabel('Quantity 1').fill('2');
