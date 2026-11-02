@@ -27,7 +27,7 @@ services:
       DATABASE_URL: postgresql://${POSTGRES_USER:-chalarot}:${POSTGRES_PASSWORD:-chalarot}@db:5432/${POSTGRES_DB:-chalarot}
       API_PORT: 4000
     ports:
-      - "4000:4000"
+      - "${API_PORT:-4000}:4000"
     depends_on:
       db:
         condition: service_healthy
