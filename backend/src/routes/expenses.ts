@@ -52,7 +52,7 @@ function validate(body: Record<string, unknown>, opts?: { allowPastDate?: boolea
   // An expense always spends real money, so an account is mandatory. Older
   // clients may still send a payment method; it is resolved to that account.
   if (!body.accountId && !body.method) return { error: 'Payment account is required' };
-  return { clean: { category, customName: category === 'other' ? customName : null, amount, date, note: note || null } };
+  return { clean: { category, customName: customName || null, amount, date, note: note || null } };
 }
 
 export const expenses = Router();

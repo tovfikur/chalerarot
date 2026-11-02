@@ -332,9 +332,17 @@ export function TradeDashboardForm({ mode, onDone }: TradeDashboardFormProps) {
     }, 0);
   }, [items, products]);
 
+  const totalOtherCost = useMemo(() => {
+    return items.reduce((sum, item) => {
+      const q = Math.abs(parseNum(item.qty));
+      const oc = parseNum(item.otherCost);
+      return sum + (q * oc);
+    }, 0);
+  }, [items]);
+
   const estimatedProfit = useMemo(() => {
-    return isSale ? (totalProductValue - totalEstimatedCost) : 0;
-  }, [isSale, totalProductValue, totalEstimatedCost]);
+    return isSale ? (totalProductValue - totalEstimatedCost - totalOtherCost) : 0;
+  }, [isSale, totalProductValue, totalEstimatedCost, totalOtherCost]);
 
   const numTransport = parseNum(transportCost);
   const numLanding = parseNum(landingCost);
@@ -517,9 +525,7 @@ export function TradeDashboardForm({ mode, onDone }: TradeDashboardFormProps) {
         seq.push(`purchaseRate_${idx}`);
       }
       seq.push(`rate_${idx}`);
-      if (!isSale) {
-        seq.push(`otherCost_${idx}`);
-      }
+      seq.push(`otherCost_${idx}`);
     });
 
     return seq;
@@ -532,8 +538,8 @@ export function TradeDashboardForm({ mode, onDone }: TradeDashboardFormProps) {
       const nextKey = seq[currentIdx + 1];
       inputRefs.current[nextKey]?.focus();
       setFocusedField(nextKey);
-    } else if (isSale ? currentKey.startsWith('rate_') : currentKey.startsWith('otherCost_')) {
-      // If pressing Enter on the last rate/otherCost field, automatically add a new product row and focus it!
+    } else if (currentKey.startsWith('otherCost_') || (isSale && currentKey.startsWith('rate_'))) {
+      // If pressing Enter on the last otherCost (or rate) field, automatically add a new product row and focus it!
       addNewRow(true);
     }
   }, [getNavSequence, addNewRow, isSale]);
@@ -814,7 +820,7 @@ export function TradeDashboardForm({ mode, onDone }: TradeDashboardFormProps) {
         const ratePerKg = per > 0 ? (effectiveRate / per) : effectiveRate;
         // Purchase cost per KG for backend (if admin modified purchase price)
         const unitCostPerKg = effectivePurchaseRate > 0 ? (effectivePurchaseRate / per) : (prod?.cost || 0);
-        const otherCostPerBag = !isSale ? parseNum(l.otherCost) : 0;
+        const otherCostPerBag = parseNum(l.otherCost);
 
         return {
           productId: pId,
@@ -822,8 +828,8 @@ export function TradeDashboardForm({ mode, onDone }: TradeDashboardFormProps) {
           enteredQty: enteredQty,
           rate: Math.round(ratePerKg * 100) / 100,
           unitCost: isSale ? Math.round(unitCostPerKg * 100) / 100 : undefined,
-          otherCost: !isSale ? otherCostPerBag : undefined,
-          otherCostPerBag: !isSale ? otherCostPerBag : undefined,
+          otherCost: otherCostPerBag > 0 ? otherCostPerBag : undefined,
+          otherCostPerBag: otherCostPerBag > 0 ? otherCostPerBag : undefined,
         };
       });
 
@@ -851,15 +857,63 @@ export function TradeDashboardForm({ mode, onDone }: TradeDashboardFormProps) {
       }
 
       const todayISO = isoDate || today();
-      if (numTransport > 0 && chosenAccountId) {
-        saveExpense({
-          category: 'transport',
-          customName: 'পরিবহন খরচ',
-          amount: numTransport,
-          accountId: chosenAccountId,
-          date: todayISO,
-          note: `${isSale ? 'বিক্রয়' : 'ক্রয়'} #${memoNo} পরিবহন খরচ`,
-        }).catch(() => {});
+      const invoiceRef = res?.invoiceNo || memoNo.trim() || 'Invoice';
+      const expAccountId = chosenAccountId || cashAcc?.id || moneyAccounts.find(a => a.type === 'cash')?.id || moneyAccounts[0]?.id;
+
+      if (numTransport > 0 && expAccountId) {
+        try {
+          await saveExpense({
+            category: 'transport',
+            customName: 'পরিবহন খরচ',
+            amount: numTransport,
+            accountId: expAccountId,
+            date: todayISO,
+            note: `[ধরন: পরিবহন] ${isSale ? 'বিক্রয়' : 'ক্রয়'} #${invoiceRef} পরিবহন খরচ`,
+          });
+        } catch (e) {
+          console.error('Failed to save transport expense:', e);
+        }
+      }
+
+      if (numLanding > 0 && expAccountId) {
+        try {
+          await saveExpense({
+            category: 'loading',
+            customName: 'লেবার/লোডিং খরচ',
+            amount: numLanding,
+            accountId: expAccountId,
+            date: todayISO,
+            note: `[ধরন: ল্যান্ডিং] ${isSale ? 'বিক্রয়' : 'ক্রয়'} #${invoiceRef} লেবার/লোডিং খরচ`,
+          });
+        } catch (e) {
+          console.error('Failed to save landing expense:', e);
+        }
+      }
+
+      const totalLinesOtherCost = validLines.reduce((sum, l) => {
+        const q = Math.abs(parseNum(l.qty));
+        const oc = parseNum(l.otherCost);
+        return sum + (q * oc);
+      }, 0);
+
+      if (totalLinesOtherCost > 0 && expAccountId) {
+        const lineDetails = validLines
+          .filter(l => parseNum(l.otherCost) > 0)
+          .map(l => `${l.name || 'পণ্য'}: ${Math.abs(parseNum(l.qty))} বস্তা x ৳${parseNum(l.otherCost)}`)
+          .join(', ');
+
+        try {
+          await saveExpense({
+            category: 'loading',
+            customName: isSale ? 'বিক্রয় খরচ (প্রতি বস্তা)' : 'ক্রয় খরচ (প্রতি বস্তা)',
+            amount: totalLinesOtherCost,
+            accountId: expAccountId,
+            date: todayISO,
+            note: `[ধরন: ল্যান্ডিং] ${isSale ? 'বিক্রয়' : 'ক্রয়'} #${invoiceRef} বস্তা প্রতি খরচ (${lineDetails})`,
+          });
+        } catch (e) {
+          console.error('Failed to save per-bag other expense:', e);
+        }
       }
 
       if (Platform.OS === 'web' && typeof localStorage !== 'undefined') {
@@ -906,7 +960,7 @@ export function TradeDashboardForm({ mode, onDone }: TradeDashboardFormProps) {
     }
   }, [
     submitting, items, selectedPartyId, isSale, products, moneyAccounts, numBank, billDate,
-    lang, sale, numDiscount, totalPaid, memoNo, purchase, numTransport, saveExpense, mode,
+    lang, sale, numDiscount, totalPaid, memoNo, purchase, numTransport, numLanding, saveExpense, mode,
     printDoc, resetForm, sales, purchases, focusCustomerInput
   ]);
 
@@ -1578,14 +1632,12 @@ export function TradeDashboardForm({ mode, onDone }: TradeDashboardFormProps) {
             <Text style={[styles.th, { width: 120, textAlign: 'center' }]}>পরিমাণ (বস্তা)</Text>
             <Text style={[styles.th, { width: 110, textAlign: 'center' }]}>মোট কেজি</Text>
             {isSale && (
-              <Text style={[styles.th, { width: 120, textAlign: 'center' }]}>গড় ক্রয়দর (৳)</Text>
+              <Text style={[styles.th, { width: 110, textAlign: 'center' }]}>গড় ক্রয়দর (৳)</Text>
             )}
-            <Text style={[styles.th, { width: 120, textAlign: 'center' }]}>
+            <Text style={[styles.th, { width: 110, textAlign: 'center' }]}>
               {isSale ? 'বিক্রয় দর (৳)' : 'ক্রয় দর (৳)'}
             </Text>
-            {!isSale && (
-              <Text style={[styles.th, { width: 130, textAlign: 'center' }]}>অন্যান্য খরচ/বস্তা (৳)</Text>
-            )}
+            <Text style={[styles.th, { width: 125, textAlign: 'center' }]}>অন্যান্য খরচ/বস্তা (৳)</Text>
             <Text style={[styles.th, { width: 125, textAlign: 'center' }]}>মোট (৳)</Text>
             <Text style={[styles.th, { width: 48, textAlign: 'center' }]}>অ্যাকশন</Text>
           </View>
@@ -1862,32 +1914,16 @@ export function TradeDashboardForm({ mode, onDone }: TradeDashboardFormProps) {
                       onKeyDown: (e: any) => {
                         if (e.key === 'Tab' && !e.shiftKey) {
                           e.preventDefault?.();
-                          if (!isSale) {
-                            inputRefs.current[`otherCost_${rowIdx}`]?.focus();
-                            setFocusedField(`otherCost_${rowIdx}`);
-                          } else if (rowIdx < items.length - 1) {
-                            inputRefs.current[`code_${rowIdx + 1}`]?.focus();
-                            setFocusedField(`code_${rowIdx + 1}`);
-                          } else {
-                            confirmBtnRef.current?.focus();
-                            setFocusedField('completeButton');
-                          }
+                          inputRefs.current[`otherCost_${rowIdx}`]?.focus();
+                          setFocusedField(`otherCost_${rowIdx}`);
                         }
                       }
                     } as any : {})}
                     onKeyPress={(e: any) => {
                       if (e.nativeEvent?.key === 'Tab' && !e.nativeEvent?.shiftKey) {
                         e.preventDefault?.();
-                        if (!isSale) {
-                          inputRefs.current[`otherCost_${rowIdx}`]?.focus();
-                          setFocusedField(`otherCost_${rowIdx}`);
-                        } else if (rowIdx < items.length - 1) {
-                          inputRefs.current[`code_${rowIdx + 1}`]?.focus();
-                          setFocusedField(`code_${rowIdx + 1}`);
-                        } else {
-                          confirmBtnRef.current?.focus();
-                          setFocusedField('completeButton');
-                        }
+                        inputRefs.current[`otherCost_${rowIdx}`]?.focus();
+                        setFocusedField(`otherCost_${rowIdx}`);
                       }
                     }}
                     selectTextOnFocus={true}
@@ -1907,38 +1943,24 @@ export function TradeDashboardForm({ mode, onDone }: TradeDashboardFormProps) {
                   />
                 </View>
 
-                {/* Other Cost per Bag (Purchase Mode only) */}
-                {!isSale && (
-                  <View style={[styles.td, { width: 130, alignItems: 'center' }]}>
-                    <TextInput
-                      ref={el => (inputRefs.current[`otherCost_${rowIdx}`] = el)}
-                      accessibilityLabel={`Other cost per bag ${rowIdx + 1}`}
-                      value={row.otherCost ?? ''}
-                      onChangeText={txt => {
-                        setItems(prev => {
-                          const copy = [...prev];
-                          copy[rowIdx] = { ...copy[rowIdx], otherCost: txt };
-                          return copy;
-                        });
-                      }}
-                      onFocus={() => setFocusedField(`otherCost_${rowIdx}`)}
-                      onSubmitEditing={() => focusNextField(`otherCost_${rowIdx}`)}
-                      {...(Platform.OS === 'web' ? {
-                        onKeyDown: (e: any) => {
-                          if (e.key === 'Tab' && !e.shiftKey) {
-                            e.preventDefault?.();
-                            if (rowIdx < items.length - 1) {
-                              inputRefs.current[`code_${rowIdx + 1}`]?.focus();
-                              setFocusedField(`code_${rowIdx + 1}`);
-                            } else {
-                              confirmBtnRef.current?.focus();
-                              setFocusedField('completeButton');
-                            }
-                          }
-                        }
-                      } as any : {})}
-                      onKeyPress={(e: any) => {
-                        if (e.nativeEvent?.key === 'Tab' && !e.nativeEvent?.shiftKey) {
+                {/* Other Cost per Bag */}
+                <View style={[styles.td, { width: 125, alignItems: 'center' }]}>
+                  <TextInput
+                    ref={el => (inputRefs.current[`otherCost_${rowIdx}`] = el)}
+                    accessibilityLabel={`Other cost per bag ${rowIdx + 1}`}
+                    value={row.otherCost ?? ''}
+                    onChangeText={txt => {
+                      setItems(prev => {
+                        const copy = [...prev];
+                        copy[rowIdx] = { ...copy[rowIdx], otherCost: txt };
+                        return copy;
+                      });
+                    }}
+                    onFocus={() => setFocusedField(`otherCost_${rowIdx}`)}
+                    onSubmitEditing={() => focusNextField(`otherCost_${rowIdx}`)}
+                    {...(Platform.OS === 'web' ? {
+                      onKeyDown: (e: any) => {
+                        if (e.key === 'Tab' && !e.shiftKey) {
                           e.preventDefault?.();
                           if (rowIdx < items.length - 1) {
                             inputRefs.current[`code_${rowIdx + 1}`]?.focus();
@@ -1948,25 +1970,39 @@ export function TradeDashboardForm({ mode, onDone }: TradeDashboardFormProps) {
                             setFocusedField('completeButton');
                           }
                         }
-                      }}
-                      selectTextOnFocus={true}
-                      style={[
-                        styles.tableTextInput,
-                        { height: 40, width: '100%', textAlign: 'center', borderColor: '#CBD5E1', backgroundColor: '#FFFFFF' },
-                        isInputFocused(`otherCost_${rowIdx}`) && styles.inputFocusedGlow,
-                      ]}
-                      placeholder="০"
-                      placeholderTextColor="#94A3B8"
-                      keyboardType="numeric"
-                      returnKeyType="next"
-                    />
-                    {parseNum(row.otherCost) > 0 && (
-                      <Text style={{ fontSize: 10, color: '#047857', fontWeight: '700', marginTop: 2 }}>
-                        আমার দর: {m(effectiveRate + parseNum(row.otherCost))}
-                      </Text>
-                    )}
-                  </View>
-                )}
+                      }
+                    } as any : {})}
+                    onKeyPress={(e: any) => {
+                      if (e.nativeEvent?.key === 'Tab' && !e.nativeEvent?.shiftKey) {
+                        e.preventDefault?.();
+                        if (rowIdx < items.length - 1) {
+                          inputRefs.current[`code_${rowIdx + 1}`]?.focus();
+                          setFocusedField(`code_${rowIdx + 1}`);
+                        } else {
+                          confirmBtnRef.current?.focus();
+                          setFocusedField('completeButton');
+                        }
+                      }
+                    }}
+                    selectTextOnFocus={true}
+                    style={[
+                      styles.tableTextInput,
+                      { height: 40, width: '100%', textAlign: 'center', borderColor: '#CBD5E1', backgroundColor: '#FFFFFF' },
+                      isInputFocused(`otherCost_${rowIdx}`) && styles.inputFocusedGlow,
+                    ]}
+                    placeholder="০"
+                    placeholderTextColor="#94A3B8"
+                    keyboardType="numeric"
+                    returnKeyType="next"
+                  />
+                  {parseNum(row.otherCost) > 0 && (
+                    <Text style={{ fontSize: 10, color: isSale ? '#B45309' : '#047857', fontWeight: '700', marginTop: 2 }}>
+                      {isSale
+                        ? `খরচ: ${m(Math.abs(rowQty) * parseNum(row.otherCost))}`
+                        : `আমার দর: ${m(effectiveRate + parseNum(row.otherCost))}`}
+                    </Text>
+                  )}
+                </View>
 
                 {/* Total Box */}
                 <View style={[styles.td, { width: 125, alignItems: 'center' }]}>
@@ -2184,6 +2220,11 @@ export function TradeDashboardForm({ mode, onDone }: TradeDashboardFormProps) {
                           <Text style={{ fontSize: 13, color: '#475569' }}>
                             দর: <Text style={{ fontWeight: '700' }}>৳{toBnDigits(String(r))}</Text>
                           </Text>
+                          {parseNum(it.otherCost) > 0 ? (
+                            <Text style={{ fontSize: 13, color: isSale ? '#B45309' : '#047857' }}>
+                              অন্যান্য খরচ: <Text style={{ fontWeight: '700' }}>৳{toBnDigits(String(parseNum(it.otherCost)))}/বস্তা</Text> (মোট: ৳{toBnDigits(String(Math.abs(q) * parseNum(it.otherCost)))})
+                            </Text>
+                          ) : null}
                           {isSale && pr > 0 ? (
                             <Text style={{ fontSize: 13, color: '#B45309' }}>
                               ক্রয় খরচ: <Text style={{ fontWeight: '700' }}>৳{toBnDigits(String(pr))}</Text>
@@ -2200,6 +2241,17 @@ export function TradeDashboardForm({ mode, onDone }: TradeDashboardFormProps) {
                       {totalProductValue < 0 ? '-' : ''}৳{toBnDigits(String(Math.abs(Math.round(totalProductValue))))}
                     </Text>
                   </View>
+
+                  {totalOtherCost > 0 ? (
+                    <View style={{ marginTop: 4, flexDirection: 'row', justifyContent: 'space-between', backgroundColor: '#FEF3C7', paddingHorizontal: 8, paddingVertical: 4, borderRadius: 6 }}>
+                      <Text style={{ fontSize: 13, color: '#92400E', fontWeight: '700' }}>
+                        মোট বস্তা প্রতি খরচ (খরচ খাতায় যাবে):
+                      </Text>
+                      <Text style={{ fontSize: 14, fontWeight: '800', color: '#92400E' }}>
+                        ৳{toBnDigits(String(Math.round(totalOtherCost)))}
+                      </Text>
+                    </View>
+                  ) : null}
 
                   {isSale ? (
                     <View style={{ marginTop: 4, flexDirection: 'row', justifyContent: 'space-between' }}>
@@ -2360,8 +2412,8 @@ export function TradeDashboardForm({ mode, onDone }: TradeDashboardFormProps) {
                         value={transportCost}
                         onChangeText={setTransportCost}
                         keyboardType="numeric"
-                        onSubmitEditing={() => executeTransaction()}
-                        returnKeyType="done"
+                        onSubmitEditing={() => inputRefs.current['modal_landingCost']?.focus()}
+                        returnKeyType="next"
                         style={{ borderWidth: 1, borderColor: '#CBD5E1', borderRadius: 6, paddingHorizontal: 8, height: 36, fontSize: 14, backgroundColor: '#FFFFFF', fontWeight: '700' }}
                         placeholder="০"
                       />
@@ -2371,6 +2423,38 @@ export function TradeDashboardForm({ mode, onDone }: TradeDashboardFormProps) {
                         </Text>
                       )}
                     </View>
+
+                    {/* Optional Landing / Labor Cost */}
+                    <View style={{ marginBottom: 8, padding: 8, backgroundColor: '#F8FAFC', borderRadius: 8, borderWidth: 1, borderColor: '#E2E8F0' }}>
+                      <Text style={{ fontSize: 12, fontWeight: '700', color: '#64748B', marginBottom: 4 }}>লেবার / খালাস খরচ (ঐচ্ছিক)</Text>
+                      <TextInput
+                        ref={el => (inputRefs.current['modal_landingCost'] = el)}
+                        accessibilityLabel="Landing labor cost"
+                        value={landingCost}
+                        onChangeText={setLandingCost}
+                        keyboardType="numeric"
+                        onSubmitEditing={() => executeTransaction()}
+                        returnKeyType="done"
+                        style={{ borderWidth: 1, borderColor: '#CBD5E1', borderRadius: 6, paddingHorizontal: 8, height: 36, fontSize: 14, backgroundColor: '#FFFFFF', fontWeight: '700' }}
+                        placeholder="০"
+                      />
+                      {numLanding > 0 && (
+                        <Text style={{ fontSize: 11, color: '#B45309', marginTop: 3, fontWeight: '600' }}>
+                          খরচ খাতায় যুক্ত হবে: ৳{toBnDigits(String(numLanding))}
+                        </Text>
+                      )}
+                    </View>
+
+                    {totalOtherCost > 0 && (
+                      <View style={{ marginBottom: 8, padding: 8, backgroundColor: '#FEF3C7', borderRadius: 8, borderWidth: 1, borderColor: '#FDE68A' }}>
+                        <Text style={{ fontSize: 12, fontWeight: '700', color: '#92400E', marginBottom: 2 }}>
+                          {isSale ? 'বিক্রয় খরচ (প্রতি বস্তা)' : 'ক্রয় খরচ (প্রতি বস্তা)'}
+                        </Text>
+                        <Text style={{ fontSize: 13, fontWeight: '800', color: '#B45309' }}>
+                          মোট খরচ: ৳{toBnDigits(String(Math.round(totalOtherCost)))} (খরচ খাতায় স্বয়ংক্রিয় যুক্ত হবে)
+                        </Text>
+                      </View>
+                    )}
 
                     {/* 5. TOTAL INVOICE DUE */}
                     <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingVertical: 5 }}>

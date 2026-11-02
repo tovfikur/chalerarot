@@ -8,10 +8,10 @@ test.describe('Purchase other cost per bag feature', () => {
     // 1. Verify header has "অন্যান্য খরচ/বস্তা (৳)"
     await expect(page.getByText('অন্যান্য খরচ/বস্তা (৳)')).toBeVisible();
 
-    // 2. In sale mode it should NOT be visible
+    // 2. In sale mode it should ALSO be visible now
     await page.goto('http://localhost:3001/#/sale');
     await page.waitForLoadState('networkidle');
-    await expect(page.getByText('অন্যান্য খরচ/বস্তা (৳)')).not.toBeVisible();
+    await expect(page.getByText('অন্যান্য খরচ/বস্তা (৳)')).toBeVisible();
 
     // 3. Return to purchase mode
     await page.goto('http://localhost:3001/#/purchase');
