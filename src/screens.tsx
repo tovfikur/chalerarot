@@ -16,7 +16,8 @@ import { StockDashboard } from './screens/StockDashboard';
 import { ExpenseDashboard } from './screens/ExpenseDashboard';
 import { HomeDashboard } from './screens/HomeDashboard';
 import { AccountsDashboard } from './screens/AccountsDashboard';
-export { TradeDashboardForm, StockDashboard, ExpenseDashboard, HomeDashboard, AccountsDashboard };
+import { BulkUploadModal } from './BulkUploadModal';
+export { TradeDashboardForm, StockDashboard, ExpenseDashboard, HomeDashboard, AccountsDashboard, BulkUploadModal };
 
 export type Nav = (r: string) => void;
 const num = (v: string) => parseNum(v);
@@ -903,9 +904,10 @@ function NewPurchase({ onDone }: { onDone: () => void }) {
 }
 
 export function Products() {
-  const { t, products, saveProduct, deleteProduct } = useApp(); const m = useMoney(); const n = useNum();
+  const { t, lang, products, saveProduct, deleteProduct } = useApp(); const m = useMoney(); const n = useNum();
   const { kg } = useUnitLabel();
   const [f, setF] = useState<Product | null>(null);
+  const [bulkOpen, setBulkOpen] = useState(false);
   const [v, setV] = useState({ code: '', name: '', description: '', cost: '', price: '', opening: '', sb: '25', mb: '40', lb: '50' });
   const [pq, setPq] = useState('');
   const listed = products.filter(p => matchProduct(p, pq));
@@ -959,7 +961,37 @@ export function Products() {
     </FormGrid>
     <Btn icon={icons.save} label={t('save')} testID="save-product" onPress={save} /><Btn kind="ghost" icon={icons.cancel} label={t('cancel')} onPress={() => setF(null)} /></Card></Screen>;
   return <Screen>
-    <ListPageHeader title={t('products')} addLabel={t('add')} onAdd={() => open()} />
+    <ListPageHeader
+      title={t('products')}
+      addLabel={t('add')}
+      onAdd={() => open()}
+      extraActions={
+        <TouchableOpacity
+          onPress={() => setBulkOpen(true)}
+          testID="bulk-product-upload"
+          style={{
+            flexDirection: 'row',
+            alignItems: 'center',
+            gap: 6,
+            backgroundColor: '#15803D',
+            paddingHorizontal: 12,
+            paddingVertical: 9,
+            borderRadius: 10,
+            borderTopWidth: 1,
+            borderTopColor: 'rgba(255, 255, 255, 0.45)',
+            borderBottomWidth: 2,
+            borderBottomColor: 'rgba(0, 0, 0, 0.25)',
+            ...(Platform.OS === 'web' ? ({ cursor: 'pointer' } as any) : {}),
+          }}
+          activeOpacity={0.85}
+        >
+          <AppIcon name={icons.upload} size={18} iconColor="#FFFFFF" />
+          <Text style={{ color: '#FFFFFF', fontSize: 13, fontWeight: '700' }}>
+            {lang === 'bn' ? 'বাল্ক পণ্য আপলোড' : 'Bulk Products'}
+          </Text>
+        </TouchableOpacity>
+      }
+    />
     <SearchDropdown
       items={products}
       query={pq}
@@ -998,6 +1030,7 @@ export function Products() {
         </Card>
       </DetailShell>
     ) : null}
+    {bulkOpen ? <BulkUploadModal kind="product" onClose={() => setBulkOpen(false)} /> : null}
   </Screen>;
 }
 
@@ -1009,6 +1042,7 @@ export function Parties({ kind, focus, onFocusDone, onReturn }: { kind: 'c' | 'v
   const { isDesktop } = useBreakpoint();
   const txs = isC ? cTx : vTx;
   const list = isC ? customers : vendors; const [sel, setSel] = useState<Party | null>(null); const [f, setF] = useState<Party | null>(null);
+  const [bulkOpen, setBulkOpen] = useState(false);
   const subOpen = sel !== null || f !== null; // a form/detail is showing instead of the list
   const subOpenRef = useRef(subOpen); subOpenRef.current = subOpen;
   const [inv, setInv] = useState<{ kind: 'sale' | 'purchase'; id: string } | null>(null);
@@ -1222,7 +1256,7 @@ export function Parties({ kind, focus, onFocusDone, onReturn }: { kind: 'c' | 'v
       <Text style={{ fontSize: balFs, fontWeight: '700', color: b.balance > 0 ? '#C62828' : '#1B7F4B' }}>{m(b.balance)}</Text><Muted>{isC ? t('currentDue') : t('currentPayable')}</Muted>
       <Row left={isC ? t('totalSales') : t('totalPurchase')} right={m(b.total)} /><Row left={t('totalPaid')} right={m(b.paid)} /><Row left={t('nextDate')} right={fd(sel.next)} />
       <Btn icon={isC ? icons.collect : icons.pay} label={t(isC ? 'receivePayment' : 'payPayment')} onPress={() => setPayOpen(true)} />
-      <View style={{ flexDirection: 'row', gap: 10 }}><View style={{ flex: 1 }}><Btn kind="ghost" icon={icons.edit} label={t('edit')} onPress={() => open(sel)} /></View><View style={{ flex: 1 }}><Btn kind="danger" icon={icons.del} label={t('del')} onPress={() => setConfirmDel(true)} /></View></View></Card>
+      <View style={{ flexDirection: 'row', gap: 10 }}><View style={{ flex: 1 }}><Btn kind="ghost" icon={icons.edit} label={t('edit')} testID="edit-party" onPress={() => open(sel)} /></View><View style={{ flex: 1 }}><Btn kind="danger" icon={icons.del} label={t('del')} onPress={() => setConfirmDel(true)} /></View></View></Card>
       <Card><SectionHead icon={icons.history}>{t('history')}</SectionHead><Row left={t('prevDue')} right={m(sel.opening)} />{txs.map(x => {
         const row = <Row key={x.id} left={x.kind === 'payment' ? lbl(x.kind) : (x.ref ?? lbl(x.kind))} sub={fd(x.date)} right={m(x.amount)} neg={x.kind !== 'payment'} />;
         const payRow = x.kind === 'payment' && (x.account || x.note)
@@ -1277,6 +1311,32 @@ export function Parties({ kind, focus, onFocusDone, onReturn }: { kind: 'c' | 'v
       badge={lang === 'bn' ? 'সক্রিয়' : 'Active'}
       addLabel={isC ? (lang === 'bn' ? 'নতুন কাস্টমার' : 'New Customer') : (lang === 'bn' ? 'নতুন মহাজন' : 'New Vendor')}
       onAdd={() => open()}
+      extraActions={
+        <TouchableOpacity
+          onPress={() => setBulkOpen(true)}
+          testID={isC ? 'bulk-customer-upload' : 'bulk-vendor-upload'}
+          style={{
+            flexDirection: 'row',
+            alignItems: 'center',
+            gap: 6,
+            backgroundColor: '#15803D',
+            paddingHorizontal: 12,
+            paddingVertical: 9,
+            borderRadius: 10,
+            borderTopWidth: 1,
+            borderTopColor: 'rgba(255, 255, 255, 0.45)',
+            borderBottomWidth: 2,
+            borderBottomColor: 'rgba(0, 0, 0, 0.25)',
+            ...(Platform.OS === 'web' ? ({ cursor: 'pointer' } as any) : {}),
+          }}
+          activeOpacity={0.85}
+        >
+          <AppIcon name={icons.upload} size={18} iconColor="#FFFFFF" />
+          <Text style={{ color: '#FFFFFF', fontSize: 13, fontWeight: '700' }}>
+            {isC ? (lang === 'bn' ? 'বাল্ক কাস্টমার' : 'Bulk Customers') : (lang === 'bn' ? 'বাল্ক সরবরাহকারী' : 'Bulk Vendors')}
+          </Text>
+        </TouchableOpacity>
+      }
     />
     {/* Top Summary Cards */}
     {(() => {
@@ -1360,7 +1420,9 @@ export function Parties({ kind, focus, onFocusDone, onReturn }: { kind: 'c' | 'v
           );
         }) : <Card>{pq.trim() ? <NoResult /> : <Empty />}</Card>}
       </RGrid>
-    )}</Screen>;
+    )}
+    {bulkOpen ? <BulkUploadModal kind={isC ? 'customer' : 'vendor'} onClose={() => setBulkOpen(false)} /> : null}
+  </Screen>;
 }
 
 // Shared Collection / Vendor Payment screen

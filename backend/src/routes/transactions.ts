@@ -43,12 +43,23 @@ export const tx = Router();
 // canonical settlement, never the stored columns.
 tx.get('/sales', async (_req: Request, res: Response) => {
   const [list, settled] = await Promise.all([
-    db.sale.findMany({ orderBy: [{ date: 'desc' }, { createdAt: 'desc' }], include: { items: true } }),
+    db.sale.findMany({
+      orderBy: [{ date: 'desc' }, { createdAt: 'desc' }],
+      include: { items: true, returns: { select: { totalAmount: true } } },
+    }),
     settleAll('sale'),
   ]);
   res.json(list.map(s => {
     const st = settled.get(s.id);
-    return st ? { ...s, paid: st.paid, due: st.due, status: st.status } : s;
+    const retTotal = s.returns ? s.returns.reduce((acc, r) => acc + r.totalAmount, 0) : 0;
+    const netTotal = Math.max(0, round2(s.total - retTotal));
+    return {
+      ...s,
+      total: retTotal > 0 ? netTotal : s.total,
+      paid: st ? st.paid : s.paid,
+      due: st ? st.due : s.due,
+      status: st?.status,
+    };
   }));
 });
 
@@ -59,18 +70,53 @@ tx.get('/sales/:id', async (req: Request, res: Response) => {
     include: {
       items: { include: { product: { select: { name: true } } } },
       customer: { select: { name: true, mobile: true } },
-      returns: { select: { id: true, returnNo: true, date: true, totalAmount: true } },
+      returns: {
+        include: {
+          items: { include: { product: { select: { name: true } } } },
+        },
+      },
     },
   });
   if (!s) return res.status(404).json({ error: 'Sale not found' });
   const st = s.customerId ? (await settleParty('sale', s.customerId)).get(s.id) : undefined;
+  const returnTotal = s.returns.reduce((sum, r) => sum + r.totalAmount, 0);
+  const netTotal = Math.max(0, round2(s.total - returnTotal));
+
+  const regularItems = s.items.map(it => ({
+    productName: it.product.name,
+    unit: it.unit,
+    enteredQty: it.enteredQty,
+    qtyKg: it.qtyKg,
+    rate: it.rate,
+    unitCost: it.unitCost,
+    cogs: it.cogs,
+  }));
+
+  const retItems = s.returns.flatMap(r =>
+    r.items.map(it => ({
+      productName: `${it.product.name} (বিক্রয় ফেরত)`,
+      unit: it.unit,
+      enteredQty: -it.enteredQty,
+      qtyKg: -it.qtyKg,
+      rate: it.rate,
+      unitCost: it.unitCost,
+      cogs: -it.cogs,
+    }))
+  );
+
+  const displayPaid = Math.min(netTotal, Math.max(0, round2((st?.paid ?? s.paid) - returnTotal)));
+  const displayDue = Math.max(0, round2(netTotal - displayPaid));
+
   res.json({
     id: s.id, invoiceNo: s.invoiceNo, date: s.date, createdAt: s.createdAt,
-    discount: s.discount, total: s.total,
-    paid: st?.paid ?? s.paid, due: st?.due ?? s.due, status: st?.status,
+    discount: s.discount,
+    total: returnTotal > 0 ? netTotal : s.total,
+    paid: returnTotal > 0 ? displayPaid : (st?.paid ?? s.paid),
+    due: returnTotal > 0 ? displayDue : (st?.due ?? s.due),
+    status: st?.status,
     nextDate: s.nextDate ?? undefined,
     customer: s.customer ? { name: s.customer.name, mobile: s.customer.mobile } : null,
-    items: s.items.map(it => ({ productName: it.product.name, unit: it.unit, enteredQty: it.enteredQty, qtyKg: it.qtyKg, rate: it.rate, unitCost: it.unitCost, cogs: it.cogs })),
+    items: [...regularItems, ...retItems],
     returns: s.returns.map(r => ({ id: r.id, returnNo: r.returnNo, date: r.date, amount: r.totalAmount })),
     payment: await paymentOf('sale', s.id),
   });
@@ -103,10 +149,10 @@ tx.get('/sales/:id/returnable', async (req: Request, res: Response) => {
   });
 });
 
-// POST /api/sales { customerId?, lines: [{productId, unit, enteredQty}], discount?, paid?, method?, next?, date? }
+// POST /api/sales { customerId?, lines: [{productId, unit, enteredQty}], discount?, paid?, method?, next?, date?, memoNo? }
 tx.post('/sales', async (req: Request, res: Response) => {
   try {
-    const { customerId, lines, discount, paid, method, accountId, next, date } = req.body ?? {};
+    const { customerId, lines, discount, paid, method, accountId, next, date, memoNo } = req.body ?? {};
     if (!Array.isArray(lines) || !lines.length) return res.status(400).json({ error: 'No items in sale' });
     const day = transactionDay(date);
     checkPromiseDay(next);
@@ -118,39 +164,70 @@ tx.post('/sales', async (req: Request, res: Response) => {
       // is resolved once and used by the ledger entry below.
       const payAccount = pay > 0 ? await resolveAccount(t, { accountId, method: accountId ? undefined : payMethod }) : null;
       let sub = 0, cogs = 0;
+      let returnTotalAmount = 0, returnCogsReversed = 0;
       const items: { productId: string; unit: string; enteredQty: number; qtyKg: number; rate: number; unitCost: number; cogs: number }[] = [];
+      const returnItems: {
+        productId: string; unit: string; enteredQty: number; qtyKg: number; goodKg: number; damagedKg: number;
+        condition: string; damageReason: string | null; note: string | null; rate: number; amount: number;
+        unitCost: number; cogs: number; damagedValue: number;
+      }[] = [];
+
       for (const l of lines) {
         if (!isUnit(l?.unit)) throw Object.assign(new Error('Invalid unit'), { status: 400 });
         const entered = num(l?.enteredQty);
-        if (!(entered > 0)) throw Object.assign(new Error('Quantity must be greater than 0'), { status: 400 });
+        if (entered === 0 || !Number.isFinite(entered)) {
+          throw Object.assign(new Error('Quantity cannot be 0'), { status: 400 });
+        }
         const p = await t.product.findUnique({ where: { id: String(l?.productId ?? '') } });
         if (!p || p.deletedAt) throw Object.assign(new Error('Product not found'), { status: 400 });
-        const qtyKg = Math.round(toKg(p, l.unit, entered) * 100) / 100;
-        if (qtyKg > p.qtyKg) throw Object.assign(new Error(`Not enough stock: ${p.name}`), { status: 400 });
-        // Rate is captured when the line is added to the cart, so a Sale Price
-        // edit made while the cart is open can never silently re-price it.
-        // Older clients that send no rate fall back to the current price.
+
         const rate = l?.rate === undefined ? p.price : num(l.rate);
         if (!(rate > 0)) throw Object.assign(new Error('Invalid sale rate'), { status: 400, code: 'RATE_INVALID' });
-        // Cost of this line: if admin modified the purchase price (unitCost is provided and > 0),
-        // use the admin's modified purchase price; otherwise use current running average cost.
         const hasCustomCost = l.unitCost !== undefined && num(l.unitCost) > 0;
         const currentAvg = await currentAvgCost(t, p.id);
         const unitCost = hasCustomCost ? round2(num(l.unitCost)) : currentAvg;
-        const lineCogs = round2(qtyKg * unitCost);
-        cogs += lineCogs;
-        sub += round2(qtyKg * rate);
-        items.push({ productId: p.id, unit: l.unit, enteredQty: entered, qtyKg, rate, unitCost, cogs: lineCogs });
-        // Selling leaves quantity AND inventory value (AVCO out).
-        // If admin modified the purchase price, forceUnitCost ensures the inventory value is reduced
-        // by the modified purchase price, which re-blends the remaining inventory average cost.
-        await writeMovement(t, p.id, {
-          type: 'SALE', bucket: 'sellable', qtyKg: -qtyKg, unitCost, date: day, forceUnitCost: hasCustomCost,
-        });
+
+        if (entered > 0) {
+          // Standard sale line
+          const qtyKg = Math.round(toKg(p, l.unit, entered) * 100) / 100;
+          if (qtyKg > p.qtyKg) throw Object.assign(new Error(`Not enough stock: ${p.name}`), { status: 400 });
+          const lineCogs = round2(qtyKg * unitCost);
+          cogs += lineCogs;
+          sub += round2(qtyKg * rate);
+          items.push({ productId: p.id, unit: l.unit, enteredQty: entered, qtyKg, rate, unitCost, cogs: lineCogs });
+          // Selling leaves quantity AND inventory value (AVCO out).
+          await writeMovement(t, p.id, {
+            type: 'SALE', bucket: 'sellable', qtyKg: -qtyKg, unitCost, date: day, forceUnitCost: hasCustomCost,
+          });
+        } else {
+          // Negative quantity => SALES RETURN line
+          const absEntered = Math.abs(entered);
+          const returnKg = Math.round(toKg(p, l.unit, absEntered) * 100) / 100;
+          const lineAmount = round2(returnKg * rate);
+          const lineCogs = round2(returnKg * unitCost);
+          returnTotalAmount = round2(returnTotalAmount + lineAmount);
+          returnCogsReversed = round2(returnCogsReversed + lineCogs);
+
+          returnItems.push({
+            productId: p.id, unit: l.unit, enteredQty: absEntered, qtyKg: returnKg, goodKg: returnKg,
+            damagedKg: 0, condition: 'good', damageReason: null, note: 'বিক্রয় মেমো হতে ফেরত',
+            rate, amount: lineAmount, unitCost, cogs: lineCogs, damagedValue: 0,
+          });
+
+          // Stock goes back in as sales return
+          await writeMovement(t, p.id, {
+            type: 'SRETURN', bucket: 'sellable', qtyKg: returnKg, unitCost, date: day,
+          });
+        }
       }
-      const total = Math.round((sub - disc) * 100) / 100;
-      if (pay > total) throw Object.assign(new Error('Paid amount cannot exceed total'), { status: 400 });
-      const due = Math.round((total - pay) * 100) / 100;
+
+      // Calculations: grossTotal is the sale subtotal minus discount.
+      // netInvoiceTotal is grossTotal minus return credit.
+      const grossTotal = Math.max(0, Math.round((sub - disc) * 100) / 100);
+      const netInvoiceTotal = Math.max(0, Math.round((sub - disc - returnTotalAmount) * 100) / 100);
+      const cappedPay = Math.min(pay, netInvoiceTotal);
+      const due = Math.round((netInvoiceTotal - cappedPay) * 100) / 100;
+
       let validCustomerId: string | null = null;
       if (customerId) {
         const c = await t.customer.findUnique({ where: { id: String(customerId) } });
@@ -162,38 +239,76 @@ tx.post('/sales', async (req: Request, res: Response) => {
       } else if (due > 0) {
         throw Object.assign(new Error('Customer is required when there is a due'), { status: 400 });
       }
+
+      // Use user-provided memoNo as invoiceNo if given and not already taken; otherwise auto-generate.
+      let resolvedInvoiceNo: string;
+      if (memoNo && String(memoNo).trim()) {
+        const candidate = String(memoNo).trim();
+        const existing = await t.sale.findUnique({ where: { invoiceNo: candidate } });
+        resolvedInvoiceNo = existing ? await nextInvoiceNo(t, 'SAL', day) : candidate;
+      } else {
+        resolvedInvoiceNo = await nextInvoiceNo(t, 'SAL', day);
+      }
+
       const sale = await t.sale.create({
         data: {
           customerId: validCustomerId, date: day, discount: disc,
-          total, paid: pay, due,
-          // Snapshot of this sale's own COGS; the canonical period report
-          // recomputes COGS from the inventory trail and must agree with it.
-          profit: round2(total - cogs),
-          nextDate: next ?? null, invoiceNo: await nextInvoiceNo(t, 'SAL', day),
+          total: grossTotal,
+          paid: cappedPay,
+          due,
+          profit: round2(grossTotal - cogs),
+          nextDate: next ?? null, invoiceNo: resolvedInvoiceNo,
           items: { create: items },
         },
       });
-      // Sale-time collection counts toward today's collection (cash sales included).
-      // The concrete account is resolved above whenever anything is actually
-      // paid, so the ledger + payment rows follow the same event and `paid` is
-      // never counted twice.
+
+      // If there were return lines, create linked ProductReturn & credit customer
+      let createdReturn: any = null;
+      if (returnItems.length > 0) {
+        const returnNo = await nextInvoiceNo(t, 'SRN', day);
+        const profitImpact = round2(returnTotalAmount - returnCogsReversed);
+        createdReturn = await t.productReturn.create({
+          data: {
+            returnNo,
+            kind: 'sale',
+            saleId: sale.id,
+            customerId: validCustomerId,
+            date: day,
+            totalAmount: returnTotalAmount,
+            profitImpact,
+            settlement: 'credit',
+            refundAmount: 0,
+            note: `বিক্রয় #${resolvedInvoiceNo} এর সাথে সমন্বয়`,
+            items: { create: returnItems },
+          },
+        });
+
+        if (validCustomerId) {
+          await t.customerPayment.create({
+            data: {
+              customerId: validCustomerId,
+              saleId: null,
+              returnId: createdReturn.id,
+              amount: returnTotalAmount,
+              date: day,
+              note: returnNo,
+            },
+          });
+        }
+      }
+
       if (payAccount) {
         await t.customerPayment.create({
-          data: { customerId: validCustomerId, saleId: sale.id, amount: pay, date: day },
+          data: { customerId: validCustomerId, saleId: sale.id, amount: cappedPay, date: day },
         });
-        // Ledger entry for the same single event — `paid` is NOT counted again.
         await recordMovement(t, {
-          accountId: payAccount.id, method: payAccount.type, direction: 'in', amount: pay, date: day,
+          accountId: payAccount.id, method: payAccount.type, direction: 'in', amount: cappedPay, date: day,
           sourceType: 'sale', sourceId: sale.id, note: sale.invoiceNo,
         });
       }
       if (validCustomerId && next) await t.customer.update({ where: { id: validCustomerId }, data: { nextDate: String(next) } });
-      // Re-materialize this customer's stored paid/due from the canonical
-      // settlement inside the same transaction (FIFO may now attribute older
-      // floating collections to settled invoices, or this sale may absorb
-      // them when older invoices are clear).
       if (validCustomerId) await syncPartyInvoices('sale', validCustomerId, t);
-      return { id: sale.id, invoiceNo: sale.invoiceNo, total: sale.total };
+      return { id: sale.id, invoiceNo: sale.invoiceNo, total: netInvoiceTotal, returnNo: createdReturn?.returnNo };
     });
     res.status(201).json(result);
   } catch (e: unknown) {
@@ -205,12 +320,23 @@ tx.post('/sales', async (req: Request, res: Response) => {
 // GET /api/purchases (with items) — paid/due/status derived, never stored.
 tx.get('/purchases', async (_req: Request, res: Response) => {
   const [list, settled] = await Promise.all([
-    db.purchase.findMany({ orderBy: [{ date: 'desc' }, { createdAt: 'desc' }], include: { items: true } }),
+    db.purchase.findMany({
+      orderBy: [{ date: 'desc' }, { createdAt: 'desc' }],
+      include: { items: true, returns: { select: { totalAmount: true } } },
+    }),
     settleAll('purchase'),
   ]);
   res.json(list.map(p => {
     const st = settled.get(p.id);
-    return st ? { ...p, paid: st.paid, due: st.due, status: st.status } : p;
+    const retTotal = p.returns ? p.returns.reduce((acc, r) => acc + r.totalAmount, 0) : 0;
+    const netTotal = Math.max(0, round2(p.total - retTotal));
+    return {
+      ...p,
+      total: retTotal > 0 ? netTotal : p.total,
+      paid: st?.paid ?? p.paid,
+      due: st?.due ?? p.due,
+      status: st?.status,
+    };
   }));
 });
 
@@ -221,17 +347,50 @@ tx.get('/purchases/:id', async (req: Request, res: Response) => {
     include: {
       items: { include: { product: { select: { name: true } } } },
       vendor: { select: { name: true, mobile: true } },
-      returns: { select: { id: true, returnNo: true, date: true, totalAmount: true } },
+      returns: {
+        include: {
+          items: { include: { product: { select: { name: true } } } },
+        },
+      },
     },
   });
   if (!p) return res.status(404).json({ error: 'Purchase not found' });
   const st = (await settleParty('purchase', p.vendorId)).get(p.id);
+  const returnTotal = p.returns.reduce((sum, r) => sum + r.totalAmount, 0);
+  const netTotal = Math.max(0, round2(p.total - returnTotal));
+
+  const regularItems = p.items.map(it => ({
+    productName: it.product.name,
+    unit: it.unit,
+    enteredQty: it.enteredQty,
+    qtyKg: it.qtyKg,
+    rate: it.rate,
+    unitCost: it.unitCost || it.rate,
+    otherCost: it.otherCost || 0,
+  }));
+
+  const retItems = p.returns.flatMap(r =>
+    r.items.map(it => ({
+      productName: `${it.product.name} (ক্রয় ফেরত)`,
+      unit: it.unit,
+      enteredQty: -it.enteredQty,
+      qtyKg: -it.qtyKg,
+      rate: it.rate,
+    }))
+  );
+
+  const displayPaid = Math.min(netTotal, Math.max(0, round2((st?.paid ?? p.paid) - returnTotal)));
+  const displayDue = Math.max(0, round2(netTotal - displayPaid));
+
   res.json({
     id: p.id, invoiceNo: p.invoiceNo, date: p.date, createdAt: p.createdAt,
-    total: p.total, paid: st?.paid ?? p.paid, due: st?.due ?? p.due, status: st?.status,
+    total: returnTotal > 0 ? netTotal : p.total,
+    paid: returnTotal > 0 ? displayPaid : (st?.paid ?? p.paid),
+    due: returnTotal > 0 ? displayDue : (st?.due ?? p.due),
+    status: st?.status,
     nextDate: p.nextDate ?? undefined,
     vendor: { name: p.vendor.name, mobile: p.vendor.mobile },
-    items: p.items.map(it => ({ productName: it.product.name, unit: it.unit, enteredQty: it.enteredQty, qtyKg: it.qtyKg, rate: it.rate })),
+    items: [...regularItems, ...retItems],
     payment: await paymentOf('purchase', p.id),
     returns: p.returns.map(r => ({ id: r.id, returnNo: r.returnNo, date: r.date, amount: r.totalAmount })),
   });
@@ -264,10 +423,10 @@ tx.get('/purchases/:id/returnable', async (req: Request, res: Response) => {
   });
 });
 
-// POST /api/purchases { vendorId, lines: [{productId, unit, enteredQty, rate?}], paid?, method?, next?, date? }
+// POST /api/purchases { vendorId, lines: [{productId, unit, enteredQty, rate?}], paid?, method?, next?, date?, memoNo? }
 tx.post('/purchases', async (req: Request, res: Response) => {
   try {
-    const { vendorId, lines, paid, method, accountId, next, date } = req.body ?? {};
+    const { vendorId, lines, paid, method, accountId, next, date, memoNo } = req.body ?? {};
     if (!vendorId) return res.status(400).json({ error: 'Vendor is required' });
     if (!Array.isArray(lines) || !lines.length) return res.status(400).json({ error: 'No items in purchase' });
     const day = transactionDay(date);
@@ -278,51 +437,149 @@ tx.post('/purchases', async (req: Request, res: Response) => {
       const payAccount = pay > 0 ? await resolveAccount(t, { accountId, method: accountId ? undefined : payMethod }) : null;
       const v = await t.vendor.findUnique({ where: { id: String(vendorId) } });
       if (!v || (v as { deletedAt?: Date | null }).deletedAt) throw Object.assign(new Error('Vendor not found'), { status: 400 });
-      let total = 0;
-      const items: { productId: string; unit: string; enteredQty: number; qtyKg: number; rate: number }[] = [];
+
+      let totalPos = 0;
+      let returnTotalAmount = 0;
+      const items: { productId: string; unit: string; enteredQty: number; qtyKg: number; rate: number; unitCost: number; otherCost: number }[] = [];
+      const returnItems: {
+        productId: string; unit: string; enteredQty: number; qtyKg: number; goodKg: number; damagedKg: number;
+        condition: string; damageReason: string | null; note: string | null; rate: number; amount: number;
+        unitCost: number; cogs: number; damagedValue: number;
+      }[] = [];
+
       for (const l of lines) {
         if (!isUnit(l?.unit)) throw Object.assign(new Error('Invalid unit'), { status: 400 });
         const entered = num(l?.enteredQty);
-        if (!(entered > 0)) throw Object.assign(new Error('Quantity must be greater than 0'), { status: 400 });
+        if (entered === 0 || !Number.isFinite(entered)) {
+          throw Object.assign(new Error('Quantity cannot be 0'), { status: 400 });
+        }
         const p = await t.product.findUnique({ where: { id: String(l?.productId ?? '') } });
         if (!p || p.deletedAt) throw Object.assign(new Error('Product not found'), { status: 400 });
-        // Default rate is the product's current average cost when the caller
-        // does not supply one; the actual line rate is what gets valued.
+
         const rate = l?.rate === undefined ? p.cost : num(l.rate);
         if (!(rate >= 0)) throw Object.assign(new Error('Invalid rate'), { status: 400 });
-        const qtyKg = Math.round(toKg(p, l.unit, entered) * 100) / 100;
-        total += round2(qtyKg * rate);
-        items.push({ productId: p.id, unit: l.unit, enteredQty: entered, qtyKg, rate });
-        // Stock in at the real purchase rate; weighted average re-blends.
-        await writeMovement(t, p.id, {
-          type: 'PURCHASE', bucket: 'sellable', qtyKg, unitCost: rate, date: day,
-        });
+
+        if (entered > 0) {
+          // Standard purchase line
+          const qtyKg = Math.round(toKg(p, l.unit, entered) * 100) / 100;
+          totalPos += round2(qtyKg * rate);
+
+          const bagKg = p.mediumBagKg || 50;
+          const otherCostPerBag = Math.max(0, num(l?.otherCost ?? l?.otherCostPerBag));
+          const otherCostPerKg = otherCostPerBag / bagKg;
+          const buyerCostPerKg = round2(rate + otherCostPerKg);
+
+          items.push({
+            productId: p.id,
+            unit: l.unit,
+            enteredQty: entered,
+            qtyKg,
+            rate,
+            unitCost: buyerCostPerKg,
+            otherCost: otherCostPerBag,
+          });
+
+          // Stock in at the buyer's cost (vendor rate + other cost per kg); weighted average re-blends.
+          await writeMovement(t, p.id, {
+            type: 'PURCHASE', bucket: 'sellable', qtyKg, unitCost: buyerCostPerKg, date: day,
+          });
+        } else {
+          // Negative quantity => PURCHASE RETURN line
+          const absEntered = Math.abs(entered);
+          const returnKg = Math.round(toKg(p, l.unit, absEntered) * 100) / 100;
+          if (returnKg > p.qtyKg) {
+            throw Object.assign(new Error(`মজুদ অপর্যাপ্ত (${p.name}): ফেরত দেওয়া যাচ্ছে না`), { status: 400 });
+          }
+          const lineAmount = round2(returnKg * rate);
+          returnTotalAmount = round2(returnTotalAmount + lineAmount);
+
+          returnItems.push({
+            productId: p.id, unit: l.unit, enteredQty: absEntered, qtyKg: returnKg, goodKg: returnKg,
+            damagedKg: 0, condition: 'good', damageReason: null, note: 'ক্রয় মেমো হতে ফেরত',
+            rate, amount: lineAmount, unitCost: rate, cogs: 0, damagedValue: 0,
+          });
+
+          // Stock leaves at purchase rate
+          await writeMovement(t, p.id, {
+            type: 'PRETURN', bucket: 'sellable', qtyKg: -returnKg, unitCost: rate, date: day, forceUnitCost: true,
+          });
+        }
       }
-      total = round2(total);
-      if (pay > total) throw Object.assign(new Error('Paid amount cannot exceed total'), { status: 400 });
-      const due = Math.round((total - pay) * 100) / 100;
+
+      totalPos = round2(totalPos);
+      const grossTotal = totalPos;
+      const netInvoiceTotal = Math.max(0, round2(grossTotal - returnTotalAmount));
+      const cappedPayP = Math.min(pay, netInvoiceTotal);
+      const due = Math.round((netInvoiceTotal - cappedPayP) * 100) / 100;
+
+      // Use user-provided memoNo as invoiceNo if given and not already taken; otherwise auto-generate.
+      let resolvedPurInvoiceNo: string;
+      if (memoNo && String(memoNo).trim()) {
+        const candidate = String(memoNo).trim();
+        const existing = await t.purchase.findUnique({ where: { invoiceNo: candidate } });
+        resolvedPurInvoiceNo = existing ? await nextInvoiceNo(t, 'PUR', day) : candidate;
+      } else {
+        resolvedPurInvoiceNo = await nextInvoiceNo(t, 'PUR', day);
+      }
+
       const pur = await t.purchase.create({
         data: {
-          vendorId: String(vendorId), date: day, total, paid: pay, due,
-          nextDate: next ?? null, invoiceNo: await nextInvoiceNo(t, 'PUR', day),
+          vendorId: String(vendorId), date: day,
+          total: grossTotal,
+          paid: cappedPayP,
+          due,
+          nextDate: next ?? null, invoiceNo: resolvedPurInvoiceNo,
           items: { create: items },
         },
       });
+
+      // If there were return lines, create linked ProductReturn & credit vendor
+      let createdPurReturn: any = null;
+      if (returnItems.length > 0) {
+        const returnNo = await nextInvoiceNo(t, 'PRN', day);
+        createdPurReturn = await t.productReturn.create({
+          data: {
+            returnNo,
+            kind: 'purchase',
+            purchaseId: pur.id,
+            vendorId: String(vendorId),
+            date: day,
+            totalAmount: returnTotalAmount,
+            profitImpact: 0,
+            settlement: 'credit',
+            refundAmount: 0,
+            note: `ক্রয় #${resolvedPurInvoiceNo} এর সাথে সমন্বয়`,
+            items: { create: returnItems },
+          },
+        });
+
+        await t.vendorPayment.create({
+          data: {
+            vendorId: String(vendorId),
+            purchaseId: null,
+            returnId: createdPurReturn.id,
+            amount: returnTotalAmount,
+            date: day,
+            note: returnNo,
+          },
+        });
+      }
+
       // Paid money leaves through the concrete account resolved above; the
       // payable row and the ledger entry describe the same single event.
       if (payAccount) {
         await t.vendorPayment.create({
-          data: { vendorId: String(vendorId), purchaseId: pur.id, amount: pay, date: day },
+          data: { vendorId: String(vendorId), purchaseId: pur.id, amount: cappedPayP, date: day },
         });
         await recordMovement(t, {
-          accountId: payAccount.id, method: payAccount.type, direction: 'out', amount: pay, date: day,
+          accountId: payAccount.id, method: payAccount.type, direction: 'out', amount: cappedPayP, date: day,
           sourceType: 'purchase', sourceId: pur.id, note: pur.invoiceNo,
         });
       }
       if (next) await t.vendor.update({ where: { id: String(vendorId) }, data: { nextDate: String(next) } });
       // Same-transaction re-materialization of this vendor's stored paid/due.
       await syncPartyInvoices('purchase', String(vendorId), t);
-      return { id: pur.id, invoiceNo: pur.invoiceNo, total: pur.total };
+      return { id: pur.id, invoiceNo: pur.invoiceNo, total: netInvoiceTotal, returnNo: createdPurReturn?.returnNo };
     });
     res.status(201).json(result);
   } catch (e: unknown) {

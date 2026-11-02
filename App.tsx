@@ -149,7 +149,7 @@ function Shell() {
   }[route];
   const openInv = (kind: 'sale' | 'purchase', id: string) => { closeSearch(); setInv({ kind, id }); };
   const openParty = (kind: 'c' | 'v', id: string) => { closeSearch(); setPartyFocus({ kind, id }); setRoute(kind === 'c' ? 'customers' : 'vendors'); };
-  const openReturnFlow = () => {
+  const openReturnFlow = (_kind?: string, _id?: string) => {
     setInv(null);
     setRoute('home');
   };

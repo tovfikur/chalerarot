@@ -68,4 +68,8 @@ export const icons = {
   report: 'file-chart-outline',
   expense: 'wallet-outline',
   lock: 'lock-outline',
+  unlock: 'lock-open-outline',
+  phone: 'phone',
+  upload: 'cloud-upload-outline',
+  download: 'cloud-download-outline',
 } as const satisfies Record<string, IconName>;

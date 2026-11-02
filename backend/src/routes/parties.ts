@@ -23,6 +23,56 @@ customers.get('/', async (_req: Request, res: Response) => {
   res.json(list.map(shapeC));
 });
 
+// POST /api/customers/bulk
+customers.post('/bulk', async (req: Request, res: Response) => {
+  try {
+    const { items } = req.body ?? {};
+    if (!Array.isArray(items) || items.length === 0) {
+      return res.status(400).json({ error: 'Items array is required' });
+    }
+    const createdList: any[] = [];
+    const errors: { row: number; name?: string; error: string }[] = [];
+
+    await db.$transaction(async tx => {
+      for (let i = 0; i < items.length; i++) {
+        const item = items[i];
+        const rowNum = i + 1;
+        const name = String(item.name ?? '').trim();
+        if (!name) {
+          errors.push({ row: rowNum, error: 'Customer name is required' });
+          continue;
+        }
+        const code = item.code ? String(item.code).trim() : null;
+        const mobile = String(item.mobile ?? '').trim();
+        const address = item.address ? String(item.address).trim() : null;
+        const opening = num(item.opening ?? item.openingDue);
+        const next = item.next ?? item.nextDate ?? null;
+
+        const c = await tx.customer.create({
+          data: {
+            code,
+            name,
+            mobile,
+            address,
+            openingDue: opening,
+            nextDate: next,
+          },
+        });
+        createdList.push(shapeC(c));
+      }
+    });
+
+    res.status(201).json({
+      total: items.length,
+      successCount: createdList.length,
+      errors,
+      created: createdList,
+    });
+  } catch (e) {
+    res.status(500).json({ error: 'Failed to bulk import customers' });
+  }
+});
+
 customers.post('/', async (req: Request, res: Response) => {
   const { code, name, mobile, address, opening, next } = req.body ?? {};
   if (!String(name ?? '').trim()) return res.status(400).json({ error: 'Name is required' });
@@ -95,6 +145,56 @@ customers.get('/:id/ledger', async (req: Request, res: Response) => {
 vendors.get('/', async (_req: Request, res: Response) => {
   const list = await db.vendor.findMany({ where: { deletedAt: null }, orderBy: { name: 'asc' } });
   res.json(list.map(shapeV));
+});
+
+// POST /api/vendors/bulk
+vendors.post('/bulk', async (req: Request, res: Response) => {
+  try {
+    const { items } = req.body ?? {};
+    if (!Array.isArray(items) || items.length === 0) {
+      return res.status(400).json({ error: 'Items array is required' });
+    }
+    const createdList: any[] = [];
+    const errors: { row: number; name?: string; error: string }[] = [];
+
+    await db.$transaction(async tx => {
+      for (let i = 0; i < items.length; i++) {
+        const item = items[i];
+        const rowNum = i + 1;
+        const name = String(item.name ?? '').trim();
+        if (!name) {
+          errors.push({ row: rowNum, error: 'Vendor name is required' });
+          continue;
+        }
+        const code = item.code ? String(item.code).trim() : null;
+        const mobile = String(item.mobile ?? '').trim();
+        const address = item.address ? String(item.address).trim() : null;
+        const opening = num(item.opening ?? item.openingPayable);
+        const next = item.next ?? item.nextDate ?? null;
+
+        const v = await tx.vendor.create({
+          data: {
+            code,
+            name,
+            mobile,
+            address,
+            openingPayable: opening,
+            nextDate: next,
+          },
+        });
+        createdList.push(shapeV(v));
+      }
+    });
+
+    res.status(201).json({
+      total: items.length,
+      successCount: createdList.length,
+      errors,
+      created: createdList,
+    });
+  } catch (e) {
+    res.status(500).json({ error: 'Failed to bulk import vendors' });
+  }
 });
 
 vendors.post('/', async (req: Request, res: Response) => {

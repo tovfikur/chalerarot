@@ -2,7 +2,7 @@ import React, { createContext, useContext, useState, useEffect, useCallback, Rea
 import { Lang, Key, tr } from './i18n';
 import { api, Expense, MoneyAccountRow, MoneyBalance, MoneyMethod, MoneyTransfer, PeriodFinance, SettlementStatus } from './api';
 
-export type { MoneyAccountRow, MoneyBalance, MoneyMethod, MoneyTransfer, PeriodFinance };
+export type { Expense, MoneyAccountRow, MoneyBalance, MoneyMethod, MoneyTransfer, PeriodFinance };
 
 export type Product = { id: string; code?: string; name: string; description?: string; cost: number; price: number; opening: number; qty: number; uom: string; smallBagKg: number; mediumBagKg: number; largeBagKg: number; damagedQty?: number; stockValue?: number; damagedValue?: number };
 export const UOMS = ['kg', 'বস্তা', 'ton', 'pcs'];
@@ -11,7 +11,7 @@ export type Party = { id: string; name: string; mobile: string; address?: string
 export type Tx = { id: string; partyId: string; kind: 'sale' | 'purchase' | 'payment' | 'sreturn' | 'preturn'; amount: number; date: string; note?: string; ref?: string; method?: string; returnId?: string; returnId2?: never; createdAt?: string; saleId?: string; purchaseId?: string; account?: string };
 export type Line = { productId: string; qty: number; rate: number };
 export type SaleLineIn = { productId: string; unit: string; enteredQty: number; rate: number; unitCost?: number };
-export type PurchaseLineIn = { productId: string; unit: string; enteredQty: number; rate: number };
+export type PurchaseLineIn = { productId: string; unit: string; enteredQty: number; rate: number; otherCost?: number; otherCostPerBag?: number; unitCost?: number };
 export type StockTx = { id: string; productId: string; productName?: string; type: 'OPENING' | 'PURCHASE' | 'SALE' | 'ADJUSTMENT'; qty: number; date: string };
 export type SaleRec = { id: string; date: string; profit: number; total: number; customerId?: string; invoiceNo?: string; paid: number; due: number; status: SettlementStatus; cogs: number; createdAt?: string };
 /** Completed purchase, straight from the bootstrap payload (no extra request). */
@@ -28,9 +28,13 @@ export const today = () => {
 // Service interface is unchanged in shape; implementations now persist via REST.
 export interface Service {
   saveProduct(p: Product): Promise<void>; deleteProduct(id: string): Promise<void>;
+  bulkUploadProducts(items: any[]): Promise<import('./api').BulkImportRes>;
+  adjustStock(b: { items: any[]; date?: string; note?: string }): Promise<{ success: boolean; count: number; adjusted: any[] }>;
   saveParty(kind: 'c' | 'v', p: Party): Promise<void>; deleteParty(kind: 'c' | 'v', id: string): Promise<void>;
-  sale(a: { customerId?: string; lines: SaleLineIn[]; discount: number; paid: number; accountId?: string; next?: string; date?: string }): Promise<{ id: string; invoiceNo?: string; total: number }>;
-  purchase(a: { vendorId: string; lines: PurchaseLineIn[]; paid: number; accountId?: string; next?: string; date?: string }): Promise<{ id: string; invoiceNo?: string; total: number }>;
+  bulkUploadParties(kind: 'c' | 'v', items: any[]): Promise<import('./api').BulkImportRes>;
+  refresh(): Promise<void>;
+  sale(a: { customerId?: string; lines: SaleLineIn[]; discount: number; paid: number; accountId?: string; next?: string; date?: string; memoNo?: string }): Promise<{ id: string; invoiceNo?: string; total: number }>;
+  purchase(a: { vendorId: string; lines: PurchaseLineIn[]; paid: number; accountId?: string; next?: string; date?: string; memoNo?: string }): Promise<{ id: string; invoiceNo?: string; total: number }>;
   money(kind: 'c' | 'v', a: { partyId: string; amount: number; accountId: string; date: string; note?: string; next?: string }): Promise<void>;
   saveExpense(e: { id?: string; category: string; customName?: string; amount: number; accountId: string; date: string; note?: string }): Promise<void>;
   deleteExpense(id: string): Promise<void>;
@@ -149,6 +153,16 @@ export function AppProvider({ children }: { children: ReactNode }) {
       await refresh();
     },
     deleteProduct: async id => { await api.deleteProduct(id); await refresh(); },
+    bulkUploadProducts: async items => {
+      const res = await api.bulkCreateProducts(items);
+      await refresh();
+      return res;
+    },
+    adjustStock: async b => {
+      const res = await api.adjustStock(b);
+      await refresh();
+      return res;
+    },
     saveParty: async (k, p) => {
       const body = { code: p.code?.trim() ?? '', name: p.name, mobile: p.mobile, address: p.address, opening: p.opening, next: p.next };
       const list = k === 'c' ? customers : vendors;
@@ -157,14 +171,20 @@ export function AppProvider({ children }: { children: ReactNode }) {
       await refresh();
     },
     deleteParty: async (k, id) => { await api.deleteParty(k, id); await refresh(); },
-    sale: async ({ customerId, lines, discount, paid, accountId, next, date }) => {
-      const r = await api.createSale({ customerId, lines, discount, paid, accountId, next, date });
+    bulkUploadParties: async (k, items) => {
+      const res = k === 'c' ? await api.bulkCreateCustomers(items) : await api.bulkCreateVendors(items);
       await refresh();
+      return res;
+    },
+    refresh,
+    sale: async ({ customerId, lines, discount, paid, accountId, next, date, memoNo }) => {
+      const r = await api.createSale({ customerId, lines, discount, paid, accountId, next, date, memoNo });
+      refresh().catch(() => {});
       return r;
     },
-    purchase: async ({ vendorId, lines, paid, accountId, next, date }) => {
-      const r = await api.createPurchase({ vendorId, lines, paid, accountId, next, date });
-      await refresh();
+    purchase: async ({ vendorId, lines, paid, accountId, next, date, memoNo }) => {
+      const r = await api.createPurchase({ vendorId, lines, paid, accountId, next, date, memoNo });
+      refresh().catch(() => {});
       return r;
     },
     money: async (k, a) => {

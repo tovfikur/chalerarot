@@ -150,7 +150,9 @@ model PurchaseItem {
   unit       String   @default("kg")
   enteredQty Float
   qtyKg      Float
-  rate       Float // per KG
+  rate       Float // vendor purchase rate per KG
+  unitCost   Float    @default(0) // total landed cost per KG (rate + otherCostPerKg)
+  otherCost  Float    @default(0) // other landed cost per bag
 
   @@index([purchaseId])
   @@index([productId])

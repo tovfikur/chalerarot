@@ -85,18 +85,18 @@ export function AccountsDashboard({ go, focus, onFocusDone }: AccountsDashboardP
     t,
     lang,
     stats,
-    customers,
-    vendors,
+    customers = [],
+    vendors = [],
     bal,
-    expenses,
-    sales,
-    purchases,
-    cTx,
-    returns,
-    products,
-    moneyAccounts,
-    moneyBalances,
-    transfers,
+    expenses = [],
+    sales = [],
+    purchases = [],
+    cTx = [],
+    returns = [],
+    products = [],
+    moneyAccounts = [],
+    moneyBalances = [],
+    moneyTransfers: transfers = [],
     saveExpense,
     deleteExpense,
     loadFinance,
@@ -879,8 +879,8 @@ export function AccountsDashboard({ go, focus, onFocusDone }: AccountsDashboardP
           </Text>
           <Text style={[styles.solvencyPillValue, { color: solvencyRatio >= 100 ? '#10B981' : '#EF4444' }]}>
             {solvencyRatio >= 100
-              ? (lang === 'bn' ? 'নিরাপদ (১৮৫% কাভারেজ)' : 'Healthy Coverage')
-              : (lang === 'bn' ? 'সতর্কতা: দেনা বেশি' : 'Caution')}
+              ? (lang === 'bn' ? `নিরাপদ (${toBnDigits(String(Math.min(999, Math.round(solvencyRatio))))}% কাভারেজ)` : `Healthy (${Math.min(999, Math.round(solvencyRatio))}% Coverage)`)
+              : (lang === 'bn' ? `সতর্কতা: দেনা বেশি (${toBnDigits(String(Math.round(solvencyRatio)))}%)` : `Caution: Low Coverage (${Math.round(solvencyRatio)}%)`)}
           </Text>
         </View>
       </View>
@@ -1740,7 +1740,7 @@ export function AccountsDashboard({ go, focus, onFocusDone }: AccountsDashboardP
                         style={styles.callIconButton}
                         onPress={() => Linking.openURL(`tel:${item.customer.mobile}`)}
                       >
-                        <AppIcon name={icons.bkash} size={16} iconColor="#2563EB" />
+                        <AppIcon name={icons.phone} size={16} iconColor="#2563EB" />
                       </TouchableOpacity>
                     ) : null}
                     <TouchableOpacity

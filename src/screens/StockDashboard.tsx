@@ -1,15 +1,24 @@
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useEffect, useRef } from 'react';
 import { View, Text, TextInput, TouchableOpacity, ScrollView, StyleSheet, Modal, Platform, Alert } from 'react-native';
 import { useApp, Product } from '../store';
 import { toBnDigits, useNum } from '../ui';
+import { toEnDigits, normalizeInput } from '../bn';
 import { AppIcon, icons } from '../icons';
+import { BulkUploadModal } from '../BulkUploadModal';
+import {
+  exportStockExcel,
+  exportStockPDF,
+  exportAuditExcel,
+  exportAuditPDF,
+  AuditRow,
+} from '../stockReport';
 
 export function StockDashboard() {
-  const { t, products, stockTx, saveProduct } = useApp();
+  const { t, products, stockTx, saveProduct, adjustStock } = useApp();
   const n = useNum();
 
-  // Active view tab: 'products' | 'movements'
-  const [activeTab, setActiveTab] = useState<'products' | 'movements'>('products');
+  // Active view tab: 'products' | 'movements' | 'audit'
+  const [activeTab, setActiveTab] = useState<'products' | 'movements' | 'audit'>('products');
 
   // Search & filter
   const [searchQuery, setSearchQuery] = useState('');
@@ -20,6 +29,7 @@ export function StockDashboard() {
 
   // Add Product Modal
   const [modalOpen, setModalOpen] = useState(false);
+  const [bulkOpen, setBulkOpen] = useState(false);
   const [editingProduct, setEditingProduct] = useState<Product | null>(null);
   const [newCode, setNewCode] = useState('');
   const [newName, setNewName] = useState('');
@@ -32,6 +42,15 @@ export function StockDashboard() {
 
   // Item details modal (Eye action)
   const [viewProduct, setViewProduct] = useState<Product | null>(null);
+
+  // Manual Stock Audit state
+  const [physicalBagsMap, setPhysicalBagsMap] = useState<Record<string, string>>({});
+  const [physicalKgMap, setPhysicalKgMap] = useState<Record<string, string>>({});
+  const [auditReasons, setAuditReasons] = useState<Record<string, string>>({});
+  const [showOnlyDiscrepancies, setShowOnlyDiscrepancies] = useState(false);
+  const [auditConfirmModalOpen, setAuditConfirmModalOpen] = useState(false);
+  const [auditNote, setAuditNote] = useState('ম্যানুয়াল স্টক অডিট সমন্বয়');
+  const [isAdjusting, setIsAdjusting] = useState(false);
 
   const openNewProduct = () => {
     setEditingProduct(null);
@@ -86,7 +105,7 @@ export function StockDashboard() {
   const totalKg = useMemo(() => stockData.reduce((s, it) => s + it.totalKg, 0), [stockData]);
   const totalValuation = useMemo(() => stockData.reduce((s, it) => s + it.stockVal, 0), [stockData]);
 
-  // Filtered rows
+  // Filtered rows for Product list
   const filteredRows = useMemo(() => {
     const q = searchQuery.trim().toLowerCase();
     if (!q) return stockData;
@@ -95,11 +114,245 @@ export function StockDashboard() {
     );
   }, [stockData, searchQuery]);
 
-  const totalPages = Math.max(1, Math.ceil(filteredRows.length / pageSize));
+  // Audit rows computation
+  const auditRows = useMemo<AuditRow[]>(() => {
+    return products.map(p => {
+      const bagKg = p.mediumBagKg || 50;
+      const systemKg = p.qty || 0;
+      const systemBags = Math.round(systemKg / bagKg) || 0;
+      const cost = p.stockValue && p.qty ? Math.round((p.stockValue / p.qty) * 100) / 100 : (p.cost || 0);
+
+      const rawBags = physicalBagsMap[p.id];
+      const rawKg = physicalKgMap[p.id];
+
+      let physicalBags: number | null = null;
+      let physicalKg: number | null = null;
+
+      if (rawKg !== undefined && rawKg.trim() !== '') {
+        const parsedKg = parseFloat(normalizeInput(rawKg));
+        if (Number.isFinite(parsedKg)) {
+          physicalKg = Math.max(0, parsedKg);
+          const parsedBags = rawBags !== undefined && rawBags.trim() !== '' ? parseFloat(normalizeInput(rawBags)) : null;
+          physicalBags = parsedBags !== null && Number.isFinite(parsedBags)
+            ? parsedBags
+            : Math.round((physicalKg / bagKg) * 10) / 10;
+        }
+      } else if (rawBags !== undefined && rawBags.trim() !== '') {
+        const parsedBags = parseFloat(normalizeInput(rawBags));
+        if (Number.isFinite(parsedBags)) {
+          physicalBags = Math.max(0, parsedBags);
+          physicalKg = Math.round(parsedBags * bagKg * 100) / 100;
+        }
+      }
+
+      const hasCount = physicalKg !== null;
+      const deltaKg = physicalKg !== null ? Math.round((physicalKg - systemKg) * 100) / 100 : 0;
+      const deltaBags = physicalBags !== null ? Math.round((physicalBags - systemBags) * 10) / 10 : 0;
+      const deltaValue = Math.round(deltaKg * cost);
+
+      return {
+        id: p.id,
+        code: p.code ?? '',
+        name: p.name,
+        bagKg,
+        systemBags,
+        systemKg,
+        physicalBags,
+        physicalKg,
+        deltaBags,
+        deltaKg,
+        deltaValue,
+        cost,
+        reason: auditReasons[p.id] || '',
+      };
+    });
+  }, [products, physicalBagsMap, physicalKgMap, auditReasons]);
+
+  // Aggregate audit KPI summary
+  const auditSummary = useMemo(() => {
+    let discrepancyCount = 0;
+    let totalSystemBags = 0;
+    let totalSystemKg = 0;
+    let totalPhysicalBags = 0;
+    let totalPhysicalKg = 0;
+    let totalDeltaKg = 0;
+    let totalDeltaValue = 0;
+
+    auditRows.forEach(r => {
+      totalSystemBags += r.systemBags;
+      totalSystemKg += r.systemKg;
+      const countBags = r.physicalBags !== null ? r.physicalBags : r.systemBags;
+      const countKg = r.physicalKg !== null ? r.physicalKg : r.systemKg;
+      totalPhysicalBags += countBags;
+      totalPhysicalKg += countKg;
+
+      if (r.physicalKg !== null && Math.abs(r.deltaKg) >= 0.01) {
+        discrepancyCount++;
+        totalDeltaKg += r.deltaKg;
+        totalDeltaValue += r.deltaValue;
+      }
+    });
+
+    return {
+      totalItems: auditRows.length,
+      discrepancyCount,
+      totalSystemBags,
+      totalSystemKg,
+      totalPhysicalBags: Math.round(totalPhysicalBags),
+      totalPhysicalKg: Math.round(totalPhysicalKg),
+      totalDeltaKg: Math.round(totalDeltaKg * 100) / 100,
+      totalDeltaValue: Math.round(totalDeltaValue),
+    };
+  }, [auditRows]);
+
+  // Discrepancy items for adjustment
+  const itemsToAdjust = useMemo(() => {
+    return auditRows.filter(r => r.physicalKg !== null && Math.abs(r.deltaKg) >= 0.01);
+  }, [auditRows]);
+
+  // Filtered audit rows
+  const filteredAuditRows = useMemo(() => {
+    const q = searchQuery.trim().toLowerCase();
+    let list = auditRows;
+    if (showOnlyDiscrepancies) {
+      list = list.filter(r => r.physicalKg !== null && Math.abs(r.deltaKg) >= 0.01);
+    }
+    if (q) {
+      list = list.filter(r => r.code.toLowerCase().includes(q) || r.name.toLowerCase().includes(q));
+    }
+    return list;
+  }, [auditRows, showOnlyDiscrepancies, searchQuery]);
+
+  // Pagination for current view
+  const currentTotalRows = activeTab === 'audit' ? filteredAuditRows.length : filteredRows.length;
+  const totalPages = Math.max(1, Math.ceil(currentTotalRows / pageSize));
+
   const pagedRows = useMemo(() => {
     const start = (page - 1) * pageSize;
     return filteredRows.slice(start, start + pageSize);
   }, [filteredRows, page, pageSize]);
+
+  const pagedAuditRows = useMemo(() => {
+    const start = (page - 1) * pageSize;
+    return filteredAuditRows.slice(start, start + pageSize);
+  }, [filteredAuditRows, page, pageSize]);
+
+  // Auto-prefill audit counts with current system stock on entering audit tab if not initialized
+  const auditInitializedRef = useRef(false);
+  useEffect(() => {
+    if (activeTab === 'audit' && !auditInitializedRef.current && products.length > 0) {
+      auditInitializedRef.current = true;
+      handlePreFillWithSystem();
+    }
+  }, [activeTab, products]);
+
+  // Audit input handlers
+  const handleBagsChange = (id: string, val: string, bagKg: number) => {
+    setPhysicalBagsMap(prev => ({ ...prev, [id]: val }));
+    const normalized = normalizeInput(val).trim();
+    if (normalized === '') {
+      setPhysicalKgMap(prev => {
+        const next = { ...prev };
+        delete next[id];
+        return next;
+      });
+      return;
+    }
+    const parsed = parseFloat(normalized);
+    if (Number.isFinite(parsed) && parsed >= 0) {
+      const kgVal = String(Math.round(parsed * bagKg));
+      setPhysicalKgMap(prev => ({ ...prev, [id]: kgVal }));
+    }
+  };
+
+  const handleKgChange = (id: string, val: string, bagKg: number) => {
+    setPhysicalKgMap(prev => ({ ...prev, [id]: val }));
+    const normalized = normalizeInput(val).trim();
+    if (normalized === '') {
+      setPhysicalBagsMap(prev => {
+        const next = { ...prev };
+        delete next[id];
+        return next;
+      });
+      return;
+    }
+    const parsed = parseFloat(normalized);
+    if (Number.isFinite(parsed) && parsed >= 0) {
+      const bagsVal = String(Math.round((parsed / bagKg) * 10) / 10);
+      setPhysicalBagsMap(prev => ({ ...prev, [id]: bagsVal }));
+    }
+  };
+
+  const handleReasonChange = (id: string, val: string) => {
+    setAuditReasons(prev => ({ ...prev, [id]: val }));
+  };
+
+  const handlePreFillWithSystem = () => {
+    const newBags: Record<string, string> = {};
+    const newKg: Record<string, string> = {};
+    products.forEach(p => {
+      const bagKg = p.mediumBagKg || 50;
+      const bags = Math.round(p.qty / bagKg);
+      newBags[p.id] = String(bags);
+      newKg[p.id] = String(Math.round(p.qty));
+    });
+    setPhysicalBagsMap(newBags);
+    setPhysicalKgMap(newKg);
+  };
+
+  const handleClearAudit = () => {
+    setPhysicalBagsMap({});
+    setPhysicalKgMap({});
+    setAuditReasons({});
+  };
+
+  const handleExportAuditPDF = () => {
+    const ok = exportAuditPDF({
+      auditRows: filteredAuditRows,
+      summary: auditSummary,
+      note: auditNote,
+    });
+    if (!ok && Platform.OS !== 'web') {
+      Alert.alert('অডিট রিপোর্ট', 'পিডিএফ রিপোর্ট তৈরি করা হয়েছে।');
+    }
+  };
+
+  const handleExportAuditExcel = () => {
+    const ok = exportAuditExcel({
+      auditRows: filteredAuditRows,
+      summary: auditSummary,
+    });
+    if (!ok && Platform.OS !== 'web') {
+      Alert.alert('অডিট শিট', 'এক্সেল ফাইল ডাউনলোড সম্পন্ন হয়েছে।');
+    }
+  };
+
+  const handleApplyStockAdjustment = async () => {
+    if (itemsToAdjust.length === 0) {
+      Alert.alert('সতর্কতা', 'সমন্বয় করার মতো কোনো গরমিল বা পরিবর্তন পাওয়া যায়নি। বাস্তব গণনায় পরিবর্তন আনুন।');
+      return;
+    }
+    setIsAdjusting(true);
+    try {
+      const payloadItems = itemsToAdjust.map(it => ({
+        productId: it.id,
+        physicalQtyKg: it.physicalKg!,
+        deltaKg: it.deltaKg,
+        reason: it.reason || auditNote,
+      }));
+      await adjustStock({
+        items: payloadItems,
+        note: auditNote,
+      });
+      setAuditConfirmModalOpen(false);
+      handleClearAudit();
+      Alert.alert('সফল', `${itemsToAdjust.length} টি পণ্যের স্টক সমন্বয় সফলভাবে সম্পন্ন হয়েছে।`);
+    } catch (err) {
+      Alert.alert('ত্রুটি', err instanceof Error ? err.message : 'স্টক সমন্বয় ব্যর্থ হয়েছে।');
+    } finally {
+      setIsAdjusting(false);
+    }
+  };
 
   // Save new product from modal
   const handleSaveProduct = async () => {
@@ -152,6 +405,43 @@ export function StockDashboard() {
     }
   };
 
+  const handleExportExcel = () => {
+    if (activeTab === 'audit') {
+      handleExportAuditExcel();
+      return;
+    }
+    const ok = exportStockExcel({
+      activeTab,
+      items: filteredRows,
+      movements: stockTx,
+      totalBags,
+      totalKg,
+      totalValuation,
+    });
+    if (!ok && Platform.OS !== 'web') {
+      Alert.alert('এক্সেল', 'ফাইল ডাউনলোড সম্পন্ন হয়েছে।');
+    }
+  };
+
+  const handleExportPDF = () => {
+    if (activeTab === 'audit') {
+      handleExportAuditPDF();
+      return;
+    }
+    const ok = exportStockPDF({
+      activeTab,
+      items: filteredRows,
+      movements: stockTx,
+      totalBags,
+      totalKg,
+      totalValuation,
+      searchQuery: searchQuery.trim(),
+    });
+    if (!ok && Platform.OS !== 'web') {
+      Alert.alert('পিডিএফ', 'পিডিএফ রিপোর্ট তৈরি করা হয়েছে।');
+    }
+  };
+
   return (
     <ScrollView style={styles.container} contentContainerStyle={styles.contentContainer}>
       {/* Top Header Banner - Consistent Royal Blue Executive Skeuomorphic Theme */}
@@ -169,10 +459,20 @@ export function StockDashboard() {
                 <Text style={styles.liveTagText}>সক্রিয়</Text>
               </View>
             </View>
-            <Text style={styles.headerSub}>পাইকারি চালের বর্তমান স্টক হিসাব</Text>
+            <Text style={styles.headerSub}>পাইকারি চালের বর্তমান স্টক হিসাব ও নিরীক্ষা</Text>
           </View>
         </View>
         <View style={styles.headerRight}>
+          <TouchableOpacity
+            onPress={() => setBulkOpen(true)}
+            testID="stock-bulk-upload"
+            style={styles.headerBulkBtn}
+            activeOpacity={0.85}
+          >
+            <AppIcon name={icons.upload} size={18} iconColor="#FFFFFF" />
+            <Text style={styles.headerAddBtnText}>বাল্ক পণ্য আপলোড</Text>
+          </TouchableOpacity>
+
           <TouchableOpacity
             onPress={openNewProduct}
             testID="stock-add-product"
@@ -189,8 +489,8 @@ export function StockDashboard() {
       <View style={styles.kpiRow}>
         {/* Card 1: Total Bags */}
         <View style={styles.kpiCard}>
-          <View style={[styles.kpiIconWrap, { backgroundColor: '#E8F5E9' }]}>
-            <AppIcon name={icons.stock} size={26} iconColor="#1B7F4B" />
+          <View style={[styles.kpiIconWrap, { backgroundColor: '#E0F0FE' }]}>
+            <AppIcon name={icons.stock} size={26} iconColor="#1c70b9" />
           </View>
           <View style={styles.kpiInfo}>
             <Text style={styles.kpiLabel}>মোট মজুদ (বস্তা)</Text>
@@ -225,7 +525,10 @@ export function StockDashboard() {
       <View style={styles.controlsRow}>
         <View style={styles.tabButtonsGroup}>
           <TouchableOpacity
-            onPress={() => setActiveTab('products')}
+            onPress={() => {
+              setActiveTab('products');
+              setPage(1);
+            }}
             style={[styles.tabBtn, activeTab === 'products' ? styles.tabBtnActive : styles.tabBtnInactive]}
           >
             <AppIcon
@@ -241,7 +544,10 @@ export function StockDashboard() {
           </TouchableOpacity>
 
           <TouchableOpacity
-            onPress={() => setActiveTab('movements')}
+            onPress={() => {
+              setActiveTab('movements');
+              setPage(1);
+            }}
             style={[styles.tabBtn, activeTab === 'movements' ? styles.tabBtnActive : styles.tabBtnInactive]}
           >
             <AppIcon
@@ -255,21 +561,96 @@ export function StockDashboard() {
               স্টক মুভমেন্ট
             </Text>
           </TouchableOpacity>
+
+          <TouchableOpacity
+            onPress={() => {
+              setActiveTab('audit');
+              setPage(1);
+            }}
+            style={[styles.tabBtn, activeTab === 'audit' ? styles.tabBtnActive : styles.tabBtnInactive]}
+          >
+            <AppIcon
+              name={icons.stock}
+              size={18}
+              iconColor={activeTab === 'audit' ? '#fff' : '#0F172A'}
+            />
+            <Text
+              style={[styles.tabBtnText, activeTab === 'audit' ? styles.tabBtnTextActive : styles.tabBtnTextInactive]}
+            >
+              স্টক অডিট ও সমন্বয়
+            </Text>
+          </TouchableOpacity>
         </View>
 
         <View style={styles.rightActionGroup}>
-          <TouchableOpacity onPress={() => setModalOpen(true)} style={styles.addProductGreenBtn}>
-            <AppIcon name={icons.add} size={18} iconColor="#fff" />
-            <Text style={styles.addProductGreenBtnText}>পণ্য যোগ করুন</Text>
-          </TouchableOpacity>
+          {activeTab === 'audit' ? (
+            <>
+              <TouchableOpacity
+                onPress={handlePreFillWithSystem}
+                style={[styles.outlineActionBtn, { borderColor: '#1c70b9', backgroundColor: '#F0F7FF' }]}
+                accessibilityLabel="সিস্টেম মজুদ দিয়ে অটো পূরণ"
+              >
+                <AppIcon name={icons.transfer} size={16} iconColor="#1c70b9" />
+                <Text style={[styles.outlineActionBtnText, { color: '#1c70b9', fontWeight: '700' }]}>অটো-পূরণ</Text>
+              </TouchableOpacity>
 
-          <TouchableOpacity
-            onPress={() => Alert.alert('এক্সেল', 'এক্সেল ফাইল ডাউনলোড শুরু হয়েছে।')}
-            style={styles.outlineActionBtn}
-          >
-            <AppIcon name={icons.excel} size={18} iconColor="#15803D" />
-            <Text style={[styles.outlineActionBtnText, { color: '#15803D' }]}>এক্সেল ডাউনলোড</Text>
-          </TouchableOpacity>
+              <TouchableOpacity
+                onPress={handleClearAudit}
+                style={[styles.outlineActionBtn, { borderColor: '#94A3B8' }]}
+                accessibilityLabel="অডিট গণনা খালি করুন"
+              >
+                <AppIcon name={icons.cancel} size={16} iconColor="#64748B" />
+                <Text style={[styles.outlineActionBtnText, { color: '#64748B', fontWeight: '600' }]}>মুছুন</Text>
+              </TouchableOpacity>
+
+              <TouchableOpacity
+                onPress={handleExportAuditPDF}
+                style={[styles.outlineActionBtn, { borderColor: '#DC2626' }]}
+                testID="stock-audit-pdf"
+                accessibilityLabel="অডিট রিপোর্ট ডাউনলোড (PDF)"
+              >
+                <AppIcon name={icons.print} size={18} iconColor="#DC2626" />
+                <Text style={[styles.outlineActionBtnText, { color: '#DC2626', fontWeight: '700' }]}>অডিট রিপোর্ট (PDF)</Text>
+              </TouchableOpacity>
+
+              <TouchableOpacity
+                onPress={handleExportAuditExcel}
+                style={[styles.outlineActionBtn, { borderColor: '#16A34A' }]}
+                testID="stock-audit-excel"
+                accessibilityLabel="অডিট শিট ডাউনলোড (Excel)"
+              >
+                <AppIcon name={icons.excel} size={18} iconColor="#16A34A" />
+                <Text style={[styles.outlineActionBtnText, { color: '#16A34A', fontWeight: '700' }]}>অডিট শিট (Excel)</Text>
+              </TouchableOpacity>
+            </>
+          ) : (
+            <>
+              <TouchableOpacity onPress={() => setModalOpen(true)} style={styles.addProductGreenBtn}>
+                <AppIcon name={icons.add} size={18} iconColor="#fff" />
+                <Text style={styles.addProductGreenBtnText}>পণ্য যোগ করুন</Text>
+              </TouchableOpacity>
+
+              <TouchableOpacity
+                onPress={handleExportPDF}
+                style={[styles.outlineActionBtn, { borderColor: '#DC2626' }]}
+                testID="stock-pdf-download"
+                accessibilityLabel="পিডিএফ রিপোর্ট ডাউনলোড"
+              >
+                <AppIcon name={icons.print} size={18} iconColor="#DC2626" />
+                <Text style={[styles.outlineActionBtnText, { color: '#DC2626', fontWeight: '700' }]}>পিডিএফ রিপোর্ট</Text>
+              </TouchableOpacity>
+
+              <TouchableOpacity
+                onPress={handleExportExcel}
+                style={[styles.outlineActionBtn, { borderColor: '#16A34A' }]}
+                testID="stock-excel-download"
+                accessibilityLabel="এক্সেল ডাউনলোড"
+              >
+                <AppIcon name={icons.excel} size={18} iconColor="#16A34A" />
+                <Text style={[styles.outlineActionBtnText, { color: '#16A34A', fontWeight: '700' }]}>এক্সেল ডাউনলোড</Text>
+              </TouchableOpacity>
+            </>
+          )}
         </View>
       </View>
 
@@ -284,14 +665,29 @@ export function StockDashboard() {
               setPage(1);
             }}
             style={styles.filterTextInput}
-            placeholder="পণ্য কোড বা পণ্যের নাম দিয়ে খুঁজুন..."
+            placeholder={activeTab === 'audit' ? 'অডিট তালিকায় পণ্য কোড বা নাম দিয়ে খুঁজুন...' : 'পণ্য কোড বা পণ্যের নাম দিয়ে খুঁজুন...'}
           />
         </View>
 
-        <View style={styles.categoryDropdownWrap}>
-          <Text style={styles.categoryDropdownText}>সব পণ্য</Text>
-          <AppIcon name={icons.chevR} size={18} iconColor="#64748B" />
-        </View>
+        {activeTab === 'audit' ? (
+          <TouchableOpacity
+            onPress={() => {
+              setShowOnlyDiscrepancies(prev => !prev);
+              setPage(1);
+            }}
+            style={[styles.discrepancyToggleBtn, showOnlyDiscrepancies && styles.discrepancyToggleBtnActive]}
+          >
+            <View style={[styles.discrepancyDot, showOnlyDiscrepancies && { backgroundColor: '#DC2626' }]} />
+            <Text style={[styles.discrepancyToggleText, showOnlyDiscrepancies && styles.discrepancyToggleTextActive]}>
+              শুধু অমিলগুলো দেখান ({toBnDigits(String(auditSummary.discrepancyCount))})
+            </Text>
+          </TouchableOpacity>
+        ) : (
+          <View style={styles.categoryDropdownWrap}>
+            <Text style={styles.categoryDropdownText}>সব পণ্য</Text>
+            <AppIcon name={icons.chevR} size={18} iconColor="#64748B" />
+          </View>
+        )}
       </View>
 
       {/* Main Table Card */}
@@ -303,7 +699,7 @@ export function StockDashboard() {
               <Text style={[styles.th, { width: 50, textAlign: 'center' }]}>#</Text>
               <Text style={[styles.th, { flex: 1.2 }]}>পণ্য কোড</Text>
               <Text style={[styles.th, { flex: 2.2 }]}>পণ্যের নাম</Text>
-              <Text style={[styles.th, { flex: 1, textAlign: 'center' }]}>একক</Text>
+              
               <Text style={[styles.th, { flex: 1.5, textAlign: 'right' }]}>মজুদ (বস্তা)</Text>
               <Text style={[styles.th, { flex: 1.5, textAlign: 'right' }]}>মজুদ (কেজি)</Text>
               <Text style={[styles.th, { flex: 1.5, textAlign: 'right' }]}>স্টক মূল্য (৳)</Text>
@@ -325,10 +721,6 @@ export function StockDashboard() {
                   <Text style={styles.cellName}>{row.name}</Text>
                 </View>
 
-                <View style={[styles.td, { flex: 1, alignItems: 'center' }]}>
-                  <Text style={styles.cellText}>{row.unit}</Text>
-                </View>
-
                 <View style={[styles.td, { flex: 1.5, alignItems: 'flex-end' }]}>
                   <Text style={[styles.cellBold, { color: '#0F172A' }]}>{toBnDigits(row.bags.toLocaleString('en-IN'))}</Text>
                 </View>
@@ -338,7 +730,7 @@ export function StockDashboard() {
                 </View>
 
                 <View style={[styles.td, { flex: 1.5, alignItems: 'flex-end' }]}>
-                  <Text style={[styles.cellBold, { color: '#1B7F4B' }]}>
+                  <Text style={[styles.cellBold, { color: '#1c70b9' }]}>
                     ৳{toBnDigits(Math.round(row.stockVal).toLocaleString('en-IN'))}
                   </Text>
                 </View>
@@ -349,7 +741,7 @@ export function StockDashboard() {
                     testID={`view-product-${row.id}`}
                     style={styles.eyeActionButton}
                   >
-                    <AppIcon name={icons.eye} size={18} iconColor="#006A4E" />
+                    <AppIcon name={icons.eye} size={18} iconColor="#1c70b9" />
                   </TouchableOpacity>
                   <TouchableOpacity
                     onPress={() => openEditProduct(row.product)}
@@ -363,7 +755,7 @@ export function StockDashboard() {
               </View>
             ))}
           </>
-        ) : (
+        ) : activeTab === 'movements' ? (
           /* Movement view */
           <View>
             <View style={styles.tableHeaderRow}>
@@ -395,12 +787,150 @@ export function StockDashboard() {
               </View>
             ))}
           </View>
+        ) : (
+          /* Manual Stock Audit view */
+          <View>
+            <View style={styles.tableHeaderRow}>
+              <Text style={[styles.th, { width: 40, textAlign: 'center' }]}>#</Text>
+              <Text style={[styles.th, { flex: 2 }]}>পণ্য ও সাইজ</Text>
+              <Text style={[styles.th, { width: 125, textAlign: 'right' }]}>সিস্টেম মজুদ</Text>
+              <Text style={[styles.th, { width: 110, textAlign: 'center' }]}>বাস্তব বস্তা</Text>
+              <Text style={[styles.th, { width: 120, textAlign: 'center' }]}>বাস্তব কেজি</Text>
+              <Text style={[styles.th, { width: 120, textAlign: 'right' }]}>পার্থক্য</Text>
+              <Text style={[styles.th, { width: 110, textAlign: 'right' }]}>আর্থিক প্রভাব</Text>
+              <Text style={[styles.th, { flex: 1.6 }]}>কারণ / মন্তব্য</Text>
+            </View>
+
+            {pagedAuditRows.length === 0 ? (
+              <View style={{ padding: 36, alignItems: 'center', justifyContent: 'center' }}>
+                <Text style={{ fontSize: 14, color: '#64748B', fontWeight: '500' }}>
+                  {showOnlyDiscrepancies ? 'কোনো অমিলযুক্ত পণ্য পাওয়া যায়নি।' : 'কোনো পণ্য পাওয়া যায়নি।'}
+                </Text>
+              </View>
+            ) : (
+              pagedAuditRows.map((row, idx) => {
+                const hasCount = row.physicalKg !== null;
+                const isMatched = hasCount && Math.abs(row.deltaKg) < 0.01;
+                const isSurplus = hasCount && row.deltaKg >= 0.01;
+                const isShortage = hasCount && row.deltaKg <= -0.01;
+
+                return (
+                  <View
+                    key={row.id}
+                    style={[
+                      styles.tableDataRow,
+                      isShortage ? styles.shortageRow : isSurplus ? styles.surplusRow : null,
+                    ]}
+                  >
+                    <View style={[styles.td, { width: 40, alignItems: 'center' }]}>
+                      <Text style={styles.cellMuted}>{(page - 1) * pageSize + idx + 1}</Text>
+                    </View>
+
+                    <View style={[styles.td, { flex: 2 }]}>
+                      <Text style={styles.cellName} numberOfLines={1}>{row.name}</Text>
+                      <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, marginTop: 2 }}>
+                        {row.code ? <Text style={styles.auditCodeBadge}>{toBnDigits(row.code)}</Text> : null}
+                        <Text style={styles.auditBagWeightBadge}>{toBnDigits(String(row.bagKg))} কেজি বস্তা</Text>
+                      </View>
+                    </View>
+
+                    <View style={[styles.td, { width: 125, alignItems: 'flex-end' }]}>
+                      <Text style={[styles.cellBold, { color: '#0F172A' }]}>
+                        {toBnDigits(row.systemBags.toLocaleString('en-IN'))} বস্তা
+                      </Text>
+                      <Text style={{ fontSize: 11.5, color: '#64748B', marginTop: 1 }}>
+                        {toBnDigits(Math.round(row.systemKg).toLocaleString('en-IN'))} কেজি
+                      </Text>
+                    </View>
+
+                    <View style={[styles.td, { width: 110, alignItems: 'center' }]}>
+                      <TextInput
+                        value={physicalBagsMap[row.id] !== undefined ? physicalBagsMap[row.id] : String(row.systemBags)}
+                        onChangeText={val => handleBagsChange(row.id, val, row.bagKg)}
+                        placeholder={toBnDigits(String(row.systemBags))}
+                        placeholderTextColor="#94A3B8"
+                        keyboardType="numeric"
+                        selectTextOnFocus
+                        style={[
+                          styles.auditTableCellInput,
+                          isShortage ? styles.auditTableCellInputShortage : isSurplus ? styles.auditTableCellInputSurplus : null,
+                        ]}
+                      />
+                    </View>
+
+                    <View style={[styles.td, { width: 120, alignItems: 'center' }]}>
+                      <TextInput
+                        value={physicalKgMap[row.id] !== undefined ? physicalKgMap[row.id] : String(Math.round(row.systemKg))}
+                        onChangeText={val => handleKgChange(row.id, val, row.bagKg)}
+                        placeholder={toBnDigits(String(Math.round(row.systemKg)))}
+                        placeholderTextColor="#94A3B8"
+                        keyboardType="numeric"
+                        selectTextOnFocus
+                        style={[
+                          styles.auditTableCellInput,
+                          isShortage ? styles.auditTableCellInputShortage : isSurplus ? styles.auditTableCellInputSurplus : null,
+                        ]}
+                      />
+                    </View>
+
+                    <View style={[styles.td, { width: 120, alignItems: 'flex-end' }]}>
+                      {!hasCount ? (
+                        <Text style={{ fontSize: 13, color: '#94A3B8' }}>-</Text>
+                      ) : isMatched ? (
+                        <View style={styles.matchBadge}>
+                          <Text style={styles.matchBadgeText}>✓ মিলেছে</Text>
+                        </View>
+                      ) : isSurplus ? (
+                        <View style={styles.surplusBadge}>
+                          <Text style={styles.surplusBadgeText}>
+                            +{toBnDigits(String(row.deltaBags))} বস্তা
+                          </Text>
+                          <Text style={styles.surplusSubText}>
+                            (+{toBnDigits(Math.round(row.deltaKg).toLocaleString('en-IN'))} কেজি)
+                          </Text>
+                        </View>
+                      ) : (
+                        <View style={styles.shortageBadge}>
+                          <Text style={styles.shortageBadgeText}>
+                            {toBnDigits(String(row.deltaBags))} বস্তা
+                          </Text>
+                          <Text style={styles.shortageSubText}>
+                            ({toBnDigits(Math.round(row.deltaKg).toLocaleString('en-IN'))} কেজি)
+                          </Text>
+                        </View>
+                      )}
+                    </View>
+
+                    <View style={[styles.td, { width: 110, alignItems: 'flex-end' }]}>
+                      {!hasCount || isMatched ? (
+                        <Text style={{ fontSize: 13, color: '#94A3B8' }}>৳০</Text>
+                      ) : (
+                        <Text style={[styles.cellBold, { color: isSurplus ? '#16A34A' : '#DC2626' }]}>
+                          {row.deltaValue > 0 ? '+' : ''}৳{toBnDigits(Math.round(Math.abs(row.deltaValue)).toLocaleString('en-IN'))}
+                        </Text>
+                      )}
+                    </View>
+
+                    <View style={[styles.td, { flex: 1.6 }]}>
+                      <TextInput
+                        value={auditReasons[row.id] ?? ''}
+                        onChangeText={val => handleReasonChange(row.id, val)}
+                        placeholder="মন্তব্য / কারণ..."
+                        placeholderTextColor="#94A3B8"
+                        style={styles.auditReasonInput}
+                      />
+                    </View>
+                  </View>
+                );
+              })
+            )}
+          </View>
         )}
 
         {/* Pagination Footer */}
         <View style={styles.paginationFooter}>
           <Text style={styles.footerCountText}>
-            মোট {toBnDigits(String(filteredRows.length))} টি পণ্য দেখানো হচ্ছে
+            মোট {toBnDigits(String(currentTotalRows))} টি পণ্য দেখানো হচ্ছে
           </Text>
 
           <View style={styles.paginationControls}>
@@ -442,6 +972,50 @@ export function StockDashboard() {
         </View>
       </View>
 
+      {/* Bottom Action Bar for Manual Stock Adjustment */}
+      {activeTab === 'audit' && (
+        <View style={styles.auditBottomActionBar}>
+          <View style={styles.auditBottomSummary}>
+            <View style={styles.auditBottomItem}>
+              <Text style={styles.auditBottomLabel}>অডিটকৃত পণ্য:</Text>
+              <Text style={styles.auditBottomValue}>{toBnDigits(String(auditSummary.totalItems))} টি</Text>
+            </View>
+            <View style={styles.auditDivider} />
+            <View style={styles.auditBottomItem}>
+              <Text style={styles.auditBottomLabel}>পার্থক্যযুক্ত পণ্য:</Text>
+              <Text style={[styles.auditBottomValue, { color: auditSummary.discrepancyCount > 0 ? '#DC2626' : '#16A34A' }]}>
+                {toBnDigits(String(auditSummary.discrepancyCount))} টি
+              </Text>
+            </View>
+            <View style={styles.auditDivider} />
+            <View style={styles.auditBottomItem}>
+              <Text style={styles.auditBottomLabel}>ওজন তারতম্য:</Text>
+              <Text style={[styles.auditBottomValue, { color: auditSummary.totalDeltaKg < 0 ? '#DC2626' : auditSummary.totalDeltaKg > 0 ? '#16A34A' : '#0F172A' }]}>
+                {auditSummary.totalDeltaKg > 0 ? '+' : ''}{toBnDigits(Math.round(auditSummary.totalDeltaKg).toLocaleString('en-IN'))} কেজি
+              </Text>
+            </View>
+            <View style={styles.auditDivider} />
+            <View style={styles.auditBottomItem}>
+              <Text style={styles.auditBottomLabel}>আর্থিক প্রভাব:</Text>
+              <Text style={[styles.auditBottomValue, { color: auditSummary.totalDeltaValue < 0 ? '#DC2626' : auditSummary.totalDeltaValue > 0 ? '#16A34A' : '#0F172A' }]}>
+                {auditSummary.totalDeltaValue > 0 ? '+' : ''}৳{toBnDigits(Math.round(Math.abs(auditSummary.totalDeltaValue)).toLocaleString('en-IN'))}
+              </Text>
+            </View>
+          </View>
+
+          <TouchableOpacity
+            disabled={itemsToAdjust.length === 0}
+            onPress={() => setAuditConfirmModalOpen(true)}
+            style={[styles.applyAdjustmentBtn, itemsToAdjust.length === 0 && styles.applyAdjustmentBtnDisabled]}
+          >
+            <AppIcon name={icons.done} size={18} iconColor="#FFFFFF" />
+            <Text style={styles.applyAdjustmentBtnText}>
+              স্টক সমন্বয় প্রয়োগ করুন ({toBnDigits(String(itemsToAdjust.length))} টি)
+            </Text>
+          </TouchableOpacity>
+        </View>
+      )}
+
       {/* Add Product Modal (Bengali Inventory Product Modal UI.png) */}
       <Modal visible={modalOpen} transparent animationType="fade" onRequestClose={() => setModalOpen(false)}>
         <View style={styles.modalBackdrop}>
@@ -449,7 +1023,7 @@ export function StockDashboard() {
             {/* Modal Header */}
             <View style={styles.modalHeader}>
               <View style={styles.modalTitleRow}>
-                <AppIcon name={icons.products} size={22} iconColor="#006A4E" />
+                <AppIcon name={icons.products} size={22} iconColor="#1c70b9" />
                 <Text style={styles.modalTitle}>{editingProduct ? 'পণ্য সম্পাদনা' : 'নতুন পণ্য যোগ করুন'}</Text>
               </View>
               <TouchableOpacity onPress={() => setModalOpen(false)} style={styles.modalCloseBtn}>
@@ -481,24 +1055,16 @@ export function StockDashboard() {
                 </View>
               </View>
 
-              <View style={styles.modalTwoCol}>
-                <View style={styles.modalCol}>
-                  <Text style={styles.modalLabel}>একক *</Text>
-                  <View style={styles.modalSelectWrap}>
-                    <Text style={styles.modalSelectText}>{newUnit}</Text>
-                    <AppIcon name={icons.chevR} size={16} iconColor="#64748B" />
-                  </View>
-                </View>
-                <View style={styles.modalCol}>
-                  <Text style={styles.modalLabel}>বস্তায় পরিমাণ (কেজি) *</Text>
-                  <TextInput
-                    value={newBagKg}
-                    onChangeText={setNewBagKg}
-                    testID="stock-product-bag-kg"
-                    style={styles.modalInput}
-                    keyboardType="numeric"
-                  />
-                </View>
+              <View style={styles.modalCol}>
+                <Text style={styles.modalLabel}>প্রতি বস্তায় পরিমাণ (কেজি) *</Text>
+                <TextInput
+                  value={newBagKg}
+                  onChangeText={setNewBagKg}
+                  testID="stock-product-bag-kg"
+                  style={styles.modalInput}
+                  keyboardType="numeric"
+                  placeholder="৫০"
+                />
               </View>
 
               <View style={styles.modalTwoCol}>
@@ -593,7 +1159,7 @@ export function StockDashboard() {
                   বিক্রয়মূল্য: <Text style={{ fontWeight: '700' }}>৳ {viewProduct.price} / কেজি</Text>
                 </Text>
               </View>
-              <View style={{ padding: 14, alignItems: 'flex-end', borderTopWidth: 1, borderTopColor: '#E2E8E4' }}>
+              <View style={{ padding: 14, alignItems: 'flex-end', borderTopWidth: 1, borderTopColor: '#D2E3F3' }}>
                 <TouchableOpacity onPress={() => setViewProduct(null)} style={styles.modalCancelBtn}>
                   <Text style={styles.modalCancelBtnText}>বন্ধ করুন</Text>
                 </TouchableOpacity>
@@ -602,6 +1168,167 @@ export function StockDashboard() {
           </View>
         </Modal>
       )}
+
+      {bulkOpen && (
+        <BulkUploadModal kind="product" onClose={() => setBulkOpen(false)} />
+      )}
+
+      {/* Stock Adjustment Confirmation Modal */}
+      <Modal
+        visible={auditConfirmModalOpen}
+        transparent
+        animationType="fade"
+        onRequestClose={() => !isAdjusting && setAuditConfirmModalOpen(false)}
+      >
+        <View style={styles.modalBackdrop}>
+          <View style={[styles.modalBox, { maxWidth: 680 }]}>
+            {/* Modal Header */}
+            <View style={styles.modalHeader}>
+              <View style={styles.modalTitleRow}>
+                <AppIcon name={icons.stock} size={22} iconColor="#1c70b9" />
+                <Text style={styles.modalTitle}>স্টক সমন্বয় নিশ্চিতকরণ (Stock Adjustment)</Text>
+              </View>
+              <TouchableOpacity
+                disabled={isAdjusting}
+                onPress={() => setAuditConfirmModalOpen(false)}
+                style={styles.modalCloseBtn}
+              >
+                <AppIcon name={icons.cancel} size={20} iconColor="#64748B" />
+              </TouchableOpacity>
+            </View>
+
+            {/* Modal Body */}
+            <ScrollView style={[styles.modalBody, { maxHeight: 520 }]} keyboardShouldPersistTaps="handled">
+              {/* Notice Banner */}
+              <View style={styles.auditModalNotice}>
+                <Text style={styles.auditModalNoticeText}>
+                  আপনি <Text style={{ fontWeight: '800' }}>{toBnDigits(String(itemsToAdjust.length))} টি</Text> পণ্যের বর্তমান মজুদ সংশোধন করতে যাচ্ছেন। এর মাধ্যমে পণ্যের মজুদ সমন্বয় হবে এবং স্টক মুভমেন্ট হিস্ট্রিতে স্থায়ী রেকর্ড সংরক্ষিত হবে।
+                </Text>
+              </View>
+
+              {/* KPI Summary Grid */}
+              <View style={styles.auditModalSummaryRow}>
+                <View style={styles.auditModalSummaryCard}>
+                  <Text style={styles.auditModalSummaryLabel}>সমন্বয়কৃত পণ্য</Text>
+                  <Text style={styles.auditModalSummaryVal}>{toBnDigits(String(itemsToAdjust.length))} টি</Text>
+                </View>
+                <View style={styles.auditModalSummaryCard}>
+                  <Text style={styles.auditModalSummaryLabel}>মোট ওজন তারতম্য</Text>
+                  <Text
+                    style={[
+                      styles.auditModalSummaryVal,
+                      { color: auditSummary.totalDeltaKg < 0 ? '#DC2626' : auditSummary.totalDeltaKg > 0 ? '#16A34A' : '#0F172A' },
+                    ]}
+                  >
+                    {auditSummary.totalDeltaKg > 0 ? '+' : ''}{toBnDigits(Math.round(auditSummary.totalDeltaKg).toLocaleString('en-IN'))} কেজি
+                  </Text>
+                </View>
+                <View style={styles.auditModalSummaryCard}>
+                  <Text style={styles.auditModalSummaryLabel}>মোট আর্থিক প্রভাব</Text>
+                  <Text
+                    style={[
+                      styles.auditModalSummaryVal,
+                      { color: auditSummary.totalDeltaValue < 0 ? '#DC2626' : auditSummary.totalDeltaValue > 0 ? '#16A34A' : '#0F172A' },
+                    ]}
+                  >
+                    {auditSummary.totalDeltaValue > 0 ? '+' : ''}৳{toBnDigits(Math.round(Math.abs(auditSummary.totalDeltaValue)).toLocaleString('en-IN'))}
+                  </Text>
+                </View>
+              </View>
+
+              {/* Audit Note */}
+              <View style={styles.modalFormGroup}>
+                <Text style={styles.modalLabel}>অডিট সমন্বয়ের কারণ বা রেফারেন্স নোট *</Text>
+                <TextInput
+                  value={auditNote}
+                  onChangeText={setAuditNote}
+                  style={styles.modalInput}
+                  placeholder="যেমন: গুদাম নিরীক্ষা ও বার্ষিক স্টক সমন্বয়"
+                />
+              </View>
+
+              {/* Preview Table of Adjustments */}
+              <Text style={[styles.modalLabel, { marginTop: 6, marginBottom: 8 }]}>
+                সমন্বয়যোগ্য পণ্যসমূহের বিবরণ:
+              </Text>
+              <View style={{ borderWidth: 1, borderColor: '#CBD5E1', borderRadius: 8, overflow: 'hidden' }}>
+                <View style={[styles.tableHeaderRow, { backgroundColor: '#F1F5F9' }]}>
+                  <Text style={[styles.th, { flex: 2 }]}>পণ্য</Text>
+                  <Text style={[styles.th, { flex: 1.1, textAlign: 'right' }]}>বর্তমান (কেজি)</Text>
+                  <Text style={[styles.th, { flex: 1.1, textAlign: 'right' }]}>বাস্তব (কেজি)</Text>
+                  <Text style={[styles.th, { flex: 1.1, textAlign: 'right' }]}>পার্থক্য (কেজি)</Text>
+                  <Text style={[styles.th, { flex: 1.3, textAlign: 'right' }]}>আর্থিক প্রভাব (৳)</Text>
+                </View>
+                {itemsToAdjust.map(it => (
+                  <View key={it.id} style={[styles.tableDataRow, { paddingVertical: 8 }]}>
+                    <View style={[styles.td, { flex: 2 }]}>
+                      <Text style={styles.cellName}>{it.name}</Text>
+                      {it.reason ? (
+                        <Text style={{ fontSize: 11, color: '#64748B', marginTop: 1 }}>
+                          কারণ: {it.reason}
+                        </Text>
+                      ) : null}
+                    </View>
+                    <View style={[styles.td, { flex: 1.1, alignItems: 'flex-end' }]}>
+                      <Text style={styles.cellText}>
+                        {toBnDigits(Math.round(it.systemKg).toLocaleString('en-IN'))}
+                      </Text>
+                    </View>
+                    <View style={[styles.td, { flex: 1.1, alignItems: 'flex-end' }]}>
+                      <Text style={[styles.cellBold, { color: '#0F172A' }]}>
+                        {toBnDigits(Math.round(it.physicalKg!).toLocaleString('en-IN'))}
+                      </Text>
+                    </View>
+                    <View style={[styles.td, { flex: 1.1, alignItems: 'flex-end' }]}>
+                      <Text
+                        style={[
+                          styles.cellBold,
+                          { color: it.deltaKg >= 0 ? '#16A34A' : '#DC2626' },
+                        ]}
+                      >
+                        {it.deltaKg > 0 ? '+' : ''}
+                        {toBnDigits(Math.round(it.deltaKg).toLocaleString('en-IN'))}
+                      </Text>
+                    </View>
+                    <View style={[styles.td, { flex: 1.3, alignItems: 'flex-end' }]}>
+                      <Text
+                        style={[
+                          styles.cellBold,
+                          { color: it.deltaValue >= 0 ? '#16A34A' : '#DC2626' },
+                        ]}
+                      >
+                        {it.deltaValue > 0 ? '+' : ''}৳
+                        {toBnDigits(Math.round(Math.abs(it.deltaValue)).toLocaleString('en-IN'))}
+                      </Text>
+                    </View>
+                  </View>
+                ))}
+              </View>
+            </ScrollView>
+
+            {/* Modal Actions */}
+            <View style={styles.modalFooter}>
+              <TouchableOpacity
+                disabled={isAdjusting}
+                onPress={() => setAuditConfirmModalOpen(false)}
+                style={styles.modalCancelBtn}
+              >
+                <Text style={styles.modalCancelBtnText}>বাতিল</Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                disabled={isAdjusting}
+                onPress={handleApplyStockAdjustment}
+                style={[styles.modalSaveBtn, { backgroundColor: '#15803D' }]}
+              >
+                <AppIcon name={icons.done} size={18} iconColor="#fff" />
+                <Text style={styles.modalSaveBtnText}>
+                  {isAdjusting ? 'সমন্বয় করা হচ্ছে...' : 'নিশ্চিত ও সমন্বয় সংরক্ষণ করুন'}
+                </Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+        </View>
+      </Modal>
     </ScrollView>
   );
 }
@@ -609,7 +1336,7 @@ export function StockDashboard() {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#F1F5F2',
+    backgroundColor: '#F0F6FC',
   },
   contentContainer: {
     padding: 18,
@@ -701,6 +1428,20 @@ const styles = StyleSheet.create({
     gap: 10,
     zIndex: 2,
   },
+  headerBulkBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    backgroundColor: '#15803D',
+    paddingHorizontal: 12,
+    paddingVertical: 9,
+    borderRadius: 10,
+    borderTopWidth: 1,
+    borderTopColor: 'rgba(255, 255, 255, 0.45)',
+    borderBottomWidth: 2,
+    borderBottomColor: 'rgba(0, 0, 0, 0.25)',
+    ...(Platform.OS === 'web' ? ({ cursor: 'pointer' } as any) : {}),
+  },
   headerAddBtn: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -733,7 +1474,7 @@ const styles = StyleSheet.create({
     borderRadius: 14,
     padding: 16,
     borderWidth: 1,
-    borderColor: '#E2E8E4',
+    borderColor: '#D2E3F3',
     gap: 14,
   },
   kpiIconWrap: {
@@ -777,12 +1518,12 @@ const styles = StyleSheet.create({
     borderRadius: 10,
   },
   tabBtnActive: {
-    backgroundColor: '#006A4E',
+    backgroundColor: '#1c70b9',
   },
   tabBtnInactive: {
     backgroundColor: '#fff',
     borderWidth: 1,
-    borderColor: '#E2E8E4',
+    borderColor: '#D2E3F3',
   },
   tabBtnText: {
     fontSize: 14,
@@ -803,7 +1544,7 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     gap: 6,
-    backgroundColor: '#006A4E',
+    backgroundColor: '#1c70b9',
     borderRadius: 10,
     paddingHorizontal: 16,
     paddingVertical: 10,
@@ -819,7 +1560,7 @@ const styles = StyleSheet.create({
     gap: 6,
     backgroundColor: '#fff',
     borderWidth: 1,
-    borderColor: '#E2E8E4',
+    borderColor: '#D2E3F3',
     borderRadius: 10,
     paddingHorizontal: 14,
     paddingVertical: 10,
@@ -834,7 +1575,7 @@ const styles = StyleSheet.create({
     gap: 8,
     backgroundColor: '#fff',
     borderWidth: 1,
-    borderColor: '#E2E8E4',
+    borderColor: '#D2E3F3',
     borderRadius: 10,
     paddingHorizontal: 14,
     paddingVertical: 10,
@@ -852,7 +1593,7 @@ const styles = StyleSheet.create({
     backgroundColor: '#fff',
     borderRadius: 8,
     borderWidth: 1,
-    borderColor: '#E2E8E4',
+    borderColor: '#D2E3F3',
     shadowColor: '#000',
     shadowOpacity: 0.1,
     shadowRadius: 8,
@@ -877,7 +1618,7 @@ const styles = StyleSheet.create({
     borderRadius: 12,
     padding: 10,
     borderWidth: 1,
-    borderColor: '#E2E8E4',
+    borderColor: '#D2E3F3',
     marginBottom: 16,
     gap: 12,
   },
@@ -901,7 +1642,7 @@ const styles = StyleSheet.create({
     paddingHorizontal: 12,
     paddingVertical: 6,
     borderLeftWidth: 1,
-    borderLeftColor: '#E2E8E4',
+    borderLeftColor: '#D2E3F3',
   },
   categoryDropdownText: {
     fontSize: 13,
@@ -912,7 +1653,7 @@ const styles = StyleSheet.create({
     backgroundColor: '#fff',
     borderRadius: 14,
     borderWidth: 1,
-    borderColor: '#E2E8E4',
+    borderColor: '#D2E3F3',
     overflow: 'hidden',
   },
   tableHeaderRow: {
@@ -920,7 +1661,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     backgroundColor: '#F8FAFC',
     borderBottomWidth: 1,
-    borderBottomColor: '#E2E8E4',
+    borderBottomColor: '#D2E3F3',
     paddingVertical: 12,
     paddingHorizontal: 10,
   },
@@ -963,7 +1704,7 @@ const styles = StyleSheet.create({
     width: 32,
     height: 32,
     borderRadius: 16,
-    backgroundColor: '#ECFDF5',
+    backgroundColor: '#E0F0FE',
     alignItems: 'center',
     justifyContent: 'center',
   },
@@ -1028,7 +1769,7 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   pageNumberBtnActive: {
-    backgroundColor: '#006A4E',
+    backgroundColor: '#1c70b9',
   },
   pageNumberText: {
     fontSize: 12,
@@ -1059,7 +1800,7 @@ const styles = StyleSheet.create({
     paddingHorizontal: 18,
     paddingVertical: 14,
     borderBottomWidth: 1,
-    borderBottomColor: '#E2E8E4',
+    borderBottomColor: '#D2E3F3',
   },
   modalTitleRow: {
     flexDirection: 'row',
@@ -1129,7 +1870,7 @@ const styles = StyleSheet.create({
     paddingHorizontal: 18,
     paddingVertical: 12,
     borderTopWidth: 1,
-    borderTopColor: '#E2E8E4',
+    borderTopColor: '#D2E3F3',
   },
   modalCancelBtn: {
     flexDirection: 'row',
@@ -1150,7 +1891,7 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     gap: 6,
-    backgroundColor: '#006A4E',
+    backgroundColor: '#1c70b9',
     borderRadius: 8,
     paddingHorizontal: 18,
     paddingVertical: 8,
@@ -1159,5 +1900,240 @@ const styles = StyleSheet.create({
     fontSize: 13,
     color: '#fff',
     fontWeight: '700',
+  },
+  // Audit UI styles
+  discrepancyToggleBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    paddingHorizontal: 12,
+    paddingVertical: 7,
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: '#D2E3F3',
+    backgroundColor: '#fff',
+  },
+  discrepancyToggleBtnActive: {
+    backgroundColor: '#FEF2F2',
+    borderColor: '#FCA5A5',
+  },
+  discrepancyDot: {
+    width: 8,
+    height: 8,
+    borderRadius: 4,
+    backgroundColor: '#94A3B8',
+  },
+  discrepancyToggleText: {
+    fontSize: 12.5,
+    fontWeight: '600',
+    color: '#475569',
+  },
+  discrepancyToggleTextActive: {
+    color: '#DC2626',
+    fontWeight: '700',
+  },
+  auditCodeBadge: {
+    fontSize: 11,
+    fontWeight: '700',
+    color: '#1c70b9',
+    backgroundColor: '#E0F0FE',
+    paddingHorizontal: 6,
+    paddingVertical: 1,
+    borderRadius: 4,
+  },
+  auditBagWeightBadge: {
+    fontSize: 11,
+    color: '#64748B',
+    backgroundColor: '#F1F5F9',
+    paddingHorizontal: 6,
+    paddingVertical: 1,
+    borderRadius: 4,
+  },
+  auditTableCellInput: {
+    height: 38,
+    width: '100%',
+    backgroundColor: '#FFFFFF',
+    borderWidth: 1.5,
+    borderColor: '#CBD5E1',
+    borderRadius: 8,
+    textAlign: 'center',
+    fontSize: 14,
+    fontWeight: '700',
+    color: '#0F172A',
+    paddingHorizontal: 6,
+    paddingVertical: 0,
+    ...(Platform.OS === 'web' ? ({ outlineStyle: 'none' } as any) : {}),
+  },
+  auditTableCellInputShortage: {
+    borderColor: '#FCA5A5',
+    backgroundColor: '#FFF5F5',
+    color: '#DC2626',
+  },
+  auditTableCellInputSurplus: {
+    borderColor: '#86EFAC',
+    backgroundColor: '#F0FDF4',
+    color: '#15803D',
+  },
+  auditReasonInput: {
+    backgroundColor: '#FFFFFF',
+    borderWidth: 1.5,
+    borderColor: '#CBD5E1',
+    borderRadius: 8,
+    paddingHorizontal: 10,
+    height: 38,
+    fontSize: 13,
+    color: '#0F172A',
+    width: '100%',
+    paddingVertical: 0,
+    ...(Platform.OS === 'web' ? ({ outlineStyle: 'none' } as any) : {}),
+  },
+  shortageRow: {
+    backgroundColor: '#FFF7F7',
+  },
+  surplusRow: {
+    backgroundColor: '#F7FCF8',
+  },
+  matchBadge: {
+    backgroundColor: '#F1F5F9',
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+    borderRadius: 4,
+  },
+  matchBadgeText: {
+    fontSize: 11.5,
+    fontWeight: '600',
+    color: '#64748B',
+  },
+  surplusBadge: {
+    alignItems: 'flex-end',
+    backgroundColor: '#DCFCE7',
+    paddingHorizontal: 6,
+    paddingVertical: 2,
+    borderRadius: 4,
+  },
+  surplusBadgeText: {
+    fontSize: 12,
+    fontWeight: '700',
+    color: '#15803D',
+  },
+  surplusSubText: {
+    fontSize: 10,
+    color: '#166534',
+  },
+  shortageBadge: {
+    alignItems: 'flex-end',
+    backgroundColor: '#FEE2E2',
+    paddingHorizontal: 6,
+    paddingVertical: 2,
+    borderRadius: 4,
+  },
+  shortageBadgeText: {
+    fontSize: 12,
+    fontWeight: '700',
+    color: '#DC2626',
+  },
+  shortageSubText: {
+    fontSize: 10,
+    color: '#991B1B',
+  },
+  auditBottomActionBar: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    backgroundColor: '#fff',
+    borderRadius: 14,
+    paddingHorizontal: 18,
+    paddingVertical: 14,
+    marginTop: 14,
+    borderWidth: 1,
+    borderColor: '#D2E3F3',
+    ...(Platform.OS === 'web' ? {
+      boxShadow: '0 4px 16px rgba(0, 0, 0, 0.08)',
+    } as any : {}),
+  },
+  auditBottomSummary: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 16,
+  },
+  auditBottomItem: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+  },
+  auditBottomLabel: {
+    fontSize: 13,
+    color: '#64748B',
+    fontWeight: '500',
+  },
+  auditBottomValue: {
+    fontSize: 14,
+    fontWeight: '800',
+    color: '#0F172A',
+  },
+  auditDivider: {
+    width: 1,
+    height: 18,
+    backgroundColor: '#E2E8F0',
+  },
+  applyAdjustmentBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    backgroundColor: '#15803D',
+    borderRadius: 10,
+    paddingHorizontal: 20,
+    paddingVertical: 11,
+    borderTopWidth: 1,
+    borderTopColor: 'rgba(255, 255, 255, 0.4)',
+    borderBottomWidth: 2,
+    borderBottomColor: 'rgba(0, 0, 0, 0.2)',
+    ...(Platform.OS === 'web' ? ({ cursor: 'pointer' } as any) : {}),
+  },
+  applyAdjustmentBtnDisabled: {
+    backgroundColor: '#94A3B8',
+    opacity: 0.6,
+  },
+  applyAdjustmentBtnText: {
+    color: '#FFFFFF',
+    fontSize: 14,
+    fontWeight: '800',
+  },
+  auditModalNotice: {
+    backgroundColor: '#FEF3C7',
+    borderLeftWidth: 4,
+    borderLeftColor: '#D97706',
+    borderRadius: 6,
+    padding: 12,
+    marginBottom: 16,
+  },
+  auditModalNoticeText: {
+    fontSize: 13,
+    color: '#92400E',
+    lineHeight: 18,
+  },
+  auditModalSummaryRow: {
+    flexDirection: 'row',
+    gap: 12,
+    marginBottom: 16,
+  },
+  auditModalSummaryCard: {
+    flex: 1,
+    backgroundColor: '#F8FAFC',
+    borderRadius: 8,
+    padding: 12,
+    borderWidth: 1,
+    borderColor: '#E2E8F0',
+  },
+  auditModalSummaryLabel: {
+    fontSize: 12,
+    color: '#64748B',
+    fontWeight: '500',
+    marginBottom: 4,
+  },
+  auditModalSummaryVal: {
+    fontSize: 16,
+    fontWeight: '800',
+    color: '#0F172A',
   },
 });

@@ -38,6 +38,7 @@ test('creates a sale invoice with explicit rates and selected party', async ({ p
   await expect(page.getByTestId('add-product-row')).toHaveCount(1);
   const productDropdown = await page.getByTestId('product-dropdown-1').boundingBox();
   expect(productDropdown?.width ?? 0).toBeGreaterThan(320);
+  await page.getByLabel('Select product Test rice').click();
   const rate = page.getByLabel('Sale rate 1');
   await expect(rate).toHaveValue('');
   await page.getByLabel('Quantity 1').fill('2');
@@ -47,6 +48,7 @@ test('creates a sale invoice with explicit rates and selected party', async ({ p
   expect(savedSale).toBeUndefined();
 
   await page.getByLabel('Customer code').fill('340');
+  await page.getByText('Test customer').first().click();
   await page.getByTestId('complete-invoice').click();
   await expect(page.getByRole('alert')).toContainText('Enter a sale rate');
   expect(savedSale).toBeUndefined();
@@ -54,6 +56,10 @@ test('creates a sale invoice with explicit rates and selected party', async ({ p
   await rate.fill('3000');
   await page.getByTestId('complete-invoice').click();
   await expect(page.getByText('Test customer').last()).toBeVisible();
+  const dueUnderCash = page.getByTestId('modal-due-after-cash');
+  await expect(dueUnderCash).toBeVisible();
+  await expect(page.getByLabel('Cash paid')).toHaveValue('6000');
+  await expect(dueUnderCash).toContainText('পর বাকি');
   await page.getByTestId('execute-invoice').click();
 
   await expect.poll(() => savedSale).toBeTruthy();
@@ -62,6 +68,7 @@ test('creates a sale invoice with explicit rates and selected party', async ({ p
     lines: [{ productId: 'p1', unit: 'medium', enteredQty: 2, rate: 60 }],
   });
   await expect(page.getByText('SAL-E2E-1')).toBeVisible();
+  await expect(page.getByLabel('Customer code')).toBeFocused();
 });
 
 test('completes the sale workflow with keyboard navigation', async ({ page }) => {
@@ -86,11 +93,6 @@ test('completes the sale workflow with keyboard navigation', async ({ page }) =>
   await saleNavigation.focus();
   await page.keyboard.press('Enter');
 
-  const memo = page.getByLabel('Sale memo number');
-  await expect(memo).toBeFocused();
-  await memo.fill('KEY-1');
-  await memo.press('Enter');
-
   const customerCode = page.getByLabel('Customer code');
   await expect(customerCode).toBeFocused();
   await customerCode.fill('340');
@@ -110,7 +112,6 @@ test('completes the sale workflow with keyboard navigation', async ({ page }) =>
 
   const productCode = page.getByLabel('Product code 1');
   await expect(productCode).toBeFocused();
-  await expect(productCode).not.toHaveAttribute('placeholder');
   await productCode.press('ArrowDown');
   await productCode.press('Enter');
 
@@ -133,12 +134,16 @@ test('completes the sale workflow with keyboard navigation', async ({ page }) =>
   await page.keyboard.press('Enter');
 
   const cash = page.getByLabel('Cash paid');
+  await expect(cash).toBeVisible();
   await expect(cash).toBeFocused();
+  const dueUnderCashKeyboard = page.getByTestId('modal-due-after-cash');
+  await expect(dueUnderCashKeyboard).toBeVisible();
+  await expect(cash).toHaveValue('6000');
+  await expect(dueUnderCashKeyboard).toContainText('পর বাকি');
   await cash.press('Enter');
   await page.getByLabel('Bank paid').press('Enter');
   await page.getByLabel('Discount').press('Enter');
   await page.getByLabel('Transport cost').press('Enter');
-  await page.getByLabel('Landing cost').press('Enter');
   await page.getByTestId('execute-invoice').focus();
   await page.keyboard.press('Enter');
 
@@ -147,6 +152,7 @@ test('completes the sale workflow with keyboard navigation', async ({ page }) =>
     customerId: 'c1',
     lines: [{ productId: 'p1', unit: 'medium', enteredQty: 2, rate: 60 }],
   });
+  await expect(customerCode).toBeFocused();
 });
 
 test('completes the purchase workflow with keyboard navigation', async ({ page }) => {
@@ -171,13 +177,8 @@ test('completes the purchase workflow with keyboard navigation', async ({ page }
   await purchaseNavigation.focus();
   await page.keyboard.press('Enter');
 
-  const memo = page.getByLabel('Purchase memo number');
-  await expect(memo).toBeFocused();
-  await expect(memo).not.toHaveAttribute('placeholder');
-  await memo.fill('KEY-2');
-  await memo.press('Enter');
-
   const vendorCode = page.getByLabel('Vendor code');
+  await expect(vendorCode).toBeFocused();
   await vendorCode.fill('VEN-982');
   await vendorCode.press('ArrowDown');
   await vendorCode.press('Enter');
@@ -185,13 +186,11 @@ test('completes the purchase workflow with keyboard navigation', async ({ page }
   await page.getByLabel('Invoice date').press('Enter');
 
   const productCode = page.getByLabel('Product code 1');
-  await expect(productCode).not.toHaveAttribute('placeholder');
   await productCode.fill('RICE-001');
   await productCode.press('Enter');
   await page.getByLabel('Quantity 1').fill('2');
   await page.getByLabel('Quantity 1').press('Enter');
   const purchaseRate = page.getByLabel('Purchase rate 1');
-  await expect(purchaseRate).not.toHaveAttribute('placeholder');
   await purchaseRate.fill('3000');
   await purchaseRate.press('Enter');
   const complete = page.getByTestId('complete-invoice');
@@ -202,7 +201,6 @@ test('completes the purchase workflow with keyboard navigation', async ({ page }
   await page.getByLabel('Bank paid').press('Enter');
   await page.getByLabel('Discount').press('Enter');
   await page.getByLabel('Transport cost').press('Enter');
-  await page.getByLabel('Landing cost').press('Enter');
   await page.getByTestId('execute-invoice').focus();
   await page.keyboard.press('Enter');
 
@@ -240,6 +238,62 @@ test('saves and reloads the vendor code entered in the party form', async ({ pag
 
   await expect.poll(() => savedVendor?.code).toBe('VEND-ALPHA-01');
   await expect(page.getByText('VEND-ALPHA-01')).toBeVisible();
+});
+
+test('creates and edits a customer, then finds the updated customer in sales', async ({ page }) => {
+  let createdCustomer: Record<string, unknown> | undefined;
+  let updatedCustomer: Record<string, unknown> | undefined;
+  const customers = [...bootstrap.customers];
+  await page.route('**/api/**', async route => {
+    const path = new URL(route.request().url()).pathname;
+    if (path.endsWith('/bootstrap')) return route.fulfill({ json: { ...bootstrap, customers } });
+    if (path.endsWith('/customers') && route.request().method() === 'POST') {
+      const body = route.request().postDataJSON() as Record<string, unknown>;
+      createdCustomer = body;
+      customers.push({ id: 'c-new', code: '', name: '', mobile: '', ...body, opening: Number(body.opening) });
+      return route.fulfill({ status: 201, json: { id: 'c-new' } });
+    }
+    if (path.endsWith('/customers/c-new') && route.request().method() === 'PUT') {
+      const body = route.request().postDataJSON() as Record<string, unknown>;
+      updatedCustomer = body;
+      Object.assign(customers.find(customer => customer.id === 'c-new')!, body);
+      return route.fulfill({ json: { id: 'c-new' } });
+    }
+    if (path.endsWith('/reminders')) return route.fulfill({ json: { reminders: [] } });
+    return route.fulfill({ json: [] });
+  });
+
+  const bootstrapResponse = page.waitForResponse(response => response.url().endsWith('/api/bootstrap'));
+  await page.goto('/');
+  await bootstrapResponse;
+  await page.evaluate(() => new Promise<void>(resolve => requestAnimationFrame(() => requestAnimationFrame(() => resolve()))));
+
+  await page.getByTestId('nav-customers').click();
+  await page.getByTestId('list-page-add').click();
+  await page.getByLabel('Party code').fill('CUST-ALPHA');
+  await page.getByLabel('Party name').fill('Customer create test');
+  const afterCreate = page.waitForResponse(response => response.url().endsWith('/api/bootstrap'));
+  await page.getByTestId('save-party').click();
+  await afterCreate;
+  await expect.poll(() => createdCustomer?.code).toBe('CUST-ALPHA');
+  await expect(page.getByText('Customer create test')).toBeVisible();
+
+  await page.getByText('Customer create test').click();
+  await page.getByTestId('edit-party').click();
+  await page.getByLabel('Party code').fill('CUST-ALPHA-EDITED');
+  await page.getByLabel('Party name').fill('Customer edit test');
+  const afterUpdate = page.waitForResponse(response => response.url().endsWith('/api/bootstrap'));
+  await page.getByTestId('save-party').click();
+  await afterUpdate;
+  await expect.poll(() => updatedCustomer?.code).toBe('CUST-ALPHA-EDITED');
+  await expect(page.getByText('Customer edit test')).toBeVisible();
+
+  await page.getByTestId('nav-sale').click();
+  const customerCode = page.getByLabel('Customer code');
+  await customerCode.fill('CUST-ALPHA-EDITED');
+  await expect(page.getByText('Customer edit test')).toBeVisible();
+  await page.getByText('Customer edit test').last().click();
+  await expect(customerCode).toHaveValue('CUST-ALPHA-EDITED');
 });
 
 test('saves and reloads product code, description, and unit through the database API', async ({ page }) => {

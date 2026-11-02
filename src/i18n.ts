@@ -108,7 +108,10 @@ const d = {
     cancelBtn:'বাতিল করুন', saveDraft:'ড্রাফট সংরক্ষণ',
     stockDashboard:'মজুদ পণ্য', physicalStock:'মোট ফিজিক্যাল মজুদ', onTransitStock:'মোট অন-ট্রানজিট মজুদ', totalStockLabel:'সর্বমোট মজুদ', stockMovement:'স্টক মুভমেন্ট', excelDownload:'এক্সেল ডাউনলোড',
     searchProductCodeOrName:'পণ্য কোড বা পণ্যের নাম দিয়ে খুঁজুন...', allProducts:'সব পণ্য', addNewProduct:'নতুন পণ্য যোগ করুন', bagQtyKg:'বস্তায় পরিমাণ (কেজি)', openingStockBags:'প্রারম্ভিক মজুদ (বস্তা)', purchaseCostRate:'ক্রয়মূল্য (৳)', optionalDesc:'বিবরণ (ঐচ্ছিক)',
-    expenseDashboard:'খরচ', operationExpense:'অপারেশন খরচ', allExpenses:'সকল খরচ', voucherNo:'ভাউচার নং', expenseKind:'খরচের ধরন', expenseCategory:'খরচের ক্যাটাগরি', paymentMethod:'প্রদান পদ্ধতি', payerName:'প্রদানকারীর নাম (ঐচ্ছিক)', responsiblePerson:'দায়িত্বপ্রাপ্ত ব্যক্তি (ঐচ্ছিক)', saveBtn:'সংরক্ষণ করুন', reports:'রিপোর্ট', office:'অফিস' },
+    expenseDashboard:'খরচ', operationExpense:'অপারেশন খরচ', allExpenses:'সকল খরচ', voucherNo:'ভাউচার নং', expenseKind:'খরচের ধরন', expenseCategory:'খরচের ক্যাটাগরি', paymentMethod:'প্রদান পদ্ধতি', payerName:'প্রদানকারীর নাম (ঐচ্ছিক)', responsiblePerson:'দায়িত্বপ্রাপ্ত ব্যক্তি (ঐচ্ছিক)', saveBtn:'সংরক্ষণ করুন', reports:'রিপোর্ট', office:'অফিস',
+    bulkUpload:'বাল্ক আপলোড', bulkProductUpload:'বাল্ক পণ্য আপলোড', bulkCustomerUpload:'বাল্ক কাস্টমার আপলোড', bulkVendorUpload:'বাল্ক সরবরাহকারী আপলোড',
+    downloadTemplate:'টেমপ্লেট ডাউনলোড', pasteCsvOrChoose:'CSV ফাইল বা টেক্সট পেস্ট করুন', parseAndPreview:'যাচাই ও প্রিভিউ', uploadNow:'আপলোড সম্পন্ন করুন',
+    validRows:'বৈধ রেকর্ড', invalidRows:'ত্রুটিপূর্ণ রেকর্ড', totalRecords:'মোট রেকর্ড' },
   en: { home:'Home', sale:'Sales', purchase:'Purchase', accounts:'Accounts', accountsLabel:'Accounts', more:'More', products:'Products', customers:'Customers', vendors:'Vendors',
     receivable:'Receivable', payable:'Payable', profit:'Profit', stock:'Stock', todaySale:"Today's Sales", todayCollect:"Today's Collection", todayProfit:"Today's Profit",
     totalDue:'Total Receivable', totalPayable:'Total Payable', doSale:'New Sale', doPurchase:'New Purchase', collect:'Receive Money', pay:'Pay Money',
@@ -217,7 +220,10 @@ const d = {
     cancelBtn:'Cancel', saveDraft:'Save Draft',
     stockDashboard:'Stock Inventory', physicalStock:'Total Physical Stock', onTransitStock:'Total In-Transit Stock', totalStockLabel:'Grand Total Stock', stockMovement:'Stock Movement', excelDownload:'Download Excel',
     searchProductCodeOrName:'Search by product code or name...', allProducts:'All Products', addNewProduct:'Add New Product', bagQtyKg:'Weight per Bag (KG)', openingStockBags:'Opening Stock (Bags)', purchaseCostRate:'Purchase Cost (৳)', optionalDesc:'Description (Optional)',
-    expenseDashboard:'Expenses', operationExpense:'Operational Expense', allExpenses:'All Expenses', voucherNo:'Voucher No', expenseKind:'Expense Type', expenseCategory:'Expense Category', paymentMethod:'Payment Method', payerName:'Payer Name (Optional)', responsiblePerson:'Responsible Person (Optional)', saveBtn:'Save', reports:'Reports', office:'Office' },
+    expenseDashboard:'Expenses', operationExpense:'Operational Expense', allExpenses:'All Expenses', voucherNo:'Voucher No', expenseKind:'Expense Type', expenseCategory:'Expense Category', paymentMethod:'Payment Method', payerName:'Payer Name (Optional)', responsiblePerson:'Responsible Person (Optional)', saveBtn:'Save', reports:'Reports', office:'Office',
+    bulkUpload:'Bulk Upload', bulkProductUpload:'Bulk Product Upload', bulkCustomerUpload:'Bulk Customer Upload', bulkVendorUpload:'Bulk Vendor Upload',
+    downloadTemplate:'Download Template', pasteCsvOrChoose:'Select CSV file or paste text', parseAndPreview:'Parse & Preview', uploadNow:'Upload Now',
+    validRows:'Valid Records', invalidRows:'Invalid Records', totalRecords:'Total Records' },
 };
 export type Key = keyof typeof d.bn;
 export const tr = (l: Lang, k: Key) => d[l][k];

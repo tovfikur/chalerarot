@@ -42,6 +42,98 @@ products.get('/', async (_req: Request, res: Response) => {
   res.json(list.map(productJson));
 });
 
+// POST /api/products/bulk
+products.post('/bulk', async (req: Request, res: Response) => {
+  try {
+    const { items } = req.body ?? {};
+    if (!Array.isArray(items) || items.length === 0) {
+      return res.status(400).json({ error: 'Items array is required' });
+    }
+    const day = businessToday();
+    const createdList: any[] = [];
+    const errors: { row: number; name?: string; error: string }[] = [];
+
+    await db.$transaction(async tx => {
+      const existing = await tx.product.findMany({
+        where: { deletedAt: null, code: { not: null } },
+        select: { code: true },
+      });
+      const usedCodes = new Set(
+        existing.map(p => p.code?.trim().toLowerCase()).filter(Boolean)
+      );
+
+      for (let i = 0; i < items.length; i++) {
+        const item = items[i];
+        const rowNum = i + 1;
+        const name = String(item.name ?? '').trim();
+        if (!name) {
+          errors.push({ row: rowNum, error: 'Product name is required' });
+          continue;
+        }
+        const price = parsePrice(item.price);
+        if (price === null) {
+          errors.push({ row: rowNum, name, error: 'Sale price must be a number greater than 0' });
+          continue;
+        }
+        let code = String(item.code ?? '').trim() || null;
+        if (code) {
+          const codeLower = code.toLowerCase();
+          if (usedCodes.has(codeLower)) {
+            errors.push({ row: rowNum, name, error: `Product code '${code}' is already in use` });
+            continue;
+          }
+          usedCodes.add(codeLower);
+        }
+        const sb = num(item.smallBagKg, 25);
+        const mb = num(item.mediumBagKg ?? item.bagKg, 50);
+        const lb = num(item.largeBagKg, 50);
+        const o = Math.max(0, num(item.opening ?? item.openingQtyKg));
+        const c = Math.max(0, num(item.cost));
+        const openingValue = round2(o * c);
+
+        const created = await tx.product.create({
+          data: {
+            code,
+            name,
+            description: String(item.description ?? '').trim() || null,
+            uom: String(item.uom ?? 'বস্তা').trim() || 'বস্তা',
+            cost: c,
+            price,
+            openingQtyKg: o,
+            qtyKg: o,
+            openingUnitCost: c,
+            openingValue,
+            stockValue: openingValue,
+            smallBagKg: sb > 0 ? sb : 25,
+            mediumBagKg: mb > 0 ? mb : 50,
+            largeBagKg: lb > 0 ? lb : 50,
+          },
+        });
+        if (o > 0) {
+          await writeMovement(tx, created.id, {
+            type: 'OPENING',
+            bucket: 'sellable',
+            qtyKg: o,
+            unitCost: c,
+            date: day,
+            refId: created.id,
+          });
+        }
+        createdList.push(productJson(created));
+      }
+    });
+
+    res.status(201).json({
+      total: items.length,
+      successCount: createdList.length,
+      errors,
+      created: createdList,
+    });
+  } catch (e) {
+    res.status(500).json({ error: 'Failed to bulk import products' });
+  }
+});
+
 // POST /api/products
 products.post('/', async (req: Request, res: Response) => {
   try {
@@ -145,5 +237,63 @@ products.delete('/:id', async (req: Request, res: Response) => {
     res.json({ id });
   } catch (e) {
     res.status(500).json({ error: 'Failed to delete product' });
+  }
+});
+
+// POST /api/products/adjust - batch stock adjustments from manual inventory audit
+products.post('/adjust', async (req: Request, res: Response) => {
+  try {
+    const { items, date, note } = req.body ?? {};
+    if (!Array.isArray(items) || items.length === 0) {
+      return res.status(400).json({ error: 'Items array is required' });
+    }
+    const day = date ? String(date).slice(0, 10) : businessToday();
+    const auditNote = note && String(note).trim() ? String(note).trim() : 'ম্যানুয়াল স্টক অডিট সমন্বয়';
+
+    const results = await db.$transaction(async tx => {
+      const adjusted: any[] = [];
+      for (const it of items) {
+        const productId = String(it.productId ?? '');
+        if (!productId) continue;
+        const cur = await tx.product.findUnique({ where: { id: productId } });
+        if (!cur || cur.deletedAt) continue;
+
+        let deltaKg = 0;
+        if (it.physicalQtyKg !== undefined) {
+          const targetKg = Math.max(0, round2(num(it.physicalQtyKg)));
+          deltaKg = round2(targetKg - cur.qtyKg);
+        } else if (it.deltaKg !== undefined) {
+          deltaKg = round2(num(it.deltaKg));
+        }
+
+        if (deltaKg !== 0) {
+          const unitCost = cur.stockValue > 0 && cur.qtyKg > 0 ? round2(cur.stockValue / cur.qtyKg) : cur.cost;
+          const lineReason = it.reason ? `${auditNote} - ${String(it.reason).trim()}` : auditNote;
+          await writeMovement(tx, cur.id, {
+            type: 'ADJUSTMENT',
+            bucket: 'sellable',
+            qtyKg: deltaKg,
+            unitCost,
+            date: day,
+            refId: lineReason,
+          });
+          adjusted.push({
+            id: cur.id,
+            name: cur.name,
+            code: cur.code,
+            beforeKg: cur.qtyKg,
+            deltaKg,
+            afterKg: round2(cur.qtyKg + deltaKg),
+            unitCost,
+          });
+        }
+      }
+      return adjusted;
+    });
+
+    res.json({ success: true, count: results.length, adjusted: results });
+  } catch (e) {
+    console.error('Stock adjust error:', e);
+    res.status(500).json({ error: e instanceof Error ? e.message : 'Failed to adjust stock' });
   }
 });

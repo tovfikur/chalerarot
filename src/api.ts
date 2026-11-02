@@ -30,6 +30,12 @@ async function req<T>(path: string, init?: RequestInit): Promise<T> {
 }
 
 export type IdRes = { id: string };
+export type BulkImportRes = {
+  total: number;
+  successCount: number;
+  errors: { row: number; name?: string; error: string }[];
+  created: any[];
+};
 /** Product create/update response: the saved row (already mapped for the app). */
 export type ProductRes = { id: string; product: {
   id: string; code?: string; name: string; description?: string; cost: number; price: number; opening: number; qty: number;
@@ -44,7 +50,7 @@ export type TxnResult = { id: string; invoiceNo?: string; total: number };
 export type SettlementStatus = 'paid' | 'partial' | 'due';
 
 export type TxnItem = {
-  productName: string; unit: string; enteredQty: number; qtyKg: number; rate: number;
+  productName: string; unit: string; enteredQty: number; qtyKg: number; rate: number; otherCost?: number; unitCost?: number;
 };
 /** Payment account recorded on the ledger row when the document was saved. */
 export type TxnPayment = { accountName: string | null; method: string; amount: number; date: string } | null;
@@ -142,11 +148,16 @@ export const api = {
 
   // Both return the saved row so the store can patch one product in place.
   createProduct: (b: object) => req<ProductRes>('/products', { method: 'POST', body: JSON.stringify(b) }),
+  bulkCreateProducts: (items: any[]) => req<BulkImportRes>('/products/bulk', { method: 'POST', body: JSON.stringify({ items }) }),
+  adjustStock: (b: { items: any[]; date?: string; note?: string }) =>
+    req<{ success: boolean; count: number; adjusted: any[] }>('/products/adjust', { method: 'POST', body: JSON.stringify(b) }),
   updateProduct: (id: string, b: object) => req<ProductRes>(`/products/${id}`, { method: 'PUT', body: JSON.stringify(b) }),
   deleteProduct: (id: string) => req<IdRes>(`/products/${id}`, { method: 'DELETE' }),
 
   createParty: (kind: 'c' | 'v', b: object) =>
     req<IdRes>(kind === 'c' ? '/customers' : '/vendors', { method: 'POST', body: JSON.stringify(b) }),
+  bulkCreateCustomers: (items: any[]) => req<BulkImportRes>('/customers/bulk', { method: 'POST', body: JSON.stringify({ items }) }),
+  bulkCreateVendors: (items: any[]) => req<BulkImportRes>('/vendors/bulk', { method: 'POST', body: JSON.stringify({ items }) }),
   updateParty: (kind: 'c' | 'v', id: string, b: object) =>
     req<IdRes>(`${kind === 'c' ? '/customers' : '/vendors'}/${id}`, { method: 'PUT', body: JSON.stringify(b) }),
   deleteParty: (kind: 'c' | 'v', id: string) =>
