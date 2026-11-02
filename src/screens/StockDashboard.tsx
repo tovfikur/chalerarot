@@ -2,7 +2,7 @@ import React, { useState, useMemo, useEffect, useRef } from 'react';
 import { View, Text, TextInput, TouchableOpacity, ScrollView, StyleSheet, Modal, Platform, Alert } from 'react-native';
 import { useApp, Product } from '../store';
 import { toBnDigits, useNum } from '../ui';
-import { toEnDigits, normalizeInput } from '../bn';
+import { toEnDigits, normalizeInput, parseNum } from '../bn';
 import { AppIcon, icons } from '../icons';
 import { BulkUploadModal } from '../BulkUploadModal';
 import {
@@ -14,7 +14,7 @@ import {
 } from '../stockReport';
 
 export function StockDashboard() {
-  const { t, products, stockTx, saveProduct, adjustStock } = useApp();
+  const { t, products, stockTx, saveProduct, adjustStock, deleteProduct } = useApp();
   const n = useNum();
 
   // Active view tab: 'products' | 'movements' | 'audit'
@@ -57,7 +57,7 @@ export function StockDashboard() {
     setNewCode('');
     setNewName('');
     setNewUnit('বস্তা');
-    setNewBagKg('');
+    setNewBagKg('50');
     setNewOpeningBags('');
     setNewCostRate('');
     setNewSalePrice('');
@@ -72,9 +72,10 @@ export function StockDashboard() {
     setNewName(product.name);
     setNewUnit(product.uom || 'বস্তা');
     setNewBagKg(String(bagKg));
-    setNewOpeningBags(String(product.opening / bagKg));
-    setNewCostRate(String(product.cost));
-    setNewSalePrice(String(product.price));
+    const opBags = bagKg > 0 ? Math.round(((product.opening || 0) / bagKg) * 100) / 100 : 0;
+    setNewOpeningBags(opBags > 0 ? String(opBags) : '');
+    setNewCostRate(product.cost > 0 ? String(product.cost) : '');
+    setNewSalePrice(product.price > 0 ? String(product.price) : '');
     setNewDescription(product.description ?? '');
     setModalOpen(true);
   };
@@ -354,41 +355,47 @@ export function StockDashboard() {
     }
   };
 
-  // Save new product from modal
+  // Save or update product from modal
   const handleSaveProduct = async () => {
-    if (!newName.trim()) {
+    const trimmedName = newName.trim();
+    if (!trimmedName) {
       Alert.alert(t('invalid'), 'পণ্যের নাম আবশ্যক।');
       return;
     }
 
-    const bagKg = parseFloat(newBagKg);
-    if (!Number.isFinite(bagKg) || bagKg <= 0) {
-      Alert.alert(t('invalidBag'));
+    const bagKg = parseNum(newBagKg) || 50;
+    if (bagKg <= 0) {
+      Alert.alert(t('invalidBag'), 'প্রতি বস্তায় কেজির পরিমাণ ০ এর বেশি হতে হবে।');
       return;
     }
-    const openingBags = parseFloat(newOpeningBags) || 0;
-    const cost = parseFloat(newCostRate) || 0;
-    const price = parseFloat(newSalePrice);
+    const openingBags = parseNum(newOpeningBags) || 0;
+    const cost = parseNum(newCostRate) || 0;
+    const price = parseNum(newSalePrice);
     if (!Number.isFinite(price) || price <= 0) {
-      Alert.alert(t('invalidSalePrice'));
+      Alert.alert(t('invalidSalePrice'), 'সঠিক বিক্রয়দর দিন (০ এর বেশি)।');
       return;
     }
-    const openingKg = openingBags * bagKg;
+    const openingKg = Math.round(openingBags * bagKg * 100) / 100;
 
     try {
+      const isEdit = !!editingProduct;
+      const targetId = editingProduct?.id ?? `p_${Date.now()}`;
+      const openingDelta = openingKg - (editingProduct?.opening || 0);
+      const computedQty = isEdit ? Math.max(0, (editingProduct.qty || 0) + openingDelta) : openingKg;
+
       await saveProduct({
-        id: editingProduct?.id ?? `p_${Date.now()}`,
+        id: targetId,
         code: newCode.trim(),
-        name: newName.trim(),
+        name: trimmedName,
         description: newDescription.trim(),
         cost,
         price: Math.round(price * 100) / 100,
         opening: openingKg,
-        qty: openingKg,
-        uom: newUnit,
-        smallBagKg: 25,
+        qty: computedQty,
+        uom: newUnit || 'বস্তা',
+        smallBagKg: editingProduct?.smallBagKg || 25,
         mediumBagKg: bagKg,
-        largeBagKg: 50,
+        largeBagKg: editingProduct?.largeBagKg || 50,
       });
 
       setModalOpen(false);
@@ -399,7 +406,7 @@ export function StockDashboard() {
       setNewCostRate('');
       setNewSalePrice('');
       setNewDescription('');
-      Alert.alert(t('done'), 'নতুন পণ্য সফলভাবে যোগ করা হয়েছে।');
+      Alert.alert(t('done'), isEdit ? 'পণ্য সফলভাবে আপডেট করা হয়েছে।' : 'নতুন পণ্য সফলভাবে যোগ করা হয়েছে।');
     } catch (err) {
       Alert.alert(t('invalid'), err instanceof Error ? err.message : 'সংরক্ষণ ব্যর্থ হয়েছে।');
     }
@@ -1016,8 +1023,8 @@ export function StockDashboard() {
         </View>
       )}
 
-      {/* Add Product Modal (Bengali Inventory Product Modal UI.png) */}
-      <Modal visible={modalOpen} transparent animationType="fade" onRequestClose={() => setModalOpen(false)}>
+      {/* Add / Edit Product Modal */}
+      <Modal visible={modalOpen} transparent animationType="fade" onRequestClose={() => { setModalOpen(false); setEditingProduct(null); }}>
         <View style={styles.modalBackdrop}>
           <View style={styles.modalBox}>
             {/* Modal Header */}
@@ -1026,7 +1033,7 @@ export function StockDashboard() {
                 <AppIcon name={icons.products} size={22} iconColor="#1c70b9" />
                 <Text style={styles.modalTitle}>{editingProduct ? 'পণ্য সম্পাদনা' : 'নতুন পণ্য যোগ করুন'}</Text>
               </View>
-              <TouchableOpacity onPress={() => setModalOpen(false)} style={styles.modalCloseBtn}>
+              <TouchableOpacity onPress={() => { setModalOpen(false); setEditingProduct(null); }} style={styles.modalCloseBtn}>
                 <AppIcon name={icons.cancel} size={20} iconColor="#64748B" />
               </TouchableOpacity>
             </View>
@@ -1034,40 +1041,43 @@ export function StockDashboard() {
             {/* Modal Form Fields */}
             <ScrollView style={styles.modalBody} keyboardShouldPersistTaps="handled">
               <View style={styles.modalTwoCol}>
-                <View style={styles.modalCol}>
-                  <Text style={styles.modalLabel}>পণ্য কোড</Text>
+                <View style={[styles.modalCol, { flex: 1 }]}>
+                  <Text style={styles.modalLabel}>পণ্য কোড (ঐচ্ছিক)</Text>
                   <TextInput
                     value={newCode}
                     onChangeText={setNewCode}
                     testID="stock-product-code"
                     style={styles.modalInput}
+                    placeholder="কোড"
+                    placeholderTextColor="#94A3B8"
                   />
                 </View>
-                <View style={styles.modalCol}>
+                <View style={[styles.modalCol, { flex: 1.6 }]}>
                   <Text style={styles.modalLabel}>পণ্যের নাম *</Text>
                   <TextInput
                     value={newName}
                     onChangeText={setNewName}
                     testID="stock-product-name"
                     style={styles.modalInput}
-                    placeholder="খুদ চাল"
+                    placeholder="পণ্যের নাম লিখুন..."
+                    placeholderTextColor="#94A3B8"
                   />
                 </View>
               </View>
 
-              <View style={styles.modalCol}>
-                <Text style={styles.modalLabel}>প্রতি বস্তায় পরিমাণ (কেজি) *</Text>
-                <TextInput
-                  value={newBagKg}
-                  onChangeText={setNewBagKg}
-                  testID="stock-product-bag-kg"
-                  style={styles.modalInput}
-                  keyboardType="numeric"
-                  placeholder="৫০"
-                />
-              </View>
-
               <View style={styles.modalTwoCol}>
+                <View style={styles.modalCol}>
+                  <Text style={styles.modalLabel}>প্রতি বস্তায় পরিমাণ (কেজি) *</Text>
+                  <TextInput
+                    value={newBagKg}
+                    onChangeText={setNewBagKg}
+                    testID="stock-product-bag-kg"
+                    style={styles.modalInput}
+                    keyboardType="numeric"
+                    placeholder="৫০"
+                    placeholderTextColor="#94A3B8"
+                  />
+                </View>
                 <View style={styles.modalCol}>
                   <Text style={styles.modalLabel}>প্রারম্ভিক মজুদ (বস্তা)</Text>
                   <TextInput
@@ -1076,27 +1086,46 @@ export function StockDashboard() {
                     testID="stock-product-opening"
                     style={styles.modalInput}
                     keyboardType="numeric"
+                    placeholder="০"
+                    placeholderTextColor="#94A3B8"
                   />
                 </View>
+              </View>
+
+              <View style={styles.modalTwoCol}>
                 <View style={styles.modalCol}>
-                  <Text style={styles.modalLabel}>ক্রয়মূল্য (৳)</Text>
+                  <Text style={styles.modalLabel}>ক্রয়দর (প্রতি কেজি ৳)</Text>
                   <TextInput
                     value={newCostRate}
                     onChangeText={setNewCostRate}
                     testID="stock-product-cost"
                     style={styles.modalInput}
                     keyboardType="numeric"
+                    placeholder="০"
+                    placeholderTextColor="#94A3B8"
                   />
+                  {parseNum(newCostRate) > 0 && (
+                    <Text style={{ fontSize: 11, color: '#64748B', marginTop: 4 }}>
+                      প্রতি বস্তা: ৳{toBnDigits(String(Math.round(parseNum(newCostRate) * (parseNum(newBagKg) || 50))))}
+                    </Text>
+                  )}
                 </View>
                 <View style={styles.modalCol}>
-                  <Text style={styles.modalLabel}>বিক্রয়মূল্য (৳) *</Text>
+                  <Text style={styles.modalLabel}>বিক্রয়দর (প্রতি কেজি ৳) *</Text>
                   <TextInput
                     value={newSalePrice}
                     onChangeText={setNewSalePrice}
                     testID="stock-product-price"
                     style={styles.modalInput}
                     keyboardType="numeric"
+                    placeholder="০"
+                    placeholderTextColor="#94A3B8"
                   />
+                  {parseNum(newSalePrice) > 0 && (
+                    <Text style={{ fontSize: 11, color: '#047857', fontWeight: '600', marginTop: 4 }}>
+                      প্রতি বস্তা: ৳{toBnDigits(String(Math.round(parseNum(newSalePrice) * (parseNum(newBagKg) || 50))))}
+                    </Text>
+                  )}
                 </View>
               </View>
 
@@ -1106,8 +1135,9 @@ export function StockDashboard() {
                   value={newDescription}
                   onChangeText={setNewDescription}
                   testID="stock-product-description"
-                  style={[styles.modalInput, { height: 75, textAlignVertical: 'top' }]}
+                  style={[styles.modalInput, { height: 65, textAlignVertical: 'top' }]}
                   placeholder="পণ্যের অতিরিক্ত বিবরণ লিখুন..."
+                  placeholderTextColor="#94A3B8"
                   multiline
                 />
               </View>
@@ -1115,14 +1145,46 @@ export function StockDashboard() {
 
             {/* Modal Actions */}
             <View style={styles.modalFooter}>
-              <TouchableOpacity onPress={() => setModalOpen(false)} style={styles.modalCancelBtn}>
+              <TouchableOpacity onPress={() => { setModalOpen(false); setEditingProduct(null); }} style={styles.modalCancelBtn}>
                 <AppIcon name={icons.cancel} size={16} iconColor="#475569" />
                 <Text style={styles.modalCancelBtnText}>বাতিল</Text>
               </TouchableOpacity>
 
+              {editingProduct && (
+                <TouchableOpacity
+                  onPress={() => {
+                    Alert.alert(
+                      'নিশ্চিত করুন',
+                      `আপনি কি '${editingProduct.name}' পণ্যটি ট্র্যাশে পাঠাতে চান?`,
+                      [
+                        { text: 'না', style: 'cancel' },
+                        {
+                          text: 'মুছুন',
+                          style: 'destructive',
+                          onPress: async () => {
+                            try {
+                              await deleteProduct(editingProduct.id);
+                              setModalOpen(false);
+                              setEditingProduct(null);
+                              Alert.alert(t('done'), 'পণ্য সফলভাবে ট্র্যাশে পাঠানো হয়েছে।');
+                            } catch (err) {
+                              Alert.alert(t('invalid'), err instanceof Error ? err.message : 'মুছে ফেলা ব্যর্থ হয়েছে।');
+                            }
+                          },
+                        },
+                      ]
+                    );
+                  }}
+                  style={[styles.modalCancelBtn, { borderColor: '#FCA5A5', backgroundColor: '#FEF2F2' }]}
+                >
+                  <AppIcon name={icons.del} size={16} iconColor="#DC2626" />
+                  <Text style={[styles.modalCancelBtnText, { color: '#DC2626' }]}>মুছুন</Text>
+                </TouchableOpacity>
+              )}
+
               <TouchableOpacity onPress={handleSaveProduct} testID="stock-save-product" style={styles.modalSaveBtn}>
                 <AppIcon name={icons.save} size={18} iconColor="#fff" />
-                <Text style={styles.modalSaveBtnText}>সংরক্ষণ করুন</Text>
+                <Text style={styles.modalSaveBtnText}>{editingProduct ? 'আপডেট করুন' : 'সংরক্ষণ করুন'}</Text>
               </TouchableOpacity>
             </View>
           </View>
