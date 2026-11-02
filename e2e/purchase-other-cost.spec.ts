@@ -8,10 +8,10 @@ test.describe('Purchase other cost per bag feature', () => {
     // 1. Verify header has "অন্যান্য খরচ/বস্তা (৳)"
     await expect(page.getByText('অন্যান্য খরচ/বস্তা (৳)')).toBeVisible();
 
-    // 2. In sale mode it should ALSO be visible now
+    // 2. In sale mode it should NOT be visible (only for purchases)
     await page.goto('http://localhost:3001/#/sale');
     await page.waitForLoadState('networkidle');
-    await expect(page.getByText('অন্যান্য খরচ/বস্তা (৳)')).toBeVisible();
+    await expect(page.getByText('অন্যান্য খরচ/বস্তা (৳)')).not.toBeVisible();
 
     // 3. Return to purchase mode
     await page.goto('http://localhost:3001/#/purchase');
@@ -63,5 +63,22 @@ test.describe('Purchase other cost per bag feature', () => {
     await expect(page.getByText('ক্রয় নিশ্চিতকরণ ও বিবরণ পর্যালোচনা')).toBeVisible();
     await expect(page.getByText(/মোট ইনভয়েস মূল্য:\s*৳৩০০০০/)).toBeVisible();
     await expect(page.getByLabel('Cash paid')).toHaveValue('30000');
+
+    // 12. Modal should show per-bag other cost summary (10 * 50 = 500)
+    await expect(page.getByText(/মোট বস্তা প্রতি খরচ/)).toBeVisible();
+
+    // 13. Execute purchase invoice
+    const executeBtn = page.getByTestId('execute-invoice');
+    await executeBtn.click();
+    await page.waitForTimeout(1200);
+
+    // 14. Check /#/expense to verify the per-bag other cost is recorded
+    await page.goto('http://localhost:3001/#/expense');
+    await page.waitForLoadState('networkidle');
+    await page.waitForTimeout(800);
+
+    // Verify ৳500 expense appears
+    await expect(page.getByText('৳৫০০').first()).toBeVisible();
+    await expect(page.getByText(/ক্রয় খরচ \(প্রতি বস্তা\)|বস্তা প্রতি খরচ/).first()).toBeVisible();
   });
 });
