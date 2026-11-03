@@ -2,6 +2,37 @@ generator client {
   provider = "prisma-client-js"
 }
 
+model User {
+  id String @id @default(cuid())
+  name String
+  phone String
+  username String @unique
+  passwordHash String
+  role String @default("staff")
+  active Boolean @default(true)
+  sessions Session[]
+  createdAt DateTime @default(now())
+}
+
+model Session {
+  id String @id
+  userId String
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+  expiresAt DateTime
+  @@index([userId])
+  @@index([expiresAt])
+}
+
+model BusinessSettings {
+  id String @id @default("main")
+  name String @default("চালের আড়ত")
+  address String @default("")
+  phone String @default("")
+  currency String @default("BDT")
+  fiscalStartMonth Int @default(7)
+  language String @default("bn")
+}
+
 datasource db {
   provider = "postgresql"
   url      = env("DATABASE_URL")

@@ -12,7 +12,7 @@ export type Tx = { id: string; partyId: string; kind: 'sale' | 'purchase' | 'pay
 export type Line = { productId: string; qty: number; rate: number };
 export type SaleLineIn = { productId: string; unit: string; enteredQty: number; rate: number; unitCost?: number };
 export type PurchaseLineIn = { productId: string; unit: string; enteredQty: number; rate: number; otherCost?: number; otherCostPerBag?: number; unitCost?: number };
-export type StockTx = { id: string; productId: string; productName?: string; type: 'OPENING' | 'PURCHASE' | 'SALE' | 'ADJUSTMENT'; qty: number; date: string };
+export type StockTx = { id: string; productId: string; productName?: string; type: 'OPENING' | 'PURCHASE' | 'SALE' | 'ADJUSTMENT' | string; qty: number; bags: number; unitCost: number; bagUnitPrice: number; amount: number; date: string };
 export type SaleRec = { id: string; date: string; profit: number; total: number; customerId?: string; invoiceNo?: string; paid: number; due: number; status: SettlementStatus; cogs: number; createdAt?: string };
 /** Completed purchase, straight from the bootstrap payload (no extra request). */
 export type PurchaseRec = { id: string; vendorId: string; date: string; total: number; paid: number; due: number; status: SettlementStatus; invoiceNo?: string };
@@ -34,7 +34,7 @@ export interface Service {
   bulkUploadParties(kind: 'c' | 'v', items: any[]): Promise<import('./api').BulkImportRes>;
   refresh(): Promise<void>;
   sale(a: { customerId?: string; lines: SaleLineIn[]; discount: number; paid: number; accountId?: string; next?: string; date?: string; memoNo?: string }): Promise<{ id: string; invoiceNo?: string; total: number }>;
-  purchase(a: { vendorId: string; lines: PurchaseLineIn[]; paid: number; accountId?: string; next?: string; date?: string; memoNo?: string }): Promise<{ id: string; invoiceNo?: string; total: number }>;
+  purchase(a: { vendorId: string; lines: PurchaseLineIn[]; paid: number; accountId?: string; payments?: { accountId: string; amount: number }[]; next?: string; date?: string; memoNo?: string }): Promise<{ id: string; invoiceNo?: string; total: number }>;
   money(kind: 'c' | 'v', a: { partyId: string; amount: number; accountId: string; date: string; note?: string; next?: string }): Promise<void>;
   saveExpense(e: { id?: string; category: string; customName?: string; amount: number; accountId: string; date: string; note?: string }): Promise<void>;
   deleteExpense(id: string): Promise<void>;
@@ -49,6 +49,8 @@ export interface Service {
 export type ReturnSum = { id: string; kind: 'sale' | 'purchase'; date: string; amount: number; profit: number; returnNo?: string };
 
 type Ctx = Service & {
+  business: import('./api').BusinessSettings;
+  saveBusiness: (value: import('./api').BusinessSettings) => Promise<void>;
   lang: Lang; setLang: (l: Lang) => void; t: (k: Key) => string;
   ready: boolean; loadError: string | null; retry: () => void;
   products: Product[]; customers: Party[]; vendors: Party[]; cTx: Tx[]; vTx: Tx[]; stockTx: StockTx[]; sales: SaleRec[]; purchases: PurchaseRec[]; expenses: Expense[]; returns: ReturnSum[];
@@ -67,6 +69,12 @@ const C = createContext<Ctx>(null as any);
 export const useApp = () => useContext(C);
 
 export function AppProvider({ children }: { children: ReactNode }) {
+  const [business, setBusiness] = useState<import('./api').BusinessSettings>({ name: 'চালের আড়ত', address: '', phone: '', currency: 'BDT', fiscalStartMonth: 7, language: 'bn' });
+  const saveBusiness = async (value: import('./api').BusinessSettings) => {
+    const saved = await api.saveSettings(value);
+    setBusiness(saved);
+    setLang(saved.language);
+  };
   const [lang, setLang] = useState<Lang>('bn');
   const [ready, setReady] = useState(false);
   const [loadError, setLoadError] = useState<string | null>(null);
@@ -88,6 +96,9 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const [financePeriod, setFinancePeriod] = useState<PeriodFinance | null>(null);
 
   const refresh = useCallback(async () => {
+    const settings = await api.settings();
+    setBusiness(settings);
+    setLang(settings.language);
     const b = await api.bootstrap();
     setProducts(b.products);
     setCustomers(b.customers);
@@ -106,7 +117,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
     ];
     setCTx(ctx);
     setVTx(vtx);
-    setStockTx(b.movements.map(mv => ({ id: mv.id, productId: mv.productId, productName: mv.productName, type: mv.type as StockTx['type'], qty: mv.qty, date: mv.date })));
+    setStockTx(b.movements.map(mv => ({ id: mv.id, productId: mv.productId, productName: mv.productName, type: mv.type as StockTx['type'], qty: mv.qty, bags: mv.bags, unitCost: mv.unitCost, bagUnitPrice: mv.bagUnitPrice, amount: mv.amount, date: mv.date })));
     setSales(b.sales.map(s => ({ id: s.id, date: s.date, total: s.total, profit: s.profit, cogs: s.cogs ?? 0, customerId: s.customerId, invoiceNo: s.invoiceNo, paid: s.paid, due: s.due, status: s.status ?? (s.due > 0 ? 'due' : 'paid'), createdAt: s.createdAt })));
     // Purchases were already fetched by /bootstrap; keep the saved fields so the
     // Purchase module can list its own records without another request.
@@ -182,8 +193,8 @@ export function AppProvider({ children }: { children: ReactNode }) {
       refresh().catch(() => {});
       return r;
     },
-    purchase: async ({ vendorId, lines, paid, accountId, next, date, memoNo }) => {
-      const r = await api.createPurchase({ vendorId, lines, paid, accountId, next, date, memoNo });
+    purchase: async ({ vendorId, lines, paid, accountId, payments, next, date, memoNo }) => {
+      const r = await api.createPurchase({ vendorId, lines, paid, accountId, payments, next, date, memoNo });
       refresh().catch(() => {});
       return r;
     },
@@ -260,5 +271,5 @@ export function AppProvider({ children }: { children: ReactNode }) {
       payable: vendors.reduce((s, v) => s + bal('v', v.id).balance, 0),
     };
   };
-  return <C.Provider value={{ ...svc, lang, setLang, t, ready, loadError, retry: load, products, customers, vendors, cTx, vTx, stockTx, sales, purchases, expenses, returns, moneyBalances: money, moneyTransfers: transfers, moneyAccounts: accounts, financeToday, financeLifetime, financePeriod, bal, stats }}>{children}</C.Provider>;
+  return <C.Provider value={{ ...svc, business, saveBusiness, lang, setLang, t, ready, loadError, retry: load, products, customers, vendors, cTx, vTx, stockTx, sales, purchases, expenses, returns, moneyBalances: money, moneyTransfers: transfers, moneyAccounts: accounts, financeToday, financeLifetime, financePeriod, bal, stats }}>{children}</C.Provider>;
 }

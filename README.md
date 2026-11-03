@@ -16,6 +16,25 @@ Inventory, Purchase, Sale and Expense Management System for Rice Wholesale Busin
 
 ## Getting Started
 
+### Login and users
+
+On first launch, create the administrator using the setup screen: name, phone,
+username and a password of at least 10 characters. No default login is seeded.
+After setup, every business API requires login. Settings contains My Profile,
+password changes, logout, and an administrator-only Users section to create,
+edit or deactivate users and reset their passwords. Staff can use operational
+features but cannot manage users or change business settings.
+
+Passwords are salted and hashed with scrypt. HttpOnly sessions expire after
+12 hours; password changes, user edits and deactivation revoke prior sessions.
+Use HTTPS for production (production cookies are Secure), and set `APP_ORIGINS`
+to the frontend origin. The production web app and API should share one origin.
+
+Authentication verification: `node scripts/verify-auth.cjs`. Set
+`VERIFY_AUTH_DATABASE_URL`, `VERIFY_AUTH_API_URL` (ending in `/api`) and
+`VERIFY_AUTH_WEB_URL` to an isolated, running test environment with no users.
+The check creates temporary users and removes them afterward.
+
 ### Prerequisites
 - Node.js (v18+)
 - Docker & Docker Compose (optional for containerized setup)

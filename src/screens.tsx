@@ -618,7 +618,7 @@ export function Trade({ mode }: { mode: 'sale' | 'purchase' }) {
   const [view, setView] = useState<'list' | 'new'>('new');
   const [focusId, setFocusId] = useState<string | null>(null);
   if (view === 'new') {
-    return <TradeDashboardForm mode={mode} onDone={() => setView('list')} />;
+    return <TradeDashboardForm mode={mode} onDone={() => setView('list')} onOpenHistory={() => setView('list')} />;
   }
   return <TxnHistory kind={mode} onNew={() => setView('new')} focus={focusId} onFocusDone={() => setFocusId(null)} />;
 }
@@ -1306,7 +1306,7 @@ export function Parties({ kind, focus, onFocusDone, onReturn }: { kind: 'c' | 'v
   return <Screen scrollRef={scrollRef} onScrollY={onScrollY}>
       <ListPageHeader
       title={isC ? t('customers') : t('vendors')}
-      subtitle={isC ? (lang === 'bn' ? 'খরিদ্দারদের তালিকা, বাকি খতিয়ান ও লেনদেন হিসাব' : 'Customer directory, receivables & history') : (lang === 'bn' ? 'চালের মহাজন ও সরবরাহকারীদের তালিকা ও দেনা হিসাব' : 'Vendor directory, payables & history')}
+      
       icon={isC ? icons.customers : icons.vendors}
       badge={lang === 'bn' ? 'সক্রিয়' : 'Active'}
       addLabel={isC ? (lang === 'bn' ? 'নতুন কাস্টমার' : 'New Customer') : (lang === 'bn' ? 'নতুন মহাজন' : 'New Vendor')}
@@ -2101,129 +2101,10 @@ function TransferHistory({ limit = 8 }: { limit?: number }) {
  * Total Money is only the sum of the ACTIVE account balances - never sales,
  * profit, receivable, payable or inventory value.
  */
-export function BankCash() {
-  const { t, lang, moneyAccounts, moneyTransfers } = useApp();
-  const m = useMoney();
-  const [addOpen, setAddOpen] = useState(false);
-  const [editId, setEditId] = useState<string | null>(null);
-  const [detailId, setDetailId] = useState<string | null>(null);
-  const [transferOpen, setTransferOpen] = useState(false);
-  const isBankOrCash = (a: (typeof moneyAccounts)[number]) => a.type === 'cash' || a.type === 'bank';
-  const active = moneyAccounts.filter(a => a.active && isBankOrCash(a));
-  const archived = moneyAccounts.filter(a => !a.active && isBankOrCash(a));
-  const total = active.reduce((sum, a) => sum + a.balance, 0);
-  // Active accounts are the default view; archived ones stay hidden until asked
-  // for, so the main screen is not cluttered.
-  const [showArchived, setShowArchived] = useState(false);
-  const chip = (label: string, on: boolean, onPress: () => void) => (
-    <TouchableOpacity key={label} onPress={onPress} accessibilityRole="button" accessibilityState={{ selected: on }}
-      style={{ paddingHorizontal: 16, minHeight: 42, justifyContent: 'center', borderRadius: 22, borderWidth: 1.5, borderColor: on ? '#2563EB' : color.line, backgroundColor: on ? '#2563EB' : color.card }}>
-      <Text style={{ color: on ? '#fff' : color.text, fontSize: 14, fontWeight: on ? '700' : '600' }}>{label}</Text>
-    </TouchableOpacity>
-  );
-
-  const card = (a: (typeof moneyAccounts)[number]) => (
-    <TouchableOpacity key={a.id} onPress={() => setDetailId(a.id)} activeOpacity={0.85}
-      accessibilityRole="button" accessibilityLabel={a.name}
-      style={{ backgroundColor: color.card, borderRadius: 14, borderWidth: 1.5, borderColor: color.line, padding: 16, marginBottom: 12 }}>
-      <View style={{ flexDirection: 'row', alignItems: 'center', gap: 12 }}>
-        <View style={{ width: 44, height: 44, borderRadius: 12, backgroundColor: a.type === 'cash' ? '#ECFDF5' : '#EFF6FF', alignItems: 'center', justifyContent: 'center' }}>
-          <AppIcon name={a.type === 'cash' ? icons.cash : icons.bank} size={24} iconColor={a.type === 'cash' ? '#059669' : '#2563EB'} />
-        </View>
-        <View style={{ flex: 1 }}>
-          <Text style={{ fontSize: 17, fontWeight: '700', color: color.text }}>{a.name}</Text>
-          <Muted>{a.type === 'cash' ? 'ক্যাশ ড্রয়ার / ক্যাশ ইন হ্যান্ড' : (a.bankName ? `${a.bankName}${a.branch ? ` (${a.branch})` : ''}` : 'ব্যাংক একাউন্ট')}</Muted>
-        </View>
-        <AppIcon name={icons.chevR} size={22} iconColor={color.muted} />
-      </View>
-      {a.accountNumber ? (
-        <View style={{ marginTop: 8, paddingHorizontal: 10, paddingVertical: 4, backgroundColor: '#F8FAFC', borderRadius: 8, alignSelf: 'flex-start' }}>
-          <Text style={{ fontSize: 13, color: '#475569', fontWeight: '500' }}>হিসাব নং: {a.accountNumber}</Text>
-        </View>
-      ) : null}
-      <View style={{ height: 10 }} />
-      <Row left={t('accountBalanceLabel')} right={m(a.balance)} neg={a.balance < 0} />
-    </TouchableOpacity>
-  );
-
-  return (
-    <Screen>
-      <PageHeader
-        title={t('bankCash')}
-        subtitle={lang === 'bn' ? 'দোকানের নগদ ক্যাশ বাক্স ও ব্যাংক একাউন্টের লাইভ ব্যালেন্স ও তহবিল' : 'Live balances of cash drawers and bank accounts'}
-        icon={icons.accounts}
-        liveTag={lang === 'bn' ? 'তহবিল' : 'Reserves'}
-        actions={
-          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
-            <TouchableOpacity
-              onPress={() => setTransferOpen(true)}
-              style={{
-                flexDirection: 'row',
-                alignItems: 'center',
-                gap: 6,
-                backgroundColor: 'rgba(255, 255, 255, 0.2)',
-                paddingHorizontal: 14,
-                paddingVertical: 9,
-                borderRadius: 10,
-                borderTopWidth: 1,
-                borderTopColor: 'rgba(255, 255, 255, 0.45)',
-                borderBottomWidth: 2,
-                borderBottomColor: 'rgba(0, 0, 0, 0.25)',
-                ...(Platform.OS === 'web' ? ({ cursor: 'pointer' } as any) : {}),
-              }}
-              activeOpacity={0.85}
-            >
-              <AppIcon name={icons.transfer} size={16} iconColor="#FFFFFF" />
-              <Text style={{ color: '#FFFFFF', fontSize: 13, fontWeight: '800' }}>{t('transferMoney')}</Text>
-            </TouchableOpacity>
-            <TouchableOpacity
-              onPress={() => setAddOpen(true)}
-              style={{
-                flexDirection: 'row',
-                alignItems: 'center',
-                gap: 6,
-                backgroundColor: '#FFFFFF',
-                paddingHorizontal: 14,
-                paddingVertical: 9,
-                borderRadius: 10,
-                borderTopWidth: 1,
-                borderTopColor: '#FFFFFF',
-                borderBottomWidth: 2,
-                borderBottomColor: 'rgba(0, 0, 0, 0.25)',
-                ...(Platform.OS === 'web' ? ({ cursor: 'pointer' } as any) : {}),
-              }}
-              activeOpacity={0.85}
-            >
-              <AppIcon name={icons.plus} size={16} iconColor="#1c70b9" />
-              <Text style={{ color: '#1c70b9', fontSize: 13, fontWeight: '800' }}>{t('addAccount')}</Text>
-            </TouchableOpacity>
-          </View>
-        }
-      />
-      <Card>
-        <Muted>{t('totalMoneyLabel')}</Muted>
-        <Text style={{ fontSize: 32, fontWeight: '800', color: '#1E3A8A', marginTop: 4 }}>{m(total)}</Text>
-      </Card>
-      <View style={{ flexDirection: 'row', gap: 8, marginBottom: 12 }}>
-        {chip(t('activeAccountsTab'), !showArchived, () => setShowArchived(false))}
-        {archived.length ? chip(`${t('inactiveAccountsTab')} (${archived.length})`, showArchived, () => setShowArchived(true)) : null}
-      </View>
-      {!showArchived ? (
-        active.length ? active.map(card) : <Card><Empty /></Card>
-      ) : (
-        archived.length ? archived.map(card) : <Card><Empty /></Card>
-      )}
-      <TransferHistory limit={10} />
-      {addOpen ? <AccountFormModal onClose={() => setAddOpen(false)} /> : null}
-      {editId ? <AccountFormModal id={editId} onClose={() => setEditId(null)} /> : null}
-      {detailId ? <AccountDetailModal id={detailId} onClose={() => setDetailId(null)} onEdit={() => { setEditId(detailId); setDetailId(null); }} /> : null}
-      {transferOpen ? <MoneyTransferModal onClose={() => setTransferOpen(false)} /> : null}
-    </Screen>
-  );
-}
+export { BankCashDashboard as BankCash } from "./screens/BankCashDashboard";
 
 /** Add / edit one money account. Cash and Bank accounts only. */
-function AccountFormModal({ id, onClose }: { id?: string; onClose: () => void }) {
+export function AccountFormModal({ id, onClose }: { id?: string; onClose: () => void }) {
   const { t, moneyAccounts, saveAccount, setAccountOpening } = useApp();
   const cur = id ? moneyAccounts.find(a => a.id === id) : undefined;
   const [name, setName] = useState(cur?.name ?? '');
@@ -2323,7 +2204,7 @@ function AccountFormModal({ id, onClose }: { id?: string; onClose: () => void })
 }
 
 /** One account: current balance + its own ledger, in plain shop language. */
-function AccountDetailModal({ id, onClose, onEdit }: { id: string; onClose: () => void; onEdit: () => void }) {
+export function AccountDetailModal({ id, onClose, onEdit }: { id: string; onClose: () => void; onEdit: () => void }) {
   const { t, lang, moneyAccounts, saveAccount, deleteAccount } = useApp();
   const m = useMoney(); const fd = useDateStr();
   // Account lifecycle: edit, deactivate/reactivate, and a delete that the API
@@ -2382,6 +2263,8 @@ function AccountDetailModal({ id, onClose, onEdit }: { id: string; onClose: () =
     if (mv.sourceType === 'purchaseReturn') return t('purchaseReturnLabel');
     if (mv.sourceType === 'transferOut') return `${t('transferMoney')} \u2192 ${nameOf(mv.counterpartyAccountId)}`;
     if (mv.sourceType === 'transferIn') return `${t('transferMoney')} \u2190 ${nameOf(mv.counterpartyAccountId)}`;
+    if (mv.sourceType === 'deposit') return lang === 'bn' ? 'জমা' : 'Deposit';
+    if (mv.sourceType === 'withdrawal') return lang === 'bn' ? 'উত্তোলন' : 'Withdrawal';
     if (mv.sourceType === 'openingAdjust') return t('openingMoney');
     return mv.sourceType;
   };
@@ -2522,6 +2405,7 @@ function TxnItem({ it }: { it: DetailItem }) {
 
 // Shared invoice assembly + print/share actions for saved transactions.
 function useInvoice() {
+  const business = useApp().business;
   const { t, lang } = useApp(); const m = useMoney(); const n = useNum(); const fd = useDateStr();
   const { kg } = useUnitLabel();
   const un: UnitNames = { kg, small: t('smallBag'), medium: t('mediumBag'), large: t('largeBag'), ton: t('ton') };
@@ -2548,7 +2432,7 @@ function useInvoice() {
       due: m(d.due),
       next: d.nextDate ? fd(d.nextDate) : undefined,
       labels: {
-        shop: 'চালের আড়ৎ',
+        shop: business.name,
         docTitle: isSale ? t('saleInvoice') : t('purchaseInvoice'),
         invoiceNo: t('invoiceNo'), date: t('date'), time: t('time'),
         partyLabel: isSale ? t('customer') : t('vendor'),
@@ -2626,7 +2510,7 @@ function useInvoice() {
         { label: t('settleHow'), value: d.settlement === 'refund' ? t('refundMoney') : (isSale ? t('keepCredit') : t('keepVendorCredit')) },
       ],
       labels: {
-        shop: 'চালের আড়ৎ',
+        shop: business.name,
         docTitle: `${isSale ? t('saleReturn') : t('purchaseReturn')} ${t('invoice')}`,
         invoiceNo: t('returnNo'), date: t('date'), time: t('time'),
         partyLabel: isSale ? t('customer') : t('vendor'),
@@ -3207,7 +3091,7 @@ export function Trash() {
     <Screen>
       <PageHeader
         title={t('trash')}
-        subtitle={lang === 'bn' ? 'মুছে ফেলা এন্ট্রি ও ৩০ দিনের রিসাইকেল বিন' : 'Deleted records and 30-day recycle bin'}
+        
         icon={icons.del}
         liveTag={lang === 'bn' ? 'রিসাইকেল' : 'Recycle'}
         actions={

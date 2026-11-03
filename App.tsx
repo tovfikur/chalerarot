@@ -1,3 +1,5 @@
+import { Settings } from './src/screens/Settings';
+import { AuthGate } from './src/auth';
 import React, { useState, useEffect } from 'react';
 import { SafeAreaView, View, Text, TextInput, TouchableOpacity, StatusBar, Modal, ScrollView, Platform } from 'react-native';
 import { AppProvider, useApp } from './src/store';
@@ -14,7 +16,7 @@ const tabs: { r: string; k: Key; icon: IconName }[] = [
   { r: 'sale', k: 'sale', icon: icons.sale },
   { r: 'purchase', k: 'purchase', icon: icons.purchase },
   { r: 'accounts', k: 'accounts', icon: icons.accounts },
-  { r: 'more', k: 'more', icon: icons.more },
+  { r: 'settings', k: 'settings', icon: icons.settings },
 ];
 
 // Desktop sidebar: Home, Purchase, Purchase Return, Sales, Sales Return,
@@ -31,16 +33,15 @@ const sidebar: { r: string; k: Key; icon: IconName; color: string; bg: string }[
   { r: 'expense', k: 'expenseDashboard', icon: icons.expense, color: '#C026D3', bg: '#FDF4FF' },
   { r: 'accounts', k: 'accountsLabel', icon: icons.accounts, color: '#3B82F6', bg: '#EFF6FF' },
   { r: 'bank', k: 'bankCash', icon: icons.bankCash, color: '#16A34A', bg: '#F0FDF4' },
-  { r: 'more', k: 'office', icon: icons.office, color: '#6366F1', bg: '#EEF2FF' },
-  { r: 'trash', k: 'trash', icon: icons.del, color: '#DC2626', bg: '#FEF2F2' },
+  { r: 'settings', k: 'settings', icon: icons.settings, color: '#6366F1', bg: '#EEF2FF' },
 ];
 // Desktop-only sidebar density.
 const SIDE_ROW_H = 40;
 const SIDE_ROW_GAP = 1;
-const tabOf = (r: string) => (tabs.some(x => x.r === r) ? r : 'more');
+const tabOf = (r: string) => (tabs.some(x => x.r === r) ? r : 'settings');
 // Sub-routes highlight their sidebar parent.
 const sideActive = (route: string, r: string) => {
-  if (route === r) return true;
+  if (route === r || (r === 'settings' && ['more', 'trash'].includes(route))) return true;
   if (r === 'accounts' && (route === 'collect' || route === 'pay')) return true;
   if (r === 'more' && (route === 'collect' || route === 'pay')) return false;
   return false;
@@ -48,22 +49,23 @@ const sideActive = (route: string, r: string) => {
 const titleKey: Record<string, Key> = {
   collect: 'collect', pay: 'pay', customers: 'customers', vendors: 'vendors',
   stock: 'stockDashboard', expense: 'expenseDashboard', trash: 'trash',
-  bank: 'bankCash',
+  bank: 'bankCash', settings: 'settings', more: 'settings',
 };
 
 // Hash routes for web so refresh + Back/Forward restore the page.
-const ROUTES = ['home', 'sale', 'purchase', 'accounts', 'more', 'customers', 'vendors', 'stock', 'expense', 'collect', 'pay', 'trash', 'bank'] as const;
+const ROUTES = ['home', 'sale', 'purchase', 'accounts', 'more', 'settings', 'customers', 'vendors', 'stock', 'expense', 'collect', 'pay', 'trash', 'bank'] as const;
 const isWeb = typeof window !== 'undefined' && typeof window.location !== 'undefined';
 const routeFromHash = (): string => {
   if (!isWeb) return 'home';
   const h = window.location.hash.replace(/^#\/?/, '').split('?')[0];
+  if (h === 'more') return 'settings';
   if (h === 'products') return 'stock';
   if (h === 'return-sale' || h === 'return-purchase' || h === 'return') return 'home';
   return (ROUTES as readonly string[]).includes(h as any) ? h : 'home';
 };
 
 function Shell() {
-  const { t, lang, ready, loadError, retry } = useApp();
+  const { t, lang, business, ready, loadError, retry } = useApp();
   const m = useMoney();
   const [route, setRouteState] = useState<string>(routeFromHash);
   const [notifs, setNotifs] = useState<Reminder[]>([]);
@@ -80,6 +82,7 @@ function Shell() {
   const fd = useDateStr();
   const setRoute = (r: string) => {
     let target = r;
+    if (target === 'more') target = 'settings';
     if (target === 'products') target = 'stock';
     if (target === 'return-sale' || target === 'return-purchase' || target === 'return') target = 'home';
     setRouteState(target);
@@ -143,7 +146,7 @@ function Shell() {
     );
   }
   const body = {
-    home: <Home go={setRoute} />, sale: <Trade key="s" mode="sale" />, purchase: <Trade key="p" mode="purchase" />, accounts: <Accounts go={setRoute} focus={focus} onFocusDone={() => setFocus(null)} />, more: <More go={setRoute} />,
+    home: <Home go={setRoute} />, sale: <Trade key="s" mode="sale" />, purchase: <Trade key="p" mode="purchase" />, accounts: <Accounts go={setRoute} focus={focus} onFocusDone={() => setFocus(null)} />, more: <Settings />, settings: <Settings />,
     customers: <Parties kind="c" focus={partyFocus?.kind === 'c' ? partyFocus.id : null} onFocusDone={() => setPartyFocus(null)} onReturn={() => setRoute('home')} />, vendors: <Parties kind="v" focus={partyFocus?.kind === 'v' ? partyFocus.id : null} onFocusDone={() => setPartyFocus(null)} onReturn={() => setRoute('home')} />, stock: <StockDashboard />, expense: <ExpenseDashboard go={setRoute} />, collect: <Money key="c" kind="c" done={home} />, pay: <Money key="v" kind="v" done={home} />, trash: <Trash />,
     bank: <BankCash />,
   }[route];
@@ -296,7 +299,7 @@ function Shell() {
         ) : (
           <View style={{ flex: 1, flexDirection: 'row', alignItems: 'center' }}>
             {route in titleKey && !isDesktop && <TouchableOpacity onPress={() => setRoute('more')} style={{ marginRight: 12, minHeight: 44, minWidth: 44, alignItems: 'center', justifyContent: 'center' }}><AppIcon name={icons.back} size={22} iconColor="#fff" /></TouchableOpacity>}
-            <Text style={{ color: '#fff', fontSize: headerFs, fontWeight: '700', flex: 1 }} numberOfLines={1}>{titleKey[route] ? t(titleKey[route]) : 'চালের আড়ৎ'}</Text>
+            <Text style={{ color: '#fff', fontSize: headerFs, fontWeight: '700', flex: 1 }} numberOfLines={1}>{titleKey[route] ? t(titleKey[route]) : business.name}</Text>
             <TouchableOpacity onPress={() => setQOpen(true)} style={{ minHeight: 44, minWidth: 44, alignItems: 'center', justifyContent: 'center' }}>
               <AppIcon name={icons.search} size={24} iconColor="#fff" />
             </TouchableOpacity>
@@ -381,8 +384,8 @@ function Shell() {
                   <AppIcon name={icons.stock} size={20} iconColor="#fff" />
                 </View>
                 <View>
-                  <Text style={{ fontSize: 16, fontWeight: '800', color: '#0F1E36', letterSpacing: 0.3 }}>চালের আড়ৎ</Text>
-                  <Text style={{ fontSize: 10.5, fontWeight: '600', color: '#1c70b9' }}>স্মার্ট ম্যানেজমেন্ট</Text>
+                  <Text style={{ fontSize: 16, fontWeight: '800', color: '#0F1E36', letterSpacing: 0.3 }}>{business.name}</Text>
+                  
                 </View>
               </View>
 
@@ -530,4 +533,4 @@ function Shell() {
     </SafeAreaView>
   );
 }
-export default function App() { return <AppProvider><Shell /></AppProvider>; }
+export default function App() { return <AuthGate><AppProvider><Shell /></AppProvider></AuthGate>; }

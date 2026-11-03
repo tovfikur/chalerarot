@@ -20,6 +20,44 @@ const fail = (res: Response, error: string, code: string, status = 400) =>
 
 export const money = Router();
 
+// External money in/out, distinct from sales, expenses and internal transfers.
+money.post('/entries', async (req: Request, res: Response) => {
+  const { accountId, direction, amount, date, note, requestId } = req.body ?? {};
+  if (typeof accountId !== 'string' || !['in', 'out'].includes(direction) ||
+      typeof amount !== 'number' || !Number.isFinite(amount) || round2(amount) <= 0 ||
+      typeof requestId !== 'string' || requestId.length < 8 || requestId.length > 100 ||
+      typeof date !== 'string' || !DATE_RE.test(date) || !Number.isFinite(Date.parse(date)) || new Date(date).toISOString().slice(0, 10) !== date ||
+      (note !== undefined && (typeof note !== 'string' || note.length > 500))) {
+    return fail(res, 'Invalid money entry', 'INVALID_ENTRY');
+  }
+  try {
+    const result = await db.$transaction(async t => {
+      await lockAccount(t, accountId);
+      const account = await t.moneyAccount.findUnique({ where: { id: accountId } });
+      if (!account?.active) throw Object.assign(new Error('Account is unavailable'), { status: 400 });
+      const sourceType = direction === 'in' ? 'deposit' : 'withdrawal';
+      const existing = await t.moneyMovement.findUnique({ where: { sourceType_sourceId: { sourceType, sourceId: requestId } } });
+      if (existing) {
+        if (existing.moneyAccountId !== accountId || existing.amount !== round2(amount) || existing.date !== date || (existing.note ?? '') !== (note?.trim() ?? '')) {
+          throw Object.assign(new Error('Entry reference already used'), { status: 409 });
+        }
+        return existing;
+      }
+      if (direction === 'out' && round2(await accountBalance(t, accountId)) < round2(amount)) {
+        throw Object.assign(new Error('Not enough money in this account'), { status: 400, code: 'INSUFFICIENT_FUNDS' });
+      }
+      return t.moneyMovement.create({ data: {
+        moneyAccountId: accountId, method: account.type, direction, amount: round2(amount), date,
+        sourceType, sourceId: requestId, note: note?.trim() || null,
+      } });
+    });
+    res.status(201).json(result);
+  } catch (e) {
+    const err = e as { status?: number; message?: string; code?: string };
+    res.status(err.status ?? 500).json({ error: err.message ?? 'Could not save entry', code: err.code });
+  }
+});
+
 const accountBody = (b: Record<string, unknown>) => ({
   name: String(b.name ?? '').trim(),
   type: String(b.type ?? ''),
@@ -56,9 +94,8 @@ money.get('/accounts/:id', async (req: Request, res: Response) => {
   const [list, rows] = await Promise.all([
     accountBalances(),
     db.moneyMovement.findMany({
-      where: { moneyAccountId: req.params.id },
-      orderBy: [{ date: 'desc' }, { createdAt: 'desc' }],
-      take: 300,
+      where: { moneyAccountId: req.params.id, active: true },
+      orderBy: [{ date: 'desc' }, { createdAt: 'desc' }, { id: 'desc' }],
       include: { transfer: { select: { transferNo: true, fromAccountId: true, toAccountId: true } } },
     }),
   ]);
@@ -320,7 +357,7 @@ money.post('/transfers', async (req: Request, res: Response) => {
 money.get('/movements', async (req: Request, res: Response) => {
   const limit = Math.min(500, Math.max(1, parseInt(String(req.query.limit ?? '100'), 10) || 100));
   const list = await db.moneyMovement.findMany({
-    where: req.query.accountId ? { moneyAccountId: String(req.query.accountId) } : undefined,
+    where: { active: true, ...(req.query.accountId ? { moneyAccountId: String(req.query.accountId) } : {}) },
     orderBy: [{ date: 'desc' }, { createdAt: 'desc' }], take: limit,
     include: { moneyAccount: { select: { name: true, type: true } } },
   });

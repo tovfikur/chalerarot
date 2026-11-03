@@ -15,13 +15,15 @@ const num = (v: unknown, d = 0) => {
 // Payment account of an existing transaction, read from the ledger row that was
 // written when it was saved. Display only - nothing is created or changed here.
 const paymentOf = async (sourceType: string, sourceId: string) => {
-  const mv = await db.moneyMovement.findFirst({
-    where: { sourceType, sourceId, active: true },
+  const rows = await db.moneyMovement.findMany({
+    where: { sourceType, active: true, OR: [{ sourceId }, { sourceId: { startsWith: `${sourceId}:` } }] },
     include: { moneyAccount: { select: { name: true, type: true } } },
     orderBy: { createdAt: 'asc' },
   });
-  if (!mv) return null;
-  return { accountName: mv.moneyAccount?.name ?? null, method: mv.method, amount: mv.amount, date: mv.date };
+  if (!rows.length) return null;
+  const names = [...new Set(rows.map(m => m.moneyAccount?.name).filter(Boolean))];
+  const methods = [...new Set(rows.map(m => m.method))];
+  return { accountName: names.join(', ') || null, method: methods.length === 1 ? methods[0] : 'mixed', amount: round2(rows.reduce((sum, m) => sum + m.amount, 0)), date: rows[0].date };
 };
 
 // Atomic yearly invoice counter. A single upsert statement so concurrent
@@ -432,9 +434,11 @@ tx.post('/purchases', async (req: Request, res: Response) => {
     const day = transactionDay(date);
     checkPromiseDay(next);
     const pay = Math.max(0, num(paid));
+    const splitPayments = Array.isArray(req.body.payments) ? req.body.payments.filter((x: any) => x && num(x.amount) > 0) : null;
     const payMethod = methodForAmount(method, pay, Boolean(accountId));
     const result = await db.$transaction(async t => {
-      const payAccount = pay > 0 ? await resolveAccount(t, { accountId, method: accountId ? undefined : payMethod }) : null;
+      const payAccount = !splitPayments && pay > 0 ? await resolveAccount(t, { accountId, method: accountId ? undefined : payMethod }) : null;
+      const splitAccounts = splitPayments ? await Promise.all(splitPayments.map((x: any) => resolveAccount(t, { accountId: x.accountId }))) : [];
       const v = await t.vendor.findUnique({ where: { id: String(vendorId) } });
       if (!v || (v as { deletedAt?: Date | null }).deletedAt) throw Object.assign(new Error('Vendor not found'), { status: 400 });
 
@@ -567,7 +571,17 @@ tx.post('/purchases', async (req: Request, res: Response) => {
 
       // Paid money leaves through the concrete account resolved above; the
       // payable row and the ledger entry describe the same single event.
-      if (payAccount) {
+      if (splitPayments) {
+        let remaining = cappedPayP;
+        for (let i = 0; i < splitPayments.length && remaining > 0; i++) {
+          const amount = round2(Math.min(remaining, num(splitPayments[i].amount)));
+          if (!(amount > 0)) continue;
+          const acc = splitAccounts[i];
+          await t.vendorPayment.create({ data: { vendorId: String(vendorId), purchaseId: pur.id, amount, date: day } });
+          await recordMovement(t, { accountId: acc.id, method: acc.type, direction: 'out', amount, date: day, sourceType: 'purchase', sourceId: pur.id + ':' + i, note: pur.invoiceNo });
+          remaining = round2(remaining - amount);
+        }
+      } else if (payAccount) {
         await t.vendorPayment.create({
           data: { vendorId: String(vendorId), purchaseId: pur.id, amount: cappedPayP, date: day },
         });
@@ -686,7 +700,7 @@ tx.get('/bootstrap', async (_req: Request, res: Response) => {
     db.purchase.findMany({ orderBy: [{ date: 'desc' }, { createdAt: 'desc' }] }),
     db.customerPayment.findMany({ orderBy: [{ date: 'desc' }, { createdAt: 'desc' }] }),
     db.vendorPayment.findMany({ orderBy: [{ date: 'desc' }, { createdAt: 'desc' }] }),
-    db.stockMovement.findMany({ orderBy: [{ date: 'desc' }, { createdAt: 'desc' }], take: 500, include: { product: { select: { name: true } } } }),
+    db.stockMovement.findMany({ orderBy: [{ date: 'desc' }, { createdAt: 'desc' }], take: 500, include: { product: { select: { name: true, mediumBagKg: true } } } }),
     db.expense.findMany({ where: { deletedAt: null }, orderBy: [{ date: 'desc' }, { createdAt: 'desc' }] }),
     db.productReturn.findMany({ orderBy: [{ date: 'desc' }, { createdAt: 'desc' }] }),
     moneyBalances(),
@@ -746,7 +760,7 @@ tx.get('/bootstrap', async (_req: Request, res: Response) => {
     }),
     customerPayments: customerPayments.map(p => ({ id: p.id, customerId: p.customerId ?? 'cash', amount: p.amount, date: p.date, note: p.note ?? undefined, returnId: p.returnId ?? undefined, returnNo: p.returnId ? retNo.get(p.returnId) : undefined, createdAt: p.createdAt, saleId: p.saleId ?? undefined, method: p.returnId ? undefined : (inMethod.get(`p:${p.id}`) ?? (p.saleId ? inMethod.get(`s:${p.saleId}`) : undefined)), accountId: p.returnId ? undefined : inAccount.get(p.id)?.accountId, accountName: p.returnId ? undefined : inAccount.get(p.id)?.accountName })),
     vendorPayments: vendorPayments.map(p => ({ id: p.id, vendorId: p.vendorId, amount: p.amount, date: p.date, note: p.note ?? undefined, returnId: p.returnId ?? undefined, returnNo: p.returnId ? retNo.get(p.returnId) : undefined, createdAt: p.createdAt, purchaseId: p.purchaseId ?? undefined, accountId: p.returnId ? undefined : outAccount.get(p.id)?.accountId, accountName: p.returnId ? undefined : outAccount.get(p.id)?.accountName })),
-    movements: movements.map(mv => ({ id: mv.id, productId: mv.productId, productName: mv.product.name, type: mv.type, qty: mv.qtyKg, date: mv.date })),
+    movements: movements.map(mv => ({ id: mv.id, productId: mv.productId, productName: mv.product.name, type: mv.type, qty: mv.qtyKg, bags: mv.product.mediumBagKg > 0 ? round2(mv.qtyKg / mv.product.mediumBagKg) : 0, unitCost: mv.unitCost, bagUnitPrice: round2(mv.unitCost * (mv.product.mediumBagKg || 0)), amount: mv.value, date: mv.date })),
     expenses: expenses.map(e => ({ id: e.id, voucherNo: e.voucherNo ?? undefined, category: e.category, customName: e.customName ?? undefined, amount: e.amount, date: e.date, note: e.note ?? undefined, method: expMethod.get(e.id)?.method, accountId: expMethod.get(e.id)?.moneyAccountId ?? undefined })),
     returns: rets.map(r => ({ id: r.id, kind: r.kind, date: r.date, amount: r.totalAmount, profit: r.profitImpact, returnNo: r.returnNo ?? undefined })),
     money: balances,

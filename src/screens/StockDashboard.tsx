@@ -97,6 +97,8 @@ export function StockDashboard() {
         bags,
         totalKg,
         stockVal,
+        avgUnitCost: totalKg > 0 ? stockVal / totalKg : (p.cost || 0),
+        avgBagCost: (totalKg > 0 ? stockVal / totalKg : (p.cost || 0)) * (p.mediumBagKg || 50),
       };
     });
   }, [products]);
@@ -461,12 +463,9 @@ export function StockDashboard() {
           <View>
             <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
               <Text style={styles.headerTitle}>মজুদ চাল ও স্টক বিবরণ</Text>
-              <View style={styles.liveTag}>
-                <View style={styles.liveDot} />
-                <Text style={styles.liveTagText}>সক্রিয়</Text>
-              </View>
+              
             </View>
-            <Text style={styles.headerSub}>পাইকারি চালের বর্তমান স্টক হিসাব ও নিরীক্ষা</Text>
+            
           </View>
         </View>
         <View style={styles.headerRight}>
@@ -709,6 +708,8 @@ export function StockDashboard() {
               
               <Text style={[styles.th, { flex: 1.5, textAlign: 'right' }]}>মজুদ (বস্তা)</Text>
               <Text style={[styles.th, { flex: 1.5, textAlign: 'right' }]}>মজুদ (কেজি)</Text>
+              <Text style={[styles.th, { flex: 1.5, textAlign: 'right' }]}>{t('avgUnitCost')}</Text>
+              <Text style={[styles.th, { flex: 1.5, textAlign: 'right' }]}>{t('avgBagCost')}</Text>
               <Text style={[styles.th, { flex: 1.5, textAlign: 'right' }]}>স্টক মূল্য (৳)</Text>
               <Text style={[styles.th, { width: 112, textAlign: 'center' }]}>অ্যাকশন</Text>
             </View>
@@ -734,6 +735,14 @@ export function StockDashboard() {
 
                 <View style={[styles.td, { flex: 1.5, alignItems: 'flex-end' }]}>
                   <Text style={styles.cellText}>{toBnDigits(Math.round(row.totalKg).toLocaleString('en-IN'))}</Text>
+                </View>
+
+                <View style={[styles.td, { flex: 1.5, alignItems: 'flex-end' }]}>
+                  <Text style={styles.cellBold}>{toBnDigits(row.avgUnitCost.toFixed(2))}</Text>
+                </View>
+
+                <View style={[styles.td, { flex: 1.5, alignItems: 'flex-end' }]}>
+                  <Text style={styles.cellBold}>{toBnDigits(row.avgBagCost.toFixed(2))}</Text>
                 </View>
 
                 <View style={[styles.td, { flex: 1.5, alignItems: 'flex-end' }]}>
@@ -771,6 +780,10 @@ export function StockDashboard() {
               <Text style={[styles.th, { flex: 2 }]}>পণ্যের নাম</Text>
               <Text style={[styles.th, { flex: 1.5 }]}>ধরন</Text>
               <Text style={[styles.th, { flex: 1.5, textAlign: 'right' }]}>পরিমাণ (কেজি)</Text>
+              <Text style={[styles.th, { flex: 1.2, textAlign: 'right' }]}>{t('bagQty')}</Text>
+              <Text style={[styles.th, { flex: 1.5, textAlign: 'right' }]}>{t('avgUnitCost')}</Text>
+              <Text style={[styles.th, { flex: 1.5, textAlign: 'right' }]}>{t('unitPricePerBag')}</Text>
+              <Text style={[styles.th, { flex: 1.5, textAlign: 'right' }]}>{t('amount')}</Text>
             </View>
             {stockTx.slice(0, 15).map((mv, idx) => (
               <View key={mv.id} style={styles.tableDataRow}>
@@ -789,6 +802,20 @@ export function StockDashboard() {
                 <View style={[styles.td, { flex: 1.5, alignItems: 'flex-end' }]}>
                   <Text style={[styles.cellBold, { color: mv.qty >= 0 ? '#16A34A' : '#DC2626' }]}>
                     {toBnDigits(String(mv.qty))}
+                  </Text>
+                </View>
+                <View style={[styles.td, { flex: 1.2, alignItems: 'flex-end' }]}>
+                  <Text style={styles.cellBold}>{toBnDigits(Math.abs(mv.bags).toFixed(2))}</Text>
+                </View>
+                <View style={[styles.td, { flex: 1.5, alignItems: 'flex-end' }]}>
+                  <Text style={styles.cellBold}>৳{toBnDigits(mv.unitCost.toFixed(2))}</Text>
+                </View>
+                <View style={[styles.td, { flex: 1.5, alignItems: 'flex-end' }]}>
+                  <Text style={styles.cellBold}>৳{toBnDigits(mv.bagUnitPrice.toFixed(2))}</Text>
+                </View>
+                <View style={[styles.td, { flex: 1.5, alignItems: 'flex-end' }]}>
+                  <Text style={[styles.cellBold, { color: mv.amount >= 0 ? '#16A34A' : '#DC2626' }]}>
+                    {mv.amount < 0 ? '-৳' : '৳'}{toBnDigits(Math.abs(mv.amount).toFixed(2))}
                   </Text>
                 </View>
               </View>

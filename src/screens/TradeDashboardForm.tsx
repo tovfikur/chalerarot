@@ -1,9 +1,10 @@
-import React, { useState, useEffect, useRef, useMemo, useCallback } from 'react';
+﻿import React, { useState, useEffect, useRef, useMemo, useCallback } from 'react';
 import {
   View,
   Text,
   TextInput,
   TouchableOpacity,
+  Pressable,
   ScrollView,
   StyleSheet,
   Alert,
@@ -11,7 +12,7 @@ import {
   Modal,
 } from 'react-native';
 import { useApp, today, Product, Party } from '../store';
-import { color, useMoney, useNum, toBnDigits } from '../ui';
+import { color, useMoney, useNum, toBnDigits, AccountPicker } from '../ui';
 import { parseNum } from '../bn';
 import { AppIcon, icons } from '../icons';
 import { MonthCal } from '../screens';
@@ -34,6 +35,7 @@ export interface FormItemLine {
 interface TradeDashboardFormProps {
   mode: 'purchase' | 'sale';
   onDone: () => void;
+  onOpenHistory?: () => void;
 }
 
 const DRAFT_STORAGE_KEY_PREFIX = 'chaler_arot_draft_';
@@ -103,7 +105,7 @@ const fromCalendarDate = (value: string): string => {
   return parts ? `${parts[3]}/${parts[2]}/${parts[1]}` : '';
 };
 
-export function TradeDashboardForm({ mode, onDone }: TradeDashboardFormProps) {
+export function TradeDashboardForm({ mode, onDone, onOpenHistory }: TradeDashboardFormProps) {
   const isSale = mode === 'sale';
   const { t, lang, products, vendors, customers, bal, purchase, sale, moneyAccounts, saveExpense, sales, purchases } = useApp();
   const m = useMoney();
@@ -287,7 +289,19 @@ export function TradeDashboardForm({ mode, onDone }: TradeDashboardFormProps) {
   // Payments (Cash, Bank) & Discount (no default '0' strings)
   const [cashPaid, setCashPaid] = useState('');
   const [bankPaid, setBankPaid] = useState('');
+  const [cashAccountId, setCashAccountId] = useState('');
+  const [bankAccountId, setBankAccountId] = useState('');
+  const [expenseAccountId, setExpenseAccountId] = useState('');
   const [discount, setDiscount] = useState('');
+
+  useEffect(() => {
+    const active = moneyAccounts.filter(a => a.active);
+    const cash = active.find(a => a.type === 'cash');
+    const bank = active.find(a => a.type === 'bank');
+    setCashAccountId(prev => active.some(a => a.id === prev) ? prev : cash?.id ?? '');
+    setBankAccountId(prev => active.some(a => a.id === prev) ? prev : bank?.id ?? '');
+    setExpenseAccountId(prev => active.some(a => a.id === prev) ? prev : cash?.id ?? bank?.id ?? '');
+  }, [moneyAccounts]);
 
   // Split Confirmation Modal state
   const [reviewSplitOpen, setReviewSplitOpen] = useState(false);
@@ -776,9 +790,12 @@ export function TradeDashboardForm({ mode, onDone }: TradeDashboardFormProps) {
     }
 
     const effectivePartyId = selectedPartyId;
-    const cashAcc = moneyAccounts.find(a => a.type === 'cash') || moneyAccounts[0];
-    const bankAcc = moneyAccounts.find(a => a.type === 'bank') || moneyAccounts[0];
+    const cashAcc = moneyAccounts.find(a => a.type === 'cash' && a.active);
+    const bankAcc = moneyAccounts.find(a => a.type === 'bank' && a.active);
     const chosenAccountId = numBank > 0 ? bankAcc?.id : cashAcc?.id;
+    if (!isSale && numCash > 0 && !cashAccountId) { setFormError('Select an active cash account for the cash payment.'); return; }
+    if (!isSale && numBank > 0 && !bankAccountId) { setFormError('Select an active bank account for the bank payment.'); return; }
+    if (!isSale && (numTransport > 0 || numLanding > 0 || validLines.some(l => parseNum(l.otherCost) > 0)) && !expenseAccountId) { setFormError('Select an active account for purchase costs.'); return; }
 
     setSubmitting(true);
     try {
@@ -854,6 +871,10 @@ export function TradeDashboardForm({ mode, onDone }: TradeDashboardFormProps) {
           lines: processedLines,
           paid: totalPaid,
           accountId: chosenAccountId,
+          payments: [
+            ...(numCash > 0 ? [{ accountId: cashAccountId, amount: numCash }] : []),
+            ...(numBank > 0 ? [{ accountId: bankAccountId, amount: numBank }] : []),
+          ],
           date: isoDate,
           memoNo: memoNo.trim() || undefined,
         });
@@ -861,7 +882,7 @@ export function TradeDashboardForm({ mode, onDone }: TradeDashboardFormProps) {
 
       const todayISO = isoDate || today();
       const invoiceRef = res?.invoiceNo || memoNo.trim() || 'Invoice';
-      const expAccountId = chosenAccountId || cashAcc?.id || moneyAccounts.find(a => a.type === 'cash')?.id || moneyAccounts[0]?.id;
+      const expAccountId = isSale ? chosenAccountId : expenseAccountId;
 
       if (numTransport > 0 && expAccountId) {
         try {
@@ -1110,7 +1131,7 @@ export function TradeDashboardForm({ mode, onDone }: TradeDashboardFormProps) {
           >
             <AppIcon name={icons.cancel} size={20} iconColor="#DC2626" />
             <Text style={{ color: '#991B1B', fontSize: 14, fontWeight: '700', flex: 1 }}>{formError}</Text>
-            <Text style={{ color: '#DC2626', fontSize: 12, fontWeight: '600' }}>✕</Text>
+            <Text style={{ color: '#DC2626', fontSize: 12, fontWeight: '600' }}>âœ•</Text>
           </TouchableOpacity>
         </View>
       ) : null}
@@ -1153,6 +1174,8 @@ export function TradeDashboardForm({ mode, onDone }: TradeDashboardFormProps) {
 
           {/* Right: Tactile 3D Buttons for F1, Search, Bell */}
           <View style={styles.headerRight}>
+            {!isSale && onOpenHistory ? <TouchableOpacity onPress={onOpenHistory} style={styles.shortcutGuideBadge3D} testID="open-purchase-history"><Text style={styles.shortcutGuideBadgeText}>ক্রয় তালিকা</Text></TouchableOpacity> : null}
+            {!isSale && onOpenHistory ? <TouchableOpacity onPress={onOpenHistory} style={styles.shortcutGuideBadge3D} accessibilityRole="button" testID="open-purchase-history"><Text style={styles.shortcutGuideBadgeText}>ক্রয় তালিকা</Text></TouchableOpacity> : null}
             <TouchableOpacity
               onPress={() => setShowShortcutsHelp(true)}
               style={styles.shortcutGuideBadge3D}
@@ -1592,15 +1615,7 @@ export function TradeDashboardForm({ mode, onDone }: TradeDashboardFormProps) {
             </Modal>
 
             {/* Decorative Flashy Skeuomorphic Widget */}
-            <View style={styles.flashyInfoBanner}>
-              <View style={styles.flashyInfoIcon}>
-                <AppIcon name={icons.profit} size={20} iconColor="#1c70b9" />
-              </View>
-              <View style={{ flex: 1 }}>
-                <Text style={styles.flashyInfoTitle}>{isSale ? 'দ্রুত বিক্রয় ও ইনভয়েস' : 'দ্রুত ক্রয় ও ইনভয়েস'}</Text>
-                <Text style={styles.flashyInfoSub}>কীবোর্ড শর্টকাট ব্যবহারে সময় বাঁচান এবং নির্ভুল হিসাব রাখুন।</Text>
-              </View>
-            </View>
+            
           </View>
         </View>
 
@@ -2161,13 +2176,14 @@ export function TradeDashboardForm({ mode, onDone }: TradeDashboardFormProps) {
         onRequestClose={() => setReviewSplitOpen(false)}
         onDismiss={focusCustomerInput}
       >
-        <TouchableOpacity
-          activeOpacity={1}
-          onPress={() => setReviewSplitOpen(false)}
-          style={styles.modalOverlay}
-        >
-          <TouchableOpacity
-            activeOpacity={1}
+        <View style={styles.modalOverlay}>
+          <Pressable
+            accessibilityRole="button"
+            accessibilityLabel={lang === 'bn' ? 'ডায়ালগ বন্ধ করুন' : 'Close dialog'}
+            onPress={() => setReviewSplitOpen(false)}
+            style={StyleSheet.absoluteFillObject}
+          />
+          <View
             style={[styles.shortcutModalBox, { maxWidth: 1280, width: '98%', maxHeight: '96%', minHeight: '82%' }]}
           >
             {/* Modal Header */}
@@ -2396,6 +2412,8 @@ export function TradeDashboardForm({ mode, onDone }: TradeDashboardFormProps) {
                       </View>
                     </View>
 
+                    {!isSale ? <AccountPicker accountId={cashAccountId} onPick={setCashAccountId} label="Cash payment account" required={numCash > 0} /> : null}
+
                     {/* 3. BANK */}
                     <View style={{ marginBottom: 8 }}>
                       <Text style={{ fontSize: 13, fontWeight: '700', color: '#475569', marginBottom: 3 }}>ব্যাংক পরিশোধ (৳):</Text>
@@ -2410,6 +2428,8 @@ export function TradeDashboardForm({ mode, onDone }: TradeDashboardFormProps) {
                         returnKeyType="next"
                       />
                     </View>
+
+                    {!isSale ? <AccountPicker accountId={bankAccountId} onPick={setBankAccountId} label="Bank payment account" required={numBank > 0} /> : null}
 
                     {/* 4. DISCOUNT */}
                     <View style={{ marginBottom: 10 }}>
@@ -2427,6 +2447,9 @@ export function TradeDashboardForm({ mode, onDone }: TradeDashboardFormProps) {
                     </View>
 
                     {/* Optional Transport Cost */}
+                    {!isSale && (numTransport > 0 || numLanding > 0 || totalOtherCost > 0) ? (
+                      <AccountPicker accountId={expenseAccountId} onPick={setExpenseAccountId} label="Account for purchase costs" required />
+                    ) : null}
                     <View style={{ marginBottom: 8, padding: 8, backgroundColor: '#F8FAFC', borderRadius: 8, borderWidth: 1, borderColor: '#E2E8F0' }}>
                       <Text style={{ fontSize: 12, fontWeight: '700', color: '#64748B', marginBottom: 4 }}>পরিবহন খরচ (ঐচ্ছিক)</Text>
                       <TextInput
@@ -2560,8 +2583,8 @@ export function TradeDashboardForm({ mode, onDone }: TradeDashboardFormProps) {
 
               </View>
             </ScrollView>
-          </TouchableOpacity>
-        </TouchableOpacity>
+          </View>
+        </View>
       </Modal>
 
 
@@ -2633,11 +2656,7 @@ export function TradeDashboardForm({ mode, onDone }: TradeDashboardFormProps) {
                 <Text style={styles.shortcutDesc}>শর্টকাট সহায়িকা খুলুন বা বন্ধ করুন (Toggle Shortcuts)</Text>
               </View>
 
-              <View style={{ backgroundColor: '#F0F9FF', padding: 12, borderRadius: 8, marginTop: 12, borderWidth: 1, borderColor: '#BAE6FD' }}>
-                <Text style={{ fontSize: 13, color: '#0369A1', fontWeight: '600' }}>
-                  💡 টিপস: রেট (দর) ঘরে এন্টার চাপলে স্বয়ংক্রিয়ভাবে নতুন সারিতে চলে যাবে। বাংলা ও ইংরেজি উভয় সংখ্যাই টাইপ করা যাবে।
-                </Text>
-              </View>
+              
             </ScrollView>
           </TouchableOpacity>
         </TouchableOpacity>
@@ -3605,3 +3624,5 @@ const styles = StyleSheet.create({
     fontWeight: '600',
   },
 });
+
+

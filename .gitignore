@@ -1,4 +1,6 @@
 # Node & dependencies
+.local-postgres/
+.npm-cache/
 node_modules/
 */node_modules/
 

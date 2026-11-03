@@ -1,8 +1,8 @@
 // REST client for the chalarot-api backend.
 // Base URL comes from EXPO_PUBLIC_API_URL (see .env.example).
-const BASE = (typeof window !== 'undefined' && window.location)
-  ? '/api'
-  : (process.env.EXPO_PUBLIC_API_URL ?? 'http://localhost:4000/api');
+const BASE = process.env.EXPO_PUBLIC_API_URL ?? (__DEV__
+  ? 'http://localhost:4000/api'
+  : '/api');
 
 export class ApiError extends Error {
   code?: string;
@@ -19,17 +19,30 @@ async function req<T>(path: string, init?: RequestInit): Promise<T> {
   try {
     r = await fetch(`${BASE}${path}`, {
       ...init,
+      credentials: 'include',
       headers: { 'Content-Type': 'application/json', ...(init?.headers ?? {}) },
     });
   } catch (e) {
     throw new Error('Cannot reach server');
   }
-  const data = (await r.json().catch(() => ({}))) as { error?: string; code?: string; amount?: number };
-  if (!r.ok) throw new ApiError(data?.error ?? `Request failed (${r.status})`, data?.code, data?.amount);
+  if (!r.headers.get('content-type')?.includes('application/json')) {
+    throw new Error('Server returned an invalid response. Check the API URL and backend server.');
+  }
+  const data = (await r.json()) as { error?: string; code?: string; amount?: number };
+  if (!r.ok) {
+    if (r.status === 401 && !path.startsWith('/auth/')) authExpired?.();
+    throw new ApiError(data?.error ?? `Request failed (${r.status})`, data?.code, data?.amount);
+  }
   return data as T;
 }
 
 export type IdRes = { id: string };
+export type AppUser = { id: string; name: string; phone: string; username: string; role: 'admin' | 'staff'; active: boolean };
+export type UserInput = { name: string; phone: string; username: string; password: string; role: 'admin' | 'staff'; active: boolean };
+let authExpired: (() => void) | undefined;
+export const onAuthExpired = (callback?: () => void) => { authExpired = callback; };
+export type MoneyMovementRow = { id: string; moneyAccountId: string; direction: string; amount: number; date: string; sourceType: string; transferId?: string | null; note?: string | null; moneyAccount?: { name: string; type: string } };
+export type BusinessSettings = { name: string; address: string; phone: string; currency: string; fiscalStartMonth: number; language: 'bn' | 'en' };
 export type BulkImportRes = {
   total: number;
   successCount: number;
@@ -129,6 +142,17 @@ export type MoneyTransfer = {
 };
 
 export const api = {
+  authStatus: () => req<{ setup: boolean; user: AppUser | null }>('/auth/status'),
+  login: (username: string, password: string) => req<AppUser>('/auth/login', { method: 'POST', body: JSON.stringify({ username, password }) }),
+  setup: (body: UserInput) => req<AppUser>('/auth/setup', { method: 'POST', body: JSON.stringify(body) }),
+  logout: () => req('/auth/logout', { method: 'POST' }),
+  users: () => req<AppUser[]>('/users'),
+  saveUser: (body: UserInput, id?: string) => req<AppUser>(id ? `/users/${id}` : '/users', { method: id ? 'PUT' : 'POST', body: JSON.stringify(body) }),
+  profile: (body: { name: string; phone: string; password: string; currentPassword: string }) => req<AppUser>('/auth/profile', { method: 'PUT', body: JSON.stringify(body) }),
+  moneyMovements: () => req<MoneyMovementRow[]>('/money/movements?limit=30'),
+  moneyEntry: (body: { accountId: string; direction: 'in' | 'out'; amount: number; date: string; note: string; requestId: string }) => req<MoneyMovementRow>('/money/entries', { method: 'POST', body: JSON.stringify(body) }),
+  settings: () => req<BusinessSettings>('/settings'),
+  saveSettings: (value: BusinessSettings) => req<BusinessSettings>('/settings', { method: 'PUT', body: JSON.stringify(value) }),
   bootstrap: () => req<{
     products: import('./store').Product[];
     customers: import('./store').Party[];
@@ -137,7 +161,7 @@ export const api = {
     purchases: { id: string; vendorId: string; date: string; total: number; paid: number; due: number; status: SettlementStatus; invoiceNo?: string }[];
     customerPayments: { id: string; customerId: string; amount: number; date: string; note?: string; method?: string; returnId?: string; returnNo?: string; createdAt?: string; saleId?: string; accountId?: string; accountName?: string }[];
     vendorPayments: { id: string; vendorId: string; amount: number; date: string; note?: string; returnId?: string; returnNo?: string; createdAt?: string; purchaseId?: string; accountId?: string; accountName?: string }[];
-    movements: { id: string; productId: string; productName: string; type: string; qty: number; date: string }[];
+    movements: { id: string; productId: string; productName: string; type: string; qty: number; bags: number; unitCost: number; bagUnitPrice: number; amount: number; date: string }[];
     expenses: Expense[];
     returns: ReturnSummary[];
     money: MoneyBalance[];

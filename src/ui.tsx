@@ -38,9 +38,9 @@ export const fmtNum = (n: number, bn: boolean) => {
   return bn ? toBnDigits(s) : s;
 };
 export const useMoney = () => {
-  const { lang } = useApp();
+  const { lang, business } = useApp();
   // Sign goes in front of the currency symbol: -৳1,255 (not ৳-1,255).
-  return (n: number) => { const v = Math.round(n); return (v < 0 ? '-' : '') + '৳' + fmtNum(Math.abs(v), lang === 'bn'); };
+  return (n: number) => { const v = Math.round(n); return (v < 0 ? '-' : '') + ({ BDT: '৳', USD: '$', INR: '₹', EUR: '€', GBP: '£' }[business.currency] ?? business.currency) + fmtNum(Math.abs(v), lang === 'bn'); };
 };
 // Quantities/weights/stock (keeps decimals, e.g. 25.5 → ২৫.৫).
 export const useNum = () => { const { lang } = useApp(); const bn = lang === 'bn'; return (n: number) => fmtNum(n, bn); };

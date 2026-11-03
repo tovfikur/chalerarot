@@ -1,6 +1,7 @@
 // Blocks until PostgreSQL accepts TCP connections, then exits.
 // Used by `prestart` so Prisma migrate/client only run against a live DB.
 import net from 'net';
+import 'dotenv/config';
 
 function target() {
   const url = process.env.DATABASE_URL ?? '';

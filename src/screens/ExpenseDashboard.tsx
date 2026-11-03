@@ -543,18 +543,9 @@ export function ExpenseDashboard({ go }: ExpenseDashboardProps = {}) {
               <Text style={styles.headerTitle}>
                 {lang === 'bn' ? 'খরচ ও ব্যয় ব্যবস্থাপনা' : 'Expense & Cost Management'}
               </Text>
-              <View style={styles.liveTag}>
-                <View style={styles.liveDot} />
-                <Text style={styles.liveTagText}>
-                  {lang === 'bn' ? 'লাইভ সিঙ্ক' : 'Live Sync'}
-                </Text>
-              </View>
+              
             </View>
-            <Text style={styles.headerSub}>
-              {lang === 'bn'
-                ? 'দোকান পরিচালনা, পরিবহন, লেবার ও আনুষঙ্গিক খরচের সম্পূর্ণ খতিয়ান'
-                : 'Complete ledger for shop operations, freight, labor, and overhead costs'}
-            </Text>
+            
           </View>
         </View>
 
@@ -784,11 +775,7 @@ export function ExpenseDashboard({ go }: ExpenseDashboardProps = {}) {
               <Text style={styles.blockTitle}>
                 {lang === 'bn' ? 'দৈনিক খরচের ট্রেন্ড কার্ভ' : 'Daily Expense Trajectory Curve'}
               </Text>
-              <Text style={styles.blockSubtitle}>
-                {lang === 'bn'
-                  ? 'দিনের গতিবিধির ওপর স্পর্শ করুন নির্দিষ্ট দিনের খরচ দেখতে'
-                  : 'Tap or hover points on the curve to inspect daily totals'}
-              </Text>
+              
             </View>
           </View>
 
@@ -911,9 +898,7 @@ export function ExpenseDashboard({ go }: ExpenseDashboardProps = {}) {
               <Text style={styles.blockTitle}>
                 {lang === 'bn' ? 'ব্যয়ের শীর্ষ খাতসমূহ' : 'Top Categories Breakdown'}
               </Text>
-              <Text style={styles.blockSubtitle}>
-                {lang === 'bn' ? 'কোন খাতে কত শতাংশ ব্যয় হয়েছে' : 'Percentage share across expense categories'}
-              </Text>
+              
             </View>
           </View>
 

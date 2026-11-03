@@ -20,7 +20,7 @@ export function HomeDashboard({
   onDrillDown,
 }: HomeDashboardProps) {
   const {
-    lang,
+    lang, business,
     stats,
     customers,
     vendors,
@@ -120,15 +120,12 @@ export function HomeDashboard({
             <View>
               <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10 }}>
                 <Text style={styles.headerTitle}>
-                  {lang === 'bn' ? 'চালের আড়ত' : 'Chaler Arot'}
+                  {business.name}
                 </Text>
-                <View style={styles.liveBadge}>
-                  <View style={styles.liveDot} />
-                  <Text style={styles.liveText}>{lang === 'bn' ? 'লাইভ কার্যক্রম' : 'Live'}</Text>
-                </View>
+                
               </View>
               <Text style={styles.headerSubtitle}>
-                {lang === 'bn' ? `আজ: ${formattedToday} • পাইকারি চালের আধুনিক হিসাব ও ম্যানেজমেন্ট` : `Date: ${formattedToday} • Wholesale Rice Operations`}
+                {lang === 'bn' ? `আজ: ${formattedToday}` : `Date: ${formattedToday}`}
               </Text>
             </View>
           </View>
@@ -146,7 +143,7 @@ export function HomeDashboard({
             </View>
             <View>
               <Text style={[styles.heroBtnText, { color: '#1c70b9' }]}>{lang === 'bn' ? 'নতুন বিক্রয়' : 'New Sale'}</Text>
-              <Text style={[styles.heroBtnSub, { color: '#0369A1' }]}>{lang === 'bn' ? 'চালান তৈরি করুন' : 'Create Invoice'}</Text>
+              
             </View>
           </TouchableOpacity>
 
@@ -160,7 +157,7 @@ export function HomeDashboard({
             </View>
             <View>
               <Text style={styles.heroBtnText}>{lang === 'bn' ? 'চাল ক্রয়' : 'Purchase'}</Text>
-              <Text style={styles.heroBtnSub}>{lang === 'bn' ? 'স্টক ইনভেন্টরি' : 'Stock Entry'}</Text>
+              
             </View>
           </TouchableOpacity>
 
@@ -174,7 +171,7 @@ export function HomeDashboard({
             </View>
             <View>
               <Text style={styles.heroBtnText}>{lang === 'bn' ? 'হিসাব খাতা' : 'Accounts'}</Text>
-              <Text style={styles.heroBtnSub}>{lang === 'bn' ? 'আদায় ও দেনা' : 'Cash & Ledger'}</Text>
+              
             </View>
           </TouchableOpacity>
         </View>
@@ -364,7 +361,7 @@ export function HomeDashboard({
               <View style={[styles.sectionIndicatorCircle, { backgroundColor: '#3B82F6' }]} />
               <View>
                 <Text style={styles.cardHeading}>{lang === 'bn' ? 'সাম্প্রতিক বিক্রয় চালান' : 'Recent Invoices'}</Text>
-                <Text style={styles.cardSubheading}>{lang === 'bn' ? 'সর্বশেষ চালানসমূহ ও আদায়ের অবস্থা' : 'Latest sales & payment status'}</Text>
+                
               </View>
             </View>
 
@@ -480,9 +477,7 @@ export function HomeDashboard({
               <View style={[styles.sectionIndicatorCircle, { backgroundColor: '#10B981' }]} />
               <View>
                 <Text style={styles.cardHeading}>{lang === 'bn' ? 'চালের গুদাম মজুদ' : 'Rice Stock'}</Text>
-                <Text style={styles.cardSubheading}>
-                  {lang === 'bn' ? `মোট চাল: ${toBnDigits(totalStockBags)} বস্তা` : `${totalStockBags} Bags in Godown`}
-                </Text>
+                
               </View>
             </View>
 

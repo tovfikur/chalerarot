@@ -72,18 +72,18 @@ const monthShiftStart = (ds: string, delta: number) => {
   return `${dt.getUTCFullYear()}-${pad2n(dt.getUTCMonth() + 1)}-01`;
 };
 
-const presetRange = (id: 'today' | 'last7' | 'thisMonth' | 'last3m' | 'thisYear', td: string): AcctFilter => {
+const presetRange = (id: 'today' | 'last7' | 'thisMonth' | 'last3m' | 'thisYear', td: string, fiscalMonth = 7): AcctFilter => {
   if (id === 'last7') return { from: addDays(td, -6), to: td };
   if (id === 'thisMonth') return { from: monthStart(td), to: monthEnd(td) };
   if (id === 'last3m') return { from: monthStart(monthShiftStart(td, -3)), to: monthEnd(monthShiftStart(td, -1)) };
-  if (id === 'thisYear') return { from: `${td.slice(0, 4)}-01-01`, to: `${td.slice(0, 4)}-12-31` };
+  if (id === 'thisYear') { const y = Number(td.slice(0, 4)) - (Number(td.slice(5, 7)) < fiscalMonth ? 1 : 0); const from = `${y}-${pad2n(fiscalMonth)}-01`; return { from, to: addDays(`${y + 1}-${pad2n(fiscalMonth)}-01`, -1) }; }
   return { from: td, to: td };
 };
 
 export function AccountsDashboard({ go, focus, onFocusDone }: AccountsDashboardProps) {
   const {
     t,
-    lang,
+    lang, business,
     stats,
     customers = [],
     vendors = [],
@@ -111,8 +111,8 @@ export function AccountsDashboard({ go, focus, onFocusDone }: AccountsDashboardP
   const { isDesktop, isTablet, isMobile, width } = useBreakpoint();
 
   // Active navigation tab
-  // 'overview' | 'accounts' | 'due' | 'pay' | 'expense' | 'qa'
-  const [activeTab, setActiveTab] = useState<'overview' | 'accounts' | 'due' | 'pay' | 'expense' | 'qa'>('overview');
+  // 'overview' | 'accounts' | 'due' | 'pay' | 'expense'
+  const [activeTab, setActiveTab] = useState<'overview' | 'accounts' | 'due' | 'pay' | 'expense'>('overview');
 
   // Filter state
   const [fltPreset, setFltPreset] = useState<'today' | 'last7' | 'thisMonth' | 'last3m' | 'thisYear' | 'custom'>('thisMonth');
@@ -180,9 +180,9 @@ export function AccountsDashboard({ go, focus, onFocusDone }: AccountsDashboardP
   } | null>(null);
 
   // Interactive Q&A Assistant state
-  const [qaQuery, setQaQuery] = useState('');
-  const [activeQuestionId, setActiveQuestionId] = useState<string>('q1');
-  const qaInputRef = useRef<TextInput>(null);
+  
+  
+  
 
   // Period Date Range Checker
   const inPeriod = (d: string) => d >= flt.from && d <= flt.to;
@@ -320,7 +320,7 @@ export function AccountsDashboard({ go, focus, onFocusDone }: AccountsDashboardP
   // Change preset
   const handleSelectPreset = (p: 'today' | 'last7' | 'thisMonth' | 'last3m' | 'thisYear') => {
     setFltPreset(p);
-    setFlt(presetRange(p, td));
+    setFlt(presetRange(p, td, business.fiscalStartMonth));
   };
 
   // Expense categories breakdown
@@ -344,7 +344,7 @@ export function AccountsDashboard({ go, focus, onFocusDone }: AccountsDashboardP
   // Print Complete Accounts Statement
   const handlePrintStatement = () => {
     const doc: ReportDoc = {
-      shop: lang === 'bn' ? 'চালের আড়ত লিমিটেড' : 'Chaler Arot Ltd',
+      shop: business.name,
       title: lang === 'bn' ? 'আর্থিক বিবরণী ও অডিট রিপোর্ট' : 'Financial Statement & Audit Report',
       period: formatPeriodLabel(flt.from, flt.to),
       meta: [
@@ -390,270 +390,10 @@ export function AccountsDashboard({ go, focus, onFocusDone }: AccountsDashboardP
   };
 
   // Q&A Pre-Configured Questions & Dynamic Engine
-  const qaQuestions = useMemo(() => [
-    {
-      id: 'q1',
-      titleBn: 'এই সময়ে আমাদের আসল লাভ (Net Profit) কত হয়েছে?',
-      titleEn: 'What is our net profit in this period?',
-      tag: 'লাভ-ক্ষতি',
-      answer: {
-        headline: m(fProfit),
-        badge: fSale > 0 ? `${lang === 'bn' ? 'মুনাফা মার্জিন' : 'Profit Margin'}: ${Math.round((fProfit / fSale) * 100)}%` : '',
-        details: [
-          { label: lang === 'bn' ? 'মোট চাল বিক্রয়' : 'Gross Sales', val: m(fSale) },
-          { label: lang === 'bn' ? 'চালের ক্রয় খরচ (COGS)' : 'Cost of Goods (COGS)', val: m(fCogs) },
-          { label: lang === 'bn' ? 'মোট বাণিজ্যিক লাভ' : 'Gross Profit', val: m(fGrossProfit) },
-          { label: lang === 'bn' ? 'দোকান ও পরিচালনা খরচ' : 'Operating Expenses', val: m(fExp) },
-        ],
-        explanation: lang === 'bn'
-          ? `সব খরচ বাদ দিয়ে আপনার চূড়ান্ত আসল লাভ দাঁড়িয়েছে ${m(fProfit)} টাকা। বিক্রয় থেকে সরাসরি চালের কেনা দাম বাদ দেওয়ার পর মোট লাভ হয়েছিল ${m(fGrossProfit)}, যা থেকে দোকান ভাড়া, বেতন, পরিবহন ইত্যাদি ${m(fExp)} টাকা ব্যয় হয়েছে।`
-          : `After all costs, your net profit is ${m(fProfit)}. Gross profit was ${m(fGrossProfit)}, minus operating expenses of ${m(fExp)}.`,
-        actionLabel: lang === 'bn' ? 'লাভ-ক্ষতির বিস্তারিত বিবরণী দেখুন' : 'View P&L Statement',
-        action: () => setActiveTab('overview'),
-      },
-    },
-    {
-      id: 'q2',
-      titleBn: 'বর্তমানে কার কাছে সবচেয়ে বেশি টাকা পাওনা বাকি আছে?',
-      titleEn: 'Who owes us the most money right now?',
-      tag: 'কাস্টমার পাওনা',
-      answer: {
-        headline: customerDues[0] ? `${customerDues[0].customer.name} (${m(customerDues[0].balance)})` : (lang === 'bn' ? 'কোনো বাকি নেই' : 'No dues'),
-        badge: `${lang === 'bn' ? 'মোট বাকি' : 'Total Due'}: ${m(totalDueAmount)} (${totalDueCount} ${lang === 'bn' ? 'জন খরিদ্দার' : 'customers'})`,
-        details: customerDues.slice(0, 4).map(cd => ({
-          label: `${cd.customer.name} (${cd.customer.mobile || 'নম্বর নেই'})`,
-          val: m(cd.balance),
-        })),
-        explanation: lang === 'bn'
-          ? `বাজারে বর্তমানে ${totalDueCount} জন খরিদ্দারের কাছে সর্বমোট ${m(totalDueAmount)} টাকা পাওনা রয়েছে। এদের মধ্যে শীর্ষে আছেন ${customerDues[0]?.customer.name ?? 'কেউ নেই'}, যার কাছে ${m(customerDues[0]?.balance ?? 0)} টাকা বাকি রয়েছে।`
-          : `A total of ${m(totalDueAmount)} is due from ${totalDueCount} customers. Top due customer is ${customerDues[0]?.customer.name ?? 'None'}.`,
-        actionLabel: lang === 'bn' ? 'খরিদ্দারদের বাকি খতিয়ান খুলুন' : 'Open Receivables Ledger',
-        action: () => setActiveTab('due'),
-      },
-    },
-    {
-      id: 'q3',
-      titleBn: 'মহাজনদের মোট দেনা কত এবং কার কার পাওনা মেটাতে হবে?',
-      titleEn: 'What is our total vendor payable and who must be paid?',
-      tag: 'মহাজন দেনা',
-      answer: {
-        headline: m(totalPayableAmount),
-        badge: `${totalPayableCount} ${lang === 'bn' ? 'জন মহাজনের দেনা বকেয়া' : 'Vendors Pending'}`,
-        details: vendorPayables.slice(0, 4).map(vp => ({
-          label: `${vp.vendor.name} (${vp.vendor.mobile || 'নম্বর নেই'})`,
-          val: m(vp.balance),
-        })),
-        explanation: lang === 'bn'
-          ? `চালের মিল ও পাইকারি সরবরাহকারী ${totalPayableCount} জন মহাজনের কাছে সর্বমোট ${m(totalPayableAmount)} টাকা দেনা পরিশোধ করা বাকি রয়েছে। সবচেয়ে বড় পাওনাদার: ${vendorPayables[0]?.vendor.name ?? 'কেউ নেই'} (${m(vendorPayables[0]?.balance ?? 0)})।`
-          : `You owe ${m(totalPayableAmount)} across ${totalPayableCount} vendors. Highest payable: ${vendorPayables[0]?.vendor.name ?? 'None'} (${m(vendorPayables[0]?.balance ?? 0)}).`,
-        actionLabel: lang === 'bn' ? 'মহাজনদের দেনা খতিয়ান খুলুন' : 'Open Vendor Ledger',
-        action: () => setActiveTab('pay'),
-      },
-    },
-    {
-      id: 'q4',
-      titleBn: 'বর্তমানে ক্যাশ ড্রয়ার ও ব্যাংক অ্যাকাউন্টগুলোতে কত টাকা আছে?',
-      titleEn: 'How much money is in cash drawer and bank accounts?',
-      tag: 'তহবিল ও ক্যাশ',
-      answer: {
-        headline: m(totalLiquidMoney),
-        badge: `${lang === 'bn' ? 'ক্যাশ' : 'Cash'}: ${m(totalCashInHand)} | ${lang === 'bn' ? 'ব্যাংক' : 'Bank'}: ${m(totalBankBalances)}`,
-        details: moneyAccounts.map(acc => ({
-          label: `${acc.name} (${acc.type === 'cash' ? (lang === 'bn' ? 'ক্যাশ বাক্স' : 'Cash Drawer') : acc.type.toUpperCase()})`,
-          val: m(acc.balance || 0),
-        })),
-        explanation: lang === 'bn'
-          ? `আপনার ব্যবসায়ে তাৎক্ষণিক ব্যয় মেটানোর মতো সর্বমোট ${m(totalLiquidMoney)} টাকা প্রস্তুত রয়েছে। এর মধ্যে দোকানের ক্যাশ বাক্সে রয়েছে ${m(totalCashInHand)} টাকা এবং বিভিন্ন ব্যাংক ও মোবাইল ওয়ালেটে রয়েছে ${m(totalBankBalances)} টাকা।`
-          : `You have ${m(totalLiquidMoney)} in total liquid reserves: ${m(totalCashInHand)} in cash drawer and ${m(totalBankBalances)} in bank accounts.`,
-        actionLabel: lang === 'bn' ? 'ফান্ড ট্রান্সফার করুন' : 'Transfer Money',
-        action: () => setTransferModalOpen(true),
-      },
-    },
-    {
-      id: 'q5',
-      titleBn: 'আমাদের সবচেয়ে বেশি খরচ কোন খাতে হচ্ছে?',
-      titleEn: 'Which expense category has the highest spending?',
-      tag: 'ব্যয় বিশ্লেষণ',
-      answer: {
-        headline: expenseBreakdown[0] ? `${expenseBreakdown[0].category} (${m(expenseBreakdown[0].amount)})` : (lang === 'bn' ? 'কোনো খরচ নেই' : 'No expenses'),
-        badge: `${lang === 'bn' ? 'মোট খরচ' : 'Total Exp'}: ${m(fExp)}`,
-        details: expenseBreakdown.slice(0, 5).map(eb => ({
-          label: eb.category,
-          val: `${m(eb.amount)} (${eb.pct}%)`,
-        })),
-        explanation: lang === 'bn'
-          ? `নির্বাচিত সময়ে সর্বমোট ${m(fExp)} টাকা দোকান পরিচালনা ও পরিবহনে খরচ হয়েছে। এর মধ্যে সবচেয়ে ব্যয়বহুল খাত হলো '${expenseBreakdown[0]?.category ?? 'খরচ নেই'}', যেখানে মোট ব্যয়ের প্রায় ${expenseBreakdown[0]?.pct ?? 0}% খরচ হয়েছে।`
-          : `Total operational expenditure is ${m(fExp)}. Highest category is '${expenseBreakdown[0]?.category ?? 'None'}' accounting for ${expenseBreakdown[0]?.pct ?? 0}% of expenses.`,
-        actionLabel: lang === 'bn' ? 'খরচের তালিকা দেখুন' : 'View Expense Ledger',
-        action: () => setActiveTab('expense'),
-      },
-    },
-    {
-      id: 'q6',
-      titleBn: 'গুদামে বর্তমানে কত বস্তা এবং কত টাকার চালের স্টক রয়েছে?',
-      titleEn: 'How many bags and value of rice are currently in stock?',
-      tag: 'স্টক ও গুদাম',
-      answer: {
-        headline: `${n(inventorySummary.totalBags)} ${lang === 'bn' ? 'বস্তা' : 'Bags'} (${m(inventorySummary.totalValuation)})`,
-        badge: `${n(Math.round(inventorySummary.totalKg / 1000))} ${lang === 'bn' ? 'টন চাল' : 'Tons Rice'}`,
-        details: [
-          { label: lang === 'bn' ? 'মোট চালের পরিমাণ' : 'Total Stock Weight', val: `${n(inventorySummary.totalKg)} kg` },
-          { label: lang === 'bn' ? 'মোট ফিজিক্যাল বস্তা' : 'Physical Bags', val: `${n(inventorySummary.totalBags)} bags` },
-          { label: lang === 'bn' ? 'স্টক ক্রয়মূল্য (Asset Value)' : 'Stock Valuation', val: m(inventorySummary.totalValuation) },
-        ],
-        explanation: lang === 'bn'
-          ? `গুদামে বর্তমানে মোট ${n(inventorySummary.totalBags)} বস্তা চাল জমা রয়েছে, যার মোট বর্তমান কেনা দাম প্রায় ${m(inventorySummary.totalValuation)} টাকা। এটি আপনার ব্যবসার মূল চলতি মূলধন।`
-          : `The warehouse currently holds ${n(inventorySummary.totalBags)} bags of rice with an inventory cost valuation of ${m(inventorySummary.totalValuation)}.`,
-        actionLabel: lang === 'bn' ? 'স্টক ম্যানেজমেন্ট খুলুন' : 'Open Stock Management',
-        action: () => go?.('stock'),
-      },
-    },
-    {
-      id: 'q7',
-      titleBn: 'আমাদের ব্যবসার আর্থিক স্বাস্থ্য (Financial Health) এবং তারল্য নিরাপত্তা কেমন?',
-      titleEn: 'What is our business solvency and financial health?',
-      tag: 'আর্থিক স্বাস্থ্য',
-      answer: {
-        headline: solvencyRatio >= 120
-          ? (lang === 'bn' ? 'অত্যন্ত সুরক্ষিত ও শক্তিশালী' : 'Highly Solvent')
-          : solvencyRatio >= 100
-          ? (lang === 'bn' ? 'স্বাভাবিক ও ব্যালেন্সড' : 'Balanced & Safe')
-          : (lang === 'bn' ? 'সতর্কতা: দেনা কিছুটা বেশি' : 'Caution: High Payables'),
-        badge: `${lang === 'bn' ? 'নিট চলতি উদ্বৃত্ত' : 'Working Capital'}: ${m(netSolvencyScore)}`,
-        details: [
-          { label: lang === 'bn' ? 'হাতে ক্যাশ ও ব্যাংক' : 'Liquid Cash', val: m(totalLiquidMoney) },
-          { label: lang === 'bn' ? 'বাজারে কাস্টমার পাওনা' : 'Customer Due', val: m(totalDueAmount) },
-          { label: lang === 'bn' ? 'মহাজনদের মোট দেনা' : 'Vendor Payable', val: m(totalPayableAmount) },
-          { label: lang === 'bn' ? 'তারল্য কাভারেজ অনুপাত' : 'Coverage Ratio', val: `${Math.round(solvencyRatio)}%` },
-        ],
-        explanation: lang === 'bn'
-          ? `আপনার নগদ টাকা (${m(totalLiquidMoney)}) এবং বাজারের পাওনা (${m(totalDueAmount)}) মিলিয়ে মহাজনদের মোট দেনার (${m(totalPayableAmount)}) প্রায় ${Math.round(solvencyRatio)}% মেটানো সম্ভব। ${solvencyRatio >= 100 ? 'অতএব ব্যবসায়ে কোনো ক্যাশ সংকটের ঝুঁকি নেই।' : 'বকেয়া পাওনা দ্রুত কালেকশন করা বাঞ্ছনীয়।'}`
-          : `Liquid reserves (${m(totalLiquidMoney)}) and customer dues (${m(totalDueAmount)}) cover ${Math.round(solvencyRatio)}% of vendor payables (${m(totalPayableAmount)}).`,
-        actionLabel: lang === 'bn' ? 'হিসাব অডিট রিপোর্ট প্রিন্ট করুন' : 'Print Audit Statement',
-        action: handlePrintStatement,
-      },
-    },
-    {
-      id: 'q8',
-      titleBn: 'দৈনিক গড়ে কত টাকার চাল বিক্রি ও কালেকশন হচ্ছে?',
-      titleEn: 'What is our daily average sales and collection?',
-      tag: 'দৈনিক গড়',
-      answer: {
-        headline: `${lang === 'bn' ? 'গড় বিক্রয়' : 'Avg Sale'}: ${m(Math.round(fSale / (timelineData.length || 1)))}/দিন`,
-        badge: `${lang === 'bn' ? 'গড় কালেকশন' : 'Avg Collect'}: ${m(Math.round(fCollect / (timelineData.length || 1)))}/দিন`,
-        details: [
-          { label: lang === 'bn' ? 'নির্বাচিত সময়কাল' : 'Days in Period', val: `${n(timelineData.length)} days` },
-          { label: lang === 'bn' ? 'মোট বিক্রয়' : 'Period Sales', val: m(fSale) },
-          { label: lang === 'bn' ? 'মোট কালেকশন' : 'Period Collection', val: m(fCollect) },
-          { label: lang === 'bn' ? 'গড় দৈনিক মুনাফা' : 'Daily Avg Profit', val: m(Math.round(fProfit / (timelineData.length || 1))) },
-        ],
-        explanation: lang === 'bn'
-          ? `এই ফিল্টারের ${n(timelineData.length)} দিনে প্রতিদিন গড়ে ${m(Math.round(fSale / (timelineData.length || 1)))} টাকার চাল বিক্রি হয়েছে এবং দৈনিক গড়ে ${m(Math.round(fCollect / (timelineData.length || 1)))} টাকা নগদ আদায় হয়েছে।`
-          : `Across ${n(timelineData.length)} days, average daily rice sales were ${m(Math.round(fSale / (timelineData.length || 1)))} and collections were ${m(Math.round(fCollect / (timelineData.length || 1)))}.`,
-        actionLabel: lang === 'bn' ? 'ট্রেন্ড কার্ভ ও চার্ট দেখুন' : 'View Performance Curve',
-        action: () => setActiveTab('overview'),
-      },
-    },
-  ], [
-    lang,
-    fProfit,
-    fSale,
-    fCogs,
-    fGrossProfit,
-    fExp,
-    fCollect,
-    customerDues,
-    totalDueAmount,
-    totalDueCount,
-    vendorPayables,
-    totalPayableAmount,
-    totalPayableCount,
-    totalLiquidMoney,
-    totalCashInHand,
-    totalBankBalances,
-    moneyAccounts,
-    expenseBreakdown,
-    inventorySummary,
-    netSolvencyScore,
-    solvencyRatio,
-    timelineData,
-    m,
-    n,
-    go,
-  ]);
+  
 
   // Selected Q&A or search match
-  const selectedQa = useMemo(() => {
-    const q = qaQuery.trim().toLowerCase();
-    if (!q) {
-      return qaQuestions.find(item => item.id === activeQuestionId) ?? qaQuestions[0];
-    }
-
-    // Try matching specific customer
-    const matchCust = customers.find(c => c.name.toLowerCase().includes(q) || (c.mobile && c.mobile.includes(q)));
-    if (matchCust) {
-      const balance = bal('c', matchCust.id).balance;
-      return {
-        id: 'cust-match',
-        titleBn: `খরিদ্দার '${matchCust.name}' এর বর্তমান বাকি ও হিসাব`,
-        titleEn: `Account details for customer '${matchCust.name}'`,
-        tag: 'খরিদ্দার খোঁজ',
-        answer: {
-          headline: m(balance),
-          badge: balance > 0 ? (lang === 'bn' ? 'বাকি বকেয়া রয়েছে' : 'Payment Due') : (lang === 'bn' ? 'সম্পূর্ণ পরিশোধিত' : 'Fully Paid'),
-          details: [
-            { label: lang === 'bn' ? 'খরিদ্দারের নাম' : 'Customer Name', val: matchCust.name },
-            { label: lang === 'bn' ? 'মোবাইল নম্বর' : 'Phone', val: matchCust.mobile || 'নম্বর নেই' },
-            { label: lang === 'bn' ? 'ঠিকানা' : 'Address', val: matchCust.address || 'ঠিকানা নেই' },
-            { label: lang === 'bn' ? 'বর্তমান ব্যালেন্স' : 'Current Balance', val: m(balance) },
-          ],
-          explanation: lang === 'bn'
-            ? `${matchCust.name} এর কাছে বর্তমানে ${m(balance)} টাকা পাওনা রয়েছে। খরিদ্দারের সম্পূর্ণ লেজার ও চালান দেখতে নিচের বোতামে চাপুন।`
-            : `${matchCust.name} currently has an outstanding balance of ${m(balance)}. Click below to view detailed ledger.`,
-          actionLabel: lang === 'bn' ? 'চালান ও খতিয়ান দেখুন' : 'View Ledger',
-          action: () => setSelectedCustId(matchCust.id),
-        },
-      };
-    }
-
-    // Try matching specific vendor
-    const matchVendor = vendors.find(v => v.name.toLowerCase().includes(q) || (v.mobile && v.mobile.includes(q)));
-    if (matchVendor) {
-      const balance = bal('v', matchVendor.id).balance;
-      return {
-        id: 'vendor-match',
-        titleBn: `মহাজন '${matchVendor.name}' এর পাওনা ও দেনার হিসাব`,
-        titleEn: `Payable details for vendor '${matchVendor.name}'`,
-        tag: 'মহাজন খোঁজ',
-        answer: {
-          headline: m(balance),
-          badge: balance > 0 ? (lang === 'bn' ? 'পরিশোধ বকেয়া রয়েছে' : 'Payable Due') : (lang === 'bn' ? 'পরিশোধিত' : 'Paid'),
-          details: [
-            { label: lang === 'bn' ? 'মহাজনের নাম' : 'Vendor Name', val: matchVendor.name },
-            { label: lang === 'bn' ? 'মোবাইল নম্বর' : 'Phone', val: matchVendor.mobile || 'নম্বর নেই' },
-            { label: lang === 'bn' ? 'বর্তমান দেনা' : 'Current Due', val: m(balance) },
-          ],
-          explanation: lang === 'bn'
-            ? `মহাজন ${matchVendor.name} এর কাছে মোট দেনা বাকি রয়েছে ${m(balance)} টাকা।`
-            : `You owe ${matchVendor.name} a total of ${m(balance)}.`,
-          actionLabel: lang === 'bn' ? 'মহাজন খতিয়ান দেখুন' : 'View Ledger',
-          action: () => setSelectedVendorId(matchVendor.id),
-        },
-      };
-    }
-
-    // Keyword matching
-    if (q.includes('লাভ') || q.includes('মুনাফা') || q.includes('profit') || q.includes('মার্জিন')) return qaQuestions[0];
-    if (q.includes('বাকি') || q.includes('পাওনা') || q.includes('due') || q.includes('খরিদ্দার')) return qaQuestions[1];
-    if (q.includes('দেনা') || q.includes('মহাজন') || q.includes('payable') || q.includes('মিল')) return qaQuestions[2];
-    if (q.includes('ক্যাশ') || q.includes('ব্যাংক') || q.includes('টাকা') || q.includes('তহবিল') || q.includes('cash') || q.includes('bank')) return qaQuestions[3];
-    if (q.includes('খরচ') || q.includes('ব্যয়') || q.includes('expense')) return qaQuestions[4];
-    if (q.includes('স্টক') || q.includes('বস্তা') || q.includes('গুদাম') || q.includes('stock')) return qaQuestions[5];
-    if (q.includes('স্বাস্থ্য') || q.includes('নিরাপত্তা') || q.includes('health') || q.includes('ঝুঁকি')) return qaQuestions[6];
-    if (q.includes('গড়') || q.includes('দৈনিক') || q.includes('average')) return qaQuestions[7];
-
-    return qaQuestions.find(item => item.id === activeQuestionId) ?? qaQuestions[0];
-  }, [qaQuery, activeQuestionId, qaQuestions, customers, vendors, bal, m, lang]);
+  
 
   // Bezier curve coordinate math
   const chartHeight = 220;
@@ -759,18 +499,9 @@ export function AccountsDashboard({ go, focus, onFocusDone }: AccountsDashboardP
               <Text style={styles.headerTitle}>
                 {lang === 'bn' ? 'হিসাব ও আর্থিক অ্যানালিটিক্স' : 'Accounts & Financial Analytics'}
               </Text>
-              <View style={styles.liveTag}>
-                <View style={styles.liveDot} />
-                <Text style={styles.liveTagText}>
-                  {lang === 'bn' ? 'লাইভ সিঙ্ক' : 'Live Sync'}
-                </Text>
-              </View>
+              
             </View>
-            <Text style={styles.headerSub}>
-              {lang === 'bn'
-                ? 'আড়তের নগদ ও ব্যাংক তহবিল, কাস্টমার বাকি, মহাজন দেনা ও আসল নিট মুনাফার পূর্ণাঙ্গ চিত্র'
-                : 'Complete overview of cash reserves, receivables, vendor payables & net profit'}
-            </Text>
+            
           </View>
         </View>
 
@@ -847,7 +578,7 @@ export function AccountsDashboard({ go, focus, onFocusDone }: AccountsDashboardP
                 ? (lang === 'bn' ? 'এই মাস' : 'This Month')
                 : p === 'last3m'
                 ? (lang === 'bn' ? 'শেষ ৩ মাস' : 'Last 3 Months')
-                : (lang === 'bn' ? 'চলতি বছর' : 'This Year');
+                : (lang === 'bn' ? 'চলতি অর্থবছর' : 'Fiscal Year');
             return (
               <TouchableOpacity
                 key={p}
@@ -1054,7 +785,6 @@ export function AccountsDashboard({ go, focus, onFocusDone }: AccountsDashboardP
           { key: 'due', labelBn: `👥 কাস্টমার বাকি (${n(totalDueCount)})`, labelEn: `Receivables (${totalDueCount})`, icon: icons.customers },
           { key: 'pay', labelBn: `🏢 মহাজন দেনা (${n(totalPayableCount)})`, labelEn: `Payables (${totalPayableCount})`, icon: icons.vendors },
           { key: 'expense', labelBn: '📉 খরচের রেজিস্টার', labelEn: 'Expense Register', icon: icons.expense },
-          { key: 'qa', labelBn: '💡 হিসাব সহকারী ও প্রশ্নোত্তর', labelEn: 'Accounts Assistant & Q&A', icon: icons.calc },
         ].map(tTab => {
           const active = activeTab === tTab.key;
           return (
@@ -1088,11 +818,7 @@ export function AccountsDashboard({ go, focus, onFocusDone }: AccountsDashboardP
                     </Text>
                   </View>
                 </View>
-                <Text style={styles.chartSectionSubtitle}>
-                  {lang === 'bn'
-                    ? 'দিনের গতিবিধির ওপর মাউস নিন বা স্পর্শ করুন বিস্তারিত দেখতে'
-                    : 'Hover or tap on points to inspect exact daily financial figures'}
-                </Text>
+                
               </View>
 
               {/* Curve Series Toggles */}
@@ -1345,9 +1071,7 @@ export function AccountsDashboard({ go, focus, onFocusDone }: AccountsDashboardP
                   <Text style={styles.blockTitle}>
                     {lang === 'bn' ? 'লাভ-ক্ষতির স্পষ্ট ধাপ (Visual P&L Waterfall)' : 'Income Statement Waterfall'}
                   </Text>
-                  <Text style={styles.blockSubtitle}>
-                    {lang === 'bn' ? 'যে কেউ সহজেই বুঝতে পারবে প্রতি ১০০ টাকায় কত লাভ থাকে' : 'Clear breakdown from gross revenue to net pocket profit'}
-                  </Text>
+                  
                 </View>
               </View>
 
@@ -1444,9 +1168,7 @@ export function AccountsDashboard({ go, focus, onFocusDone }: AccountsDashboardP
                   <Text style={styles.blockTitle}>
                     {lang === 'bn' ? 'তারল্য ও দেনা-পাওনা ভারসাম্য' : 'Liquidity & Solvency Balance'}
                   </Text>
-                  <Text style={styles.blockSubtitle}>
-                    {lang === 'bn' ? 'মহাজন দেনার বিপরীতে ক্যাশ ও পাওনার সুরক্ষা' : 'Cash + Receivables vs Vendor Payables'}
-                  </Text>
+                  
                 </View>
               </View>
 
@@ -1525,65 +1247,7 @@ export function AccountsDashboard({ go, focus, onFocusDone }: AccountsDashboardP
           </View>
 
           {/* Section C: Plain Language Accounts Guide (সহজ ভাষায় হিসাব নির্দেশিকা) */}
-          <View style={styles.plainGuideCard}>
-            <View style={styles.cardHeaderWithIcon}>
-              <AppIcon name={icons.calc} size={24} iconColor="#8B5CF6" />
-              <View>
-                <Text style={styles.blockTitle}>
-                  {lang === 'bn' ? 'সহজ ভাষায় এই হিসাবের অর্থ কী? (যে কোনো মানুষের বোঝার জন্য)' : 'Plain Language Accounting Guide (Easy for Anyone)'}
-                </Text>
-                <Text style={styles.blockSubtitle}>
-                  {lang === 'bn' ? 'অ্যাকাউন্টিং না জানা যেকোনো সাধারণ ব্যবসায়ী বা কর্মচারীর বোঝার সহজ ব্যাখ্যা' : 'Clear explanations of core accounting metrics'}
-                </Text>
-              </View>
-            </View>
-
-            <View style={[styles.guidePillGrid, isMobile && { flexDirection: 'column' }]}>
-              <View style={styles.guideItem}>
-                <Text style={styles.guideTitle}>
-                  💡 {lang === 'bn' ? 'গ্রস প্রফিট (মোট লাভ) বনাম নেট প্রফিট (আসল লাভ) এর ফারাক কী?' : 'Gross vs Net Profit?'}
-                </Text>
-                <Text style={styles.guideDesc}>
-                  {lang === 'bn'
-                    ? 'মোট লাভ (Gross Profit) হলো চাল কেনা দাম এবং বিক্রয় দামের মধ্যবর্তী সরাসরি লাভ। আর নেট প্রফিট হলো দোকান ভাড়া, কর্মচারীর বেতন, ট্রাক ভাড়া ও বিদ্যুৎ বিল ইত্যাদি সব খরচ বাদ দেওয়ার পর আপনার পকেটে যা আসল মুনাফা হিসেবে জমা থাকে।'
-                    : 'Gross profit is trading profit (Sales minus Rice Cost). Net profit is what remains in your pocket after paying rent, staff, electricity, and transport.'}
-                </Text>
-              </View>
-
-              <View style={styles.guideItem}>
-                <Text style={styles.guideTitle}>
-                  💡 {lang === 'bn' ? 'বিক্রয় (Sales) এবং কালেকশন (Collection) কেন আলাদা?' : 'Sales vs Collection?'}
-                </Text>
-                <Text style={styles.guideDesc}>
-                  {lang === 'bn'
-                    ? 'বিক্রয় মানে মোট কত টাকার চাল খরিদ্দারের কাছে গেছে (নগদ বা বাকি)। আর কালেকশন হলো বাস্তবে আপনার ক্যাশ ড্রয়ারে বা ব্যাংক অ্যাকাউন্টে মোট কত নগদ টাকা এসে জমা হয়েছে।'
-                    : 'Sales is the total invoice amount of rice sent out. Collection is the real cash that actually reached your drawer or bank.'}
-                </Text>
-              </View>
-
-              <View style={styles.guideItem}>
-                <Text style={styles.guideTitle}>
-                  💡 {lang === 'bn' ? 'COGS (চালের ক্রয় খরচ) কী এবং কেন এটি জরুরি?' : 'What is COGS?'}
-                </Text>
-                <Text style={styles.guideDesc}>
-                  {lang === 'bn'
-                    ? 'যে চালগুলো নির্দিষ্ট সময়ে বিক্রি হয়েছে, সেগুলো পাইকারি কত দরে কেনা হয়েছিল তার মূল্য হলো COGS। বিক্রয় থেকে এই কেনা খরচ বাদ দিলেই পণ্যের আসল ব্যবসায়িক লাভ পাওয়া যায়।'
-                    : 'COGS is the wholesale cost paid to mills for the exact bags of rice that were sold during this period.'}
-                </Text>
-              </View>
-
-              <View style={styles.guideItem}>
-                <Text style={styles.guideTitle}>
-                  💡 {lang === 'bn' ? 'পাওনা বনাম দেনার ঝুঁকি কীভাবে বুঝবেন?' : 'Receivable vs Payable Risk?'}
-                </Text>
-                <Text style={styles.guideDesc}>
-                  {lang === 'bn'
-                    ? 'কাস্টমারদের কাছে বাকি টাকা এবং ক্যাশ ড্রয়ারের টাকার যোগফল সবসময় মহাজন দেনার চেয়ে বেশি থাকা প্রয়োজন। এটি ১০০% এর নিচে নামলে জরুরি দেনা মেটাতে ক্যাশ সংকট হতে পারে।'
-                    : 'Ensure your cash plus customer dues comfortably exceed vendor liabilities to avoid any working capital squeeze.'}
-                </Text>
-              </View>
-            </View>
-          </View>
+          
         </View>
       )}
 
@@ -1593,9 +1257,7 @@ export function AccountsDashboard({ go, focus, onFocusDone }: AccountsDashboardP
           <View style={styles.cardHeaderWithAction}>
             <View>
               <Text style={styles.blockTitle}>{lang === 'bn' ? 'ক্যাশ ও ব্যাংক তহবিল ব্যবস্থাপনা' : 'Cash & Bank Reserves'}</Text>
-              <Text style={styles.blockSubtitle}>
-                {lang === 'bn' ? 'দোকানের ক্যাশ ড্রয়ার ও ব্যাংক হিসাবের বর্তমান ব্যালেন্স' : 'Live balance across all cash drawers and banks'}
-              </Text>
+              
             </View>
             <TouchableOpacity style={styles.primaryActionButton} onPress={() => setTransferModalOpen(true)}>
               <AppIcon name={icons.transfer} size={18} iconColor="#fff" />
@@ -1682,11 +1344,7 @@ export function AccountsDashboard({ go, focus, onFocusDone }: AccountsDashboardP
               <Text style={styles.blockTitle}>
                 {lang === 'bn' ? 'কাস্টমারদের কাছে মোট বাকি ও পাওনা খতিয়ান' : 'Customer Receivables Ledger'}
               </Text>
-              <Text style={styles.blockSubtitle}>
-                {lang === 'bn'
-                  ? `মোট পাওনা: ${m(totalDueAmount)} (${totalDueCount} জন খরিদ্দার)`
-                  : `Total Due: ${m(totalDueAmount)} across ${totalDueCount} customers`}
-              </Text>
+              
             </View>
             <TouchableOpacity style={styles.primaryActionButton} onPress={() => go?.('collect')}>
               <AppIcon name={icons.collect} size={18} iconColor="#fff" />
@@ -1765,11 +1423,7 @@ export function AccountsDashboard({ go, focus, onFocusDone }: AccountsDashboardP
               <Text style={styles.blockTitle}>
                 {lang === 'bn' ? 'চাল সরবরাহকারী ও মহাজনদের দেনা খতিয়ান' : 'Vendor Payables Ledger'}
               </Text>
-              <Text style={styles.blockSubtitle}>
-                {lang === 'bn'
-                  ? `মোট দেনা: ${m(totalPayableAmount)} (${totalPayableCount} জন মহাজন)`
-                  : `Total Payable: ${m(totalPayableAmount)} across ${totalPayableCount} suppliers`}
-              </Text>
+              
             </View>
             <TouchableOpacity style={[styles.primaryActionButton, { backgroundColor: '#2563EB' }]} onPress={() => go?.('pay')}>
               <AppIcon name={icons.pay} size={18} iconColor="#fff" />
@@ -1835,9 +1489,7 @@ export function AccountsDashboard({ go, focus, onFocusDone }: AccountsDashboardP
           <View style={styles.cardHeaderWithAction}>
             <View>
               <Text style={styles.blockTitle}>{lang === 'bn' ? 'দোকান পরিচালনা ব্যয়ের রেজিস্টার' : 'Expense Register'}</Text>
-              <Text style={styles.blockSubtitle}>
-                {lang === 'bn' ? `নির্বাচিত সময়ে মোট খরচ: ${m(fExp)}` : `Period Total Expenses: ${m(fExp)}`}
-              </Text>
+              
             </View>
             <TouchableOpacity style={styles.primaryActionButton} onPress={() => setExpenseFormItem(null)}>
               <AppIcon name={icons.add} size={18} iconColor="#fff" />
@@ -1888,128 +1540,7 @@ export function AccountsDashboard({ go, focus, onFocusDone }: AccountsDashboardP
       )}
 
       {/* ==================== TAB 6: INTELLIGENT ACCOUNTS Q&A ASSISTANT ==================== */}
-      {activeTab === 'qa' && (
-        <View style={styles.tabContentArea}>
-          {/* Search & Ask Input */}
-          <View style={styles.qaSearchCard}>
-            <View style={styles.qaHeaderRow}>
-              <View style={styles.qaIconBadge}>
-                <AppIcon name={icons.calc} size={24} iconColor="#6366F1" />
-              </View>
-              <View style={{ flex: 1 }}>
-                <Text style={styles.qaMainTitle}>
-                  {lang === 'bn' ? 'বুদ্ধিমান হিসাব সহকারী (Accounts Q&A Navigator)' : 'Intelligent Accounts Q&A Navigator'}
-                </Text>
-                <Text style={styles.qaMainSubtitle}>
-                  {lang === 'bn'
-                    ? 'হিসাব সম্পর্কিত যে কোনো প্রশ্ন লিখুন বা নিচের প্রশ্নগুলোতে ক্লিক করুন — তাৎক্ষণিক লাইভ হিসাব পেয়ে যাবেন'
-                    : 'Ask any question about accounts or click below to get real-time computed answers'}
-                </Text>
-              </View>
-            </View>
-
-            <View style={styles.qaInputBox}>
-              <AppIcon name={icons.search} size={22} iconColor="#6366F1" />
-              <TextInput
-                ref={qaInputRef}
-                style={styles.qaTextInput}
-                placeholder={
-                  lang === 'bn'
-                    ? 'যেকোনো প্রশ্ন লিখুন (যেমন: লাভ, পাওনা, দেনা, ক্যাশ, খরচ, রহিম ট্রেডার্স)...'
-                    : 'Ask anything (e.g. net profit, receivables, cash, expenses)...'
-                }
-                value={qaQuery}
-                onChangeText={setQaQuery}
-              />
-              {qaQuery.length > 0 && (
-                <TouchableOpacity onPress={() => setQaQuery('')}>
-                  <AppIcon name={icons.cancel} size={20} iconColor="#94A3B8" />
-                </TouchableOpacity>
-              )}
-            </View>
-
-            {/* Quick Question Chips */}
-            <Text style={styles.qaPillsHeader}>
-              {lang === 'bn' ? 'দ্রুত ক্লিকের সাধারণ প্রশ্নসমূহ:' : 'Common Quick Questions:'}
-            </Text>
-            <View style={styles.qaChipsContainer}>
-              {qaQuestions.map(item => {
-                const isSelected = selectedQa?.id === item.id && !qaQuery;
-                return (
-                  <TouchableOpacity
-                    key={item.id}
-                    style={[styles.qaChip, isSelected && styles.qaChipActive]}
-                    onPress={() => {
-                      setQaQuery('');
-                      setActiveQuestionId(item.id);
-                    }}
-                  >
-                    <Text style={[styles.qaChipText, isSelected && styles.qaChipTextActive]}>
-                      {lang === 'bn' ? item.titleBn : item.titleEn}
-                    </Text>
-                  </TouchableOpacity>
-                );
-              })}
-            </View>
-          </View>
-
-          {/* Computed Live Answer Card */}
-          {selectedQa && (
-            <View style={styles.qaAnswerCard}>
-              <View style={styles.qaAnswerHeader}>
-                <View style={styles.qaTagPill}>
-                  <Text style={styles.qaTagText}>{selectedQa.tag}</Text>
-                </View>
-                <Text style={styles.qaQuestionTitle}>
-                  {lang === 'bn' ? selectedQa.titleBn : selectedQa.titleEn}
-                </Text>
-              </View>
-
-              <View style={styles.qaAnswerBody}>
-                <View style={styles.qaHeadlineRow}>
-                  <Text style={styles.qaAnswerHeadline}>{selectedQa.answer.headline}</Text>
-                  {selectedQa.answer.badge ? (
-                    <View style={styles.qaAnswerBadge}>
-                      <Text style={styles.qaAnswerBadgeText}>{selectedQa.answer.badge}</Text>
-                    </View>
-                  ) : null}
-                </View>
-
-                {/* Sub Metrics / Breakdown */}
-                <View style={styles.qaBreakdownGrid}>
-                  {selectedQa.answer.details.map((dt, i) => (
-                    <View key={i} style={styles.qaDetailItem}>
-                      <Text style={styles.qaDetailLabel}>{dt.label}</Text>
-                      <Text style={styles.qaDetailVal}>{dt.val}</Text>
-                    </View>
-                  ))}
-                </View>
-
-                {/* Plain Language Human Explanation */}
-                <View style={styles.qaExplanationBox}>
-                  <Text style={styles.qaExplanationTitle}>
-                    💡 {lang === 'bn' ? 'সহজ ব্যাখ্যা (Plain Explanation):' : 'Plain Explanation:'}
-                  </Text>
-                  <Text style={styles.qaExplanationText}>
-                    {selectedQa.answer.explanation}
-                  </Text>
-                </View>
-
-                {/* Action Button */}
-                {selectedQa.answer.action && (
-                  <TouchableOpacity
-                    style={styles.qaActionBtn}
-                    onPress={selectedQa.answer.action}
-                  >
-                    <Text style={styles.qaActionBtnText}>{selectedQa.answer.actionLabel}</Text>
-                    <AppIcon name={icons.chevR} size={18} iconColor="#fff" />
-                  </TouchableOpacity>
-                )}
-              </View>
-            </View>
-          )}
-        </View>
-      )}
+      
 
       {/* ==================== ACTIVE DRILLDOWN MODALS ==================== */}
       {/* 1. Date Range Filter Modal */}
