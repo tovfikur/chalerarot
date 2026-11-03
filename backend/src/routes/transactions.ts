@@ -160,11 +160,13 @@ tx.post('/sales', async (req: Request, res: Response) => {
     checkPromiseDay(next);
     const pay = Math.max(0, num(paid));
     const payMethod = methodForAmount(method, pay, Boolean(accountId));
+    const splitPayments = Array.isArray(req.body.payments) ? req.body.payments.filter((x: any) => x && num(x.amount) > 0) : null;
     const disc = Math.max(0, num(discount));
     const result = await db.$transaction(async t => {
       // Money only moves for the amount actually received; the concrete account
       // is resolved once and used by the ledger entry below.
-      const payAccount = pay > 0 ? await resolveAccount(t, { accountId, method: accountId ? undefined : payMethod }) : null;
+      const payAccount = !splitPayments && pay > 0 ? await resolveAccount(t, { accountId, method: accountId ? undefined : payMethod }) : null;
+      const splitAccounts = splitPayments ? await Promise.all(splitPayments.map((x: any) => resolveAccount(t, { accountId: x.accountId }))) : [];
       let sub = 0, cogs = 0;
       let returnTotalAmount = 0, returnCogsReversed = 0;
       const items: { productId: string; unit: string; enteredQty: number; qtyKg: number; rate: number; unitCost: number; cogs: number }[] = [];
@@ -299,13 +301,28 @@ tx.post('/sales', async (req: Request, res: Response) => {
         }
       }
 
-      if (payAccount) {
-        await t.customerPayment.create({
+      if (splitPayments) {
+        let remaining = cappedPay;
+        for (let i = 0; i < splitPayments.length && remaining > 0; i++) {
+          const amount = round2(Math.min(remaining, num(splitPayments[i].amount)));
+          if (!(amount > 0)) continue;
+          const acc = splitAccounts[i];
+          const payment = await t.customerPayment.create({
+            data: { customerId: validCustomerId, saleId: sale.id, amount, date: day },
+          });
+          await recordMovement(t, {
+            accountId: acc.id, method: acc.type, direction: 'in', amount, date: day,
+            sourceType: 'customerPayment', sourceId: payment.id, note: sale.invoiceNo,
+          });
+          remaining = round2(remaining - amount);
+        }
+      } else if (payAccount) {
+        const payment = await t.customerPayment.create({
           data: { customerId: validCustomerId, saleId: sale.id, amount: cappedPay, date: day },
         });
         await recordMovement(t, {
           accountId: payAccount.id, method: payAccount.type, direction: 'in', amount: cappedPay, date: day,
-          sourceType: 'sale', sourceId: sale.id, note: sale.invoiceNo,
+          sourceType: 'customerPayment', sourceId: payment.id, note: sale.invoiceNo,
         });
       }
       if (validCustomerId && next) await t.customer.update({ where: { id: validCustomerId }, data: { nextDate: String(next) } });

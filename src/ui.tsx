@@ -113,12 +113,12 @@ export const methodIcon = (m?: string): IconName => (m && METHOD_ICON[m as Accou
  * it is chosen automatically; with several accounts the user picks the exact
  * one. Nothing here is accounting jargon.
  */
-export function AccountPicker({ accountId, onPick, label, required }: {
-  accountId?: string; onPick: (id: string) => void; label?: string; required?: boolean;
+export function AccountPicker({ accountId, onPick, label, required, accountType }: {
+  accountId?: string; onPick: (id: string) => void; label?: string; required?: boolean; accountType?: AccountType;
 }) {
   const { t, moneyAccounts } = useApp();
   const fs = useFs(15, 14);
-  const active = moneyAccounts.filter(a => a.active);
+  const active = moneyAccounts.filter(a => a.active && (!accountType || a.type === accountType));
   const selected = active.find(a => a.id === accountId);
   const byType = (type: string) => active.filter(a => a.type === type);
   const types = ACCOUNT_TYPES.filter(type => byType(type).length > 0);

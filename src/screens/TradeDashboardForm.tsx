@@ -284,7 +284,6 @@ export function TradeDashboardForm({ mode, onDone, onOpenHistory }: TradeDashboa
 
   // Additional costs (Transport, Landing)
   const [transportCost, setTransportCost] = useState('');
-  const [landingCost, setLandingCost] = useState('');
 
   // Payments (Cash, Bank) & Discount (no default '0' strings)
   const [cashPaid, setCashPaid] = useState('');
@@ -325,15 +324,10 @@ export function TradeDashboardForm({ mode, onDone, onOpenHistory }: TradeDashboa
   const totalProductValue = useMemo(() => {
     return items.reduce((sum, item) => {
       const q = parseNum(item.qty);
-      const prod = products.find(p => p.id === item.productId || p.name === item.name);
-      const per = kgPerUnit(prod, item.unit || 'medium');
-      const defaultRate = isSale
-        ? Math.round((prod?.price || 0) * per)
-        : Math.round((prod?.cost || 0) * per);
-      const r = parseNum(item.rate) || defaultRate;
+      const r = parseNum(item.rate);
       return sum + q * r;
     }, 0);
-  }, [items, products, isSale]);
+  }, [items]);
 
   const totalEstimatedCost = useMemo(() => {
     return items.reduce((sum, item) => {
@@ -360,8 +354,6 @@ export function TradeDashboardForm({ mode, onDone, onOpenHistory }: TradeDashboa
   }, [isSale, totalProductValue, totalEstimatedCost]);
 
   const numTransport = parseNum(transportCost);
-  const numLanding = parseNum(landingCost);
-  const totalAdditionalCosts = numTransport + numLanding;
 
   const numCash = parseNum(cashPaid);
   const numBank = parseNum(bankPaid);
@@ -548,6 +540,11 @@ export function TradeDashboardForm({ mode, onDone, onOpenHistory }: TradeDashboa
     return seq;
   }, [isSale, items, isDateLocked]);
 
+  const focusInputAfterKey = useCallback((key: string) => {
+    setFocusedField(key);
+    setTimeout(() => inputRefs.current[key]?.focus(), 0);
+  }, []);
+
   const focusNextField = useCallback((currentKey: string) => {
     const seq = getNavSequence();
     const currentIdx = seq.indexOf(currentKey);
@@ -623,7 +620,6 @@ export function TradeDashboardForm({ mode, onDone, onOpenHistory }: TradeDashboa
       billDate,
       items,
       transportCost,
-      landingCost,
       cashPaid,
       bankPaid,
       savedAt: new Date().toISOString(),
@@ -640,7 +636,7 @@ export function TradeDashboardForm({ mode, onDone, onOpenHistory }: TradeDashboa
   }, [
     mode, orderNo, memoNo, selectedPartyId, partyCode, partyName, partyMobile,
     partyAddress, billDate, items, transportCost,
-    landingCost, cashPaid, bankPaid
+    cashPaid, bankPaid
   ]);
 
   // Reset form to clean state for a new entry (cursor starts at partyCode, pre-fills default customer/vendor)
@@ -672,7 +668,6 @@ export function TradeDashboardForm({ mode, onDone, onOpenHistory }: TradeDashboa
     setBankPaid('');
     setDiscount('');
     setTransportCost('');
-    setLandingCost('');
     setFormError('');
     setReviewSplitOpen(false);
     setActiveItemDropdownIdx(null);
@@ -790,12 +785,10 @@ export function TradeDashboardForm({ mode, onDone, onOpenHistory }: TradeDashboa
     }
 
     const effectivePartyId = selectedPartyId;
-    const cashAcc = moneyAccounts.find(a => a.type === 'cash' && a.active);
-    const bankAcc = moneyAccounts.find(a => a.type === 'bank' && a.active);
-    const chosenAccountId = numBank > 0 ? bankAcc?.id : cashAcc?.id;
-    if (!isSale && numCash > 0 && !cashAccountId) { setFormError('Select an active cash account for the cash payment.'); return; }
-    if (!isSale && numBank > 0 && !bankAccountId) { setFormError('Select an active bank account for the bank payment.'); return; }
-    if (!isSale && (numTransport > 0 || numLanding > 0 || validLines.some(l => parseNum(l.otherCost) > 0)) && !expenseAccountId) { setFormError('Select an active account for purchase costs.'); return; }
+    const chosenAccountId = numBank > 0 ? bankAccountId : cashAccountId;
+    if (numCash > 0 && !moneyAccounts.some(a => a.id === cashAccountId && a.type === 'cash' && a.active)) { setFormError('Select an active cash account for the cash payment.'); return; }
+    if (numBank > 0 && !moneyAccounts.some(a => a.id === bankAccountId && a.type === 'bank' && a.active)) { setFormError('Select an active bank account for the bank payment.'); return; }
+    if (!isSale && validLines.some(l => parseNum(l.otherCost) > 0) && !expenseAccountId) { setFormError('Select an active account for purchase costs.'); return; }
 
     setSubmitting(true);
     try {
@@ -862,6 +855,10 @@ export function TradeDashboardForm({ mode, onDone, onOpenHistory }: TradeDashboa
           discount: numDiscount,
           paid: totalPaid,
           accountId: chosenAccountId,
+          payments: [
+            ...(numCash > 0 ? [{ accountId: cashAccountId, amount: numCash }] : []),
+            ...(numBank > 0 ? [{ accountId: bankAccountId, amount: numBank }] : []),
+          ],
           date: isoDate,
           memoNo: memoNo.trim() || undefined,
         });
@@ -883,6 +880,7 @@ export function TradeDashboardForm({ mode, onDone, onOpenHistory }: TradeDashboa
       const todayISO = isoDate || today();
       const invoiceRef = res?.invoiceNo || memoNo.trim() || 'Invoice';
       const expAccountId = isSale ? chosenAccountId : expenseAccountId;
+      const expenseSaveFailures: string[] = [];
 
       if (numTransport > 0 && expAccountId) {
         try {
@@ -896,36 +894,37 @@ export function TradeDashboardForm({ mode, onDone, onOpenHistory }: TradeDashboa
           });
         } catch (e) {
           console.error('Failed to save transport expense:', e);
-        }
-      }
-
-      if (numLanding > 0 && expAccountId) {
-        try {
-          await saveExpense({
-            category: 'loading',
-            customName: 'লেবার/লোডিং খরচ',
-            amount: numLanding,
-            accountId: expAccountId,
-            date: todayISO,
-            note: `[ধরন: ল্যান্ডিং] ${isSale ? 'বিক্রয়' : 'ক্রয়'} #${invoiceRef} লেবার/লোডিং খরচ`,
-          });
-        } catch (e) {
-          console.error('Failed to save landing expense:', e);
+          expenseSaveFailures.push('transport');
         }
       }
 
       const totalLinesOtherCost = !isSale
         ? validLines.reduce((sum, l) => {
-            const q = Math.abs(parseNum(l.qty));
+            const product = products.find(p => p.id === l.productId)
+              || products.find(p => p.name.toLowerCase() === l.name.toLowerCase());
+            const unit = (l.unit || 'medium') as BagUnit;
+            const bagKg = product?.mediumBagKg || 50;
+            const bagEquivalent = bagKg > 0
+              ? Math.abs(parseNum(l.qty)) * kgPerUnit(product, unit) / bagKg
+              : 0;
             const oc = parseNum(l.otherCost);
-            return sum + (q * oc);
+            return sum + (bagEquivalent * oc);
           }, 0)
         : 0;
 
       if (totalLinesOtherCost > 0 && expAccountId && !isSale) {
         const lineDetails = validLines
           .filter(l => parseNum(l.otherCost) > 0)
-          .map(l => `${l.name || 'পণ্য'}: ${Math.abs(parseNum(l.qty))} বস্তা x ৳${parseNum(l.otherCost)}`)
+          .map(l => {
+            const product = products.find(p => p.id === l.productId)
+              || products.find(p => p.name.toLowerCase() === l.name.toLowerCase());
+            const unit = (l.unit || 'medium') as BagUnit;
+            const bagKg = product?.mediumBagKg || 50;
+            const bagEquivalent = bagKg > 0
+              ? Math.abs(parseNum(l.qty)) * kgPerUnit(product, unit) / bagKg
+              : 0;
+            return `${l.name || 'পণ্য'}: ${bagEquivalent.toFixed(2)} বস্তা x ৳${parseNum(l.otherCost)}`;
+          })
           .join(', ');
 
         try {
@@ -939,6 +938,7 @@ export function TradeDashboardForm({ mode, onDone, onOpenHistory }: TradeDashboa
           });
         } catch (e) {
           console.error('Failed to save per-bag other expense:', e);
+          expenseSaveFailures.push('per-bag landing cost');
         }
       }
 
@@ -978,6 +978,14 @@ export function TradeDashboardForm({ mode, onDone, onOpenHistory }: TradeDashboa
       resetForm(nextNo);
       setTimeout(focusCustomerInput, 150);
       setTimeout(focusCustomerInput, 350);
+      if (expenseSaveFailures.length) {
+        Alert.alert(
+          lang === 'bn' ? 'ইনভয়েস হয়েছে, খরচ সংরক্ষণ হয়নি' : 'Invoice saved, expense not recorded',
+          lang === 'bn'
+            ? `ইনভয়েস ${invoiceRef} সংরক্ষিত হয়েছে, কিন্তু ${expenseSaveFailures.join(', ')} খরচ সংরক্ষণ করা যায়নি। খরচের হিসাব পরীক্ষা করুন।`
+            : `Invoice ${invoiceRef} was saved, but these expense records failed: ${expenseSaveFailures.join(', ')}. Please review the expense ledger.`,
+        );
+      }
     } catch (err) {
       if (win && !win.closed) win.close();
       setFormError(err instanceof Error ? err.message : 'লেনদেন সম্পন্ন করা সম্ভব হয়নি।');
@@ -986,7 +994,7 @@ export function TradeDashboardForm({ mode, onDone, onOpenHistory }: TradeDashboa
     }
   }, [
     submitting, items, selectedPartyId, isSale, products, moneyAccounts, numBank, billDate,
-    lang, sale, numDiscount, totalPaid, memoNo, purchase, numTransport, numLanding, saveExpense, mode,
+    lang, sale, numDiscount, totalPaid, memoNo, purchase, numTransport, saveExpense, mode,
     printDoc, resetForm, sales, purchases, focusCustomerInput
   ]);
 
@@ -1174,8 +1182,17 @@ export function TradeDashboardForm({ mode, onDone, onOpenHistory }: TradeDashboa
 
           {/* Right: Tactile 3D Buttons for F1, Search, Bell */}
           <View style={styles.headerRight}>
-            {!isSale && onOpenHistory ? <TouchableOpacity onPress={onOpenHistory} style={styles.shortcutGuideBadge3D} testID="open-purchase-history"><Text style={styles.shortcutGuideBadgeText}>ক্রয় তালিকা</Text></TouchableOpacity> : null}
-            {!isSale && onOpenHistory ? <TouchableOpacity onPress={onOpenHistory} style={styles.shortcutGuideBadge3D} accessibilityRole="button" testID="open-purchase-history"><Text style={styles.shortcutGuideBadgeText}>ক্রয় তালিকা</Text></TouchableOpacity> : null}
+            {onOpenHistory ? (
+              <TouchableOpacity
+                onPress={onOpenHistory}
+                style={styles.shortcutGuideBadge3D}
+                accessibilityRole="button"
+                accessibilityLabel={isSale ? 'Sales list' : 'Purchase list'}
+                testID={isSale ? 'open-sales-history' : 'open-purchase-history'}
+              >
+                <Text style={styles.shortcutGuideBadgeText}>{isSale ? 'বিক্রয় তালিকা' : 'ক্রয় তালিকা'}</Text>
+              </TouchableOpacity>
+            ) : null}
             <TouchableOpacity
               onPress={() => setShowShortcutsHelp(true)}
               style={styles.shortcutGuideBadge3D}
@@ -1672,11 +1689,7 @@ export function TradeDashboardForm({ mode, onDone, onOpenHistory }: TradeDashboa
             const bagKg = rowProduct?.mediumBagKg || 50;
             const isBag = (row.unit || 'medium') === 'medium';
             const per = isBag ? bagKg : 1;
-            const defaultRate = isSale
-              ? Math.round((rowProduct?.price || 0) * per)
-              : Math.round((rowProduct?.cost || 0) * per);
-            const effectiveRate = rowRate > 0 ? rowRate : defaultRate;
-            const rowTotal = Math.round(rowQty * effectiveRate);
+            const rowTotal = Math.round(rowQty * rowRate);
             const basePurchaseRate = rowProduct ? Math.round((rowProduct.cost || 0) * per) : 0;
             const rowPurchaseRate = parseNum(row.purchaseRate);
             const rowKg = rowQty !== 0 ? Math.round(rowQty * per * 100) / 100 : 0;
@@ -1756,9 +1769,6 @@ export function TradeDashboardForm({ mode, onDone, onOpenHistory }: TradeDashboa
                         {getVisibleProducts(row.code).length ? getVisibleProducts(row.code).map((p, visibleIdx) => {
                           const pCode = p.code?.trim() ?? '';
                           const pBagKg = p.mediumBagKg || 50;
-                          const pPer = isBag ? pBagKg : 1;
-                          const pCost = Math.round((p.cost || 0) * pPer);
-                          const pPrice = Math.round((p.price || 0) * pPer);
                           return (
                             <TouchableOpacity
                               key={p.id}
@@ -1775,14 +1785,6 @@ export function TradeDashboardForm({ mode, onDone, onOpenHistory }: TradeDashboa
                                 <Text style={styles.dropdownItemSub}>
                                   কোড: {toBnDigits(pCode)} ({pCode}) • স্টক: {n(p.qty)} কেজি ({n(Math.round(p.qty / pBagKg))} বস্তা) • প্রতি বস্তা: {n(pBagKg)} কেজি
                                 </Text>
-                              </View>
-                              <View style={{ alignItems: 'flex-end' }}>
-                                <Text style={styles.dropdownItemDue}>{m(isSale ? pPrice : pCost)}</Text>
-                                {isSale && (
-                                  <Text style={{ fontSize: 10, fontWeight: '700', color: '#B45309' }}>
-                                    গড় ক্রয়: {m(pCost)}
-                                  </Text>
-                                )}
                               </View>
                             </TouchableOpacity>
                           );
@@ -1850,7 +1852,22 @@ export function TradeDashboardForm({ mode, onDone, onOpenHistory }: TradeDashboa
                       });
                     }}
                     onFocus={() => setFocusedField(`qty_${rowIdx}`)}
-                    onSubmitEditing={() => focusNextField(`qty_${rowIdx}`)}
+                    onSubmitEditing={() => {
+                      if (Platform.OS === 'web') return;
+                      if (isSale) {
+                        inputRefs.current[`rate_${rowIdx}`]?.focus();
+                        setFocusedField(`rate_${rowIdx}`);
+                      } else {
+                        focusNextField(`qty_${rowIdx}`);
+                      }
+                    }}
+                    onKeyPress={(e: any) => {
+                      if (Platform.OS !== 'web' || e.nativeEvent?.key !== 'Enter') return;
+                      e.preventDefault?.();
+                      e.stopPropagation?.();
+                      if (isSale) focusInputAfterKey(`rate_${rowIdx}`);
+                      else focusNextField(`qty_${rowIdx}`);
+                    }}
                     selectTextOnFocus={true}
                     style={[
                       styles.tableTextInput,
@@ -1902,7 +1919,18 @@ export function TradeDashboardForm({ mode, onDone, onOpenHistory }: TradeDashboa
                         });
                       }}
                       onFocus={() => setFocusedField(`purchaseRate_${rowIdx}`)}
-                      onSubmitEditing={() => focusNextField(`purchaseRate_${rowIdx}`)}
+                      onSubmitEditing={() => {
+                        if (Platform.OS !== 'web') {
+                          inputRefs.current[`rate_${rowIdx}`]?.focus();
+                          setFocusedField(`rate_${rowIdx}`);
+                        }
+                      }}
+                      onKeyPress={(e: any) => {
+                        if (Platform.OS !== 'web' || e.nativeEvent?.key !== 'Enter') return;
+                        e.preventDefault?.();
+                        e.stopPropagation?.();
+                        focusInputAfterKey(`rate_${rowIdx}`);
+                      }}
                       selectTextOnFocus={true}
                       style={[
                         styles.tableTextInput,
@@ -1921,6 +1949,7 @@ export function TradeDashboardForm({ mode, onDone, onOpenHistory }: TradeDashboa
                 <View style={[styles.td, { width: 120, alignItems: 'center' }]}>
                   <TextInput
                     ref={el => (inputRefs.current[`rate_${rowIdx}`] = el)}
+                    editable={true}
                     accessibilityLabel={`${isSale ? 'Sale rate' : 'Purchase rate'} ${rowIdx + 1}`}
                     value={row.rate}
                     onChangeText={txt => {
@@ -1931,25 +1960,16 @@ export function TradeDashboardForm({ mode, onDone, onOpenHistory }: TradeDashboa
                       });
                     }}
                     onFocus={() => setFocusedField(`rate_${rowIdx}`)}
-                    onSubmitEditing={() => focusNextField(`rate_${rowIdx}`)}
-                    {...(Platform.OS === 'web' ? {
-                      onKeyDown: (e: any) => {
-                        if (e.key === 'Tab' && !e.shiftKey) {
-                          e.preventDefault?.();
-                          if (!isSale) {
-                            inputRefs.current[`otherCost_${rowIdx}`]?.focus();
-                            setFocusedField(`otherCost_${rowIdx}`);
-                          } else if (rowIdx < items.length - 1) {
-                            inputRefs.current[`code_${rowIdx + 1}`]?.focus();
-                            setFocusedField(`code_${rowIdx + 1}`);
-                          } else {
-                            confirmBtnRef.current?.focus();
-                            setFocusedField('completeButton');
-                          }
-                        }
-                      }
-                    } as any : {})}
+                    onSubmitEditing={() => {
+                      if (Platform.OS !== 'web') focusNextField(`rate_${rowIdx}`);
+                    }}
                     onKeyPress={(e: any) => {
+                      if (Platform.OS === 'web' && e.nativeEvent?.key === 'Enter') {
+                        e.preventDefault?.();
+                        e.stopPropagation?.();
+                        setTimeout(() => focusNextField(`rate_${rowIdx}`), 0);
+                        return;
+                      }
                       if (e.nativeEvent?.key === 'Tab' && !e.nativeEvent?.shiftKey) {
                         e.preventDefault?.();
                         if (!isSale) {
@@ -1970,11 +1990,7 @@ export function TradeDashboardForm({ mode, onDone, onOpenHistory }: TradeDashboa
                       { height: 40, width: '100%', textAlign: 'center' },
                       isInputFocused(`rate_${rowIdx}`) && styles.inputFocusedGlow,
                     ]}
-                    placeholder={
-                      isSale
-                        ? (rowProduct && rowProduct.price > 0 ? String(Math.round(rowProduct.price * (rowProduct.mediumBagKg || 50))) : 'বিক্রয় দর')
-                        : (rowProduct && rowProduct.cost > 0 ? String(Math.round(rowProduct.cost * (rowProduct.mediumBagKg || 50))) : 'ক্রয় দর')
-                    }
+                    placeholder={isSale ? 'বিক্রয় দর লিখুন' : 'ক্রয় দর লিখুন'}
                     placeholderTextColor="#94A3B8"
                     keyboardType="numeric"
                     returnKeyType="next"
@@ -2034,11 +2050,6 @@ export function TradeDashboardForm({ mode, onDone, onOpenHistory }: TradeDashboa
                       keyboardType="numeric"
                       returnKeyType="next"
                     />
-                    {parseNum(row.otherCost) > 0 && (
-                      <Text style={{ fontSize: 10, color: '#047857', fontWeight: '700', marginTop: 2 }}>
-                        আমার দর: {m(effectiveRate + parseNum(row.otherCost))}
-                      </Text>
-                    )}
                   </View>
                 )}
 
@@ -2412,11 +2423,11 @@ export function TradeDashboardForm({ mode, onDone, onOpenHistory }: TradeDashboa
                       </View>
                     </View>
 
-                    {!isSale ? <AccountPicker accountId={cashAccountId} onPick={setCashAccountId} label="Cash payment account" required={numCash > 0} /> : null}
+                    <AccountPicker accountId={cashAccountId} onPick={setCashAccountId} label={isSale ? 'Cash receiving account' : 'Cash payment account'} required={numCash > 0} accountType="cash" />
 
                     {/* 3. BANK */}
                     <View style={{ marginBottom: 8 }}>
-                      <Text style={{ fontSize: 13, fontWeight: '700', color: '#475569', marginBottom: 3 }}>ব্যাংক পরিশোধ (৳):</Text>
+                      <Text style={{ fontSize: 13, fontWeight: '700', color: '#475569', marginBottom: 3 }}>{isSale ? 'ব্যাংকে গ্রহণ (৳):' : 'ব্যাংক পরিশোধ (৳):'}</Text>
                       <TextInput
                         ref={el => (inputRefs.current['modal_bankPaid'] = el)}
                         accessibilityLabel="Bank paid"
@@ -2429,7 +2440,7 @@ export function TradeDashboardForm({ mode, onDone, onOpenHistory }: TradeDashboa
                       />
                     </View>
 
-                    {!isSale ? <AccountPicker accountId={bankAccountId} onPick={setBankAccountId} label="Bank payment account" required={numBank > 0} /> : null}
+                    <AccountPicker accountId={bankAccountId} onPick={setBankAccountId} label={isSale ? 'Bank receiving account' : 'Bank payment account'} required={numBank > 0} accountType="bank" />
 
                     {/* 4. DISCOUNT */}
                     <View style={{ marginBottom: 10 }}>
@@ -2440,17 +2451,17 @@ export function TradeDashboardForm({ mode, onDone, onOpenHistory }: TradeDashboa
                         value={discount}
                         onChangeText={setDiscount}
                         keyboardType="numeric"
-                        onSubmitEditing={() => inputRefs.current['modal_transportCost']?.focus()}
+                        onSubmitEditing={() => isSale ? inputRefs.current['modal_transportCost']?.focus() : executeTransaction()}
                         style={{ borderWidth: 1.5, borderColor: '#CBD5E1', borderRadius: 8, paddingHorizontal: 10, height: 38, fontSize: 15, backgroundColor: '#FFFFFF', fontWeight: '700', color: '#B45309' }}
                         returnKeyType="done"
                       />
                     </View>
 
                     {/* Optional Transport Cost */}
-                    {!isSale && (numTransport > 0 || numLanding > 0 || totalOtherCost > 0) ? (
+                    {!isSale && totalOtherCost > 0 ? (
                       <AccountPicker accountId={expenseAccountId} onPick={setExpenseAccountId} label="Account for purchase costs" required />
                     ) : null}
-                    <View style={{ marginBottom: 8, padding: 8, backgroundColor: '#F8FAFC', borderRadius: 8, borderWidth: 1, borderColor: '#E2E8F0' }}>
+                    {isSale ? <View style={{ marginBottom: 8, padding: 8, backgroundColor: '#F8FAFC', borderRadius: 8, borderWidth: 1, borderColor: '#E2E8F0' }}>
                       <Text style={{ fontSize: 12, fontWeight: '700', color: '#64748B', marginBottom: 4 }}>পরিবহন খরচ (ঐচ্ছিক)</Text>
                       <TextInput
                         ref={el => (inputRefs.current['modal_transportCost'] = el)}
@@ -2458,7 +2469,7 @@ export function TradeDashboardForm({ mode, onDone, onOpenHistory }: TradeDashboa
                         value={transportCost}
                         onChangeText={setTransportCost}
                         keyboardType="numeric"
-                        onSubmitEditing={() => inputRefs.current['modal_landingCost']?.focus()}
+                        onSubmitEditing={() => executeTransaction()}
                         returnKeyType="next"
                         style={{ borderWidth: 1, borderColor: '#CBD5E1', borderRadius: 6, paddingHorizontal: 8, height: 36, fontSize: 14, backgroundColor: '#FFFFFF', fontWeight: '700' }}
                         placeholder="০"
@@ -2468,28 +2479,7 @@ export function TradeDashboardForm({ mode, onDone, onOpenHistory }: TradeDashboa
                           মোট বাকি থেকে বাদ যাবে: ৳{toBnDigits(String(numTransport))}
                         </Text>
                       )}
-                    </View>
-
-                    {/* Optional Landing / Labor Cost */}
-                    <View style={{ marginBottom: 8, padding: 8, backgroundColor: '#F8FAFC', borderRadius: 8, borderWidth: 1, borderColor: '#E2E8F0' }}>
-                      <Text style={{ fontSize: 12, fontWeight: '700', color: '#64748B', marginBottom: 4 }}>লেবার / খালাস খরচ (ঐচ্ছিক)</Text>
-                      <TextInput
-                        ref={el => (inputRefs.current['modal_landingCost'] = el)}
-                        accessibilityLabel="Landing labor cost"
-                        value={landingCost}
-                        onChangeText={setLandingCost}
-                        keyboardType="numeric"
-                        onSubmitEditing={() => executeTransaction()}
-                        returnKeyType="done"
-                        style={{ borderWidth: 1, borderColor: '#CBD5E1', borderRadius: 6, paddingHorizontal: 8, height: 36, fontSize: 14, backgroundColor: '#FFFFFF', fontWeight: '700' }}
-                        placeholder="০"
-                      />
-                      {numLanding > 0 && (
-                        <Text style={{ fontSize: 11, color: '#B45309', marginTop: 3, fontWeight: '600' }}>
-                          খরচ খাতায় যুক্ত হবে: ৳{toBnDigits(String(numLanding))}
-                        </Text>
-                      )}
-                    </View>
+                    </View> : null}
 
                     {!isSale && totalOtherCost > 0 && (
                       <View style={{ marginBottom: 8, padding: 8, backgroundColor: '#FEF3C7', borderRadius: 8, borderWidth: 1, borderColor: '#FDE68A' }}>

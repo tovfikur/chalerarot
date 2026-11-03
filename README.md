@@ -18,9 +18,10 @@ Inventory, Purchase, Sale and Expense Management System for Rice Wholesale Busin
 
 ### Login and users
 
-On first launch, create the administrator using the setup screen: name, phone,
-username and a password of at least 10 characters. No default login is seeded.
-After setup, every business API requires login. Settings contains My Profile,
+No default login is seeded. Create the first administrator through the
+`POST /api/auth/setup` endpoint (name, phone, email and a password of at least
+10 characters); it closes permanently once an account exists. Users then log in
+with their email address and password. Settings contains My Profile,
 password changes, logout, and an administrator-only Users section to create,
 edit or deactivate users and reset their passwords. Staff can use operational
 features but cannot manage users or change business settings.

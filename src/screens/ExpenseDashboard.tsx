@@ -1,2196 +1,576 @@
-import React, { useState, useMemo, useEffect } from 'react';
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import { Alert, Text, TouchableOpacity, View } from 'react-native';
+import { useApp, today } from '../store';
+import { api, type Expense, type ExpenseCategoryKind, type ExpenseCategoryRow } from '../api';
 import {
-  View,
-  Text,
-  TextInput,
-  TouchableOpacity,
-  ScrollView,
-  StyleSheet,
-  Modal,
-  Alert,
-  Platform,
-} from 'react-native';
-import { useApp, today, type MoneyAccountRow } from '../store';
-import type { Expense } from '../api';
-import {
+  AccountPicker,
+  Btn,
+  Card,
+  Chips,
+  Empty,
+  Field,
+  ListTable,
+  Muted,
+  PageHeader,
+  Screen,
+  Title,
+  color,
+  useAccountName,
+  useDateStr,
   useMoney,
   useNum,
-  useDateStr,
-  toBnDigits,
-  color,
-  Empty,
+  type TableColumn,
 } from '../ui';
-import { AppIcon, icons } from '../icons';
-import { useBreakpoint } from '../responsive';
-import { printReport, printedAtStamp, type ReportDoc } from '../report';
-import { MoneyTransferModal, FilterModal, type AcctFilter } from '../screens';
+import { AppIcon, icons, type IconName } from '../icons';
+import { RGrid, useBreakpoint, useFs } from '../responsive';
+import { parseNum, toEnDigits } from '../bn';
+import { SearchField } from '../search';
+import { DetailShell } from '../screens';
+
+type Cat = { id: string; name: string; kind: ExpenseCategoryKind; key?: string; custom?: boolean; customName?: string };
+
+const SYSTEM_META: { key: string; kind: ExpenseCategoryKind; bn: string; en: string }[] = [
+  { key: 'loading', kind: 'landing', bn: 'ল্যান্ডিং খরচ', en: 'Landing Cost' },
+  { key: 'salary', kind: 'operating', bn: 'কর্মচারীর বেতন', en: 'Salary' },
+  { key: 'rent', kind: 'operating', bn: 'দোকান/গুদাম ভাড়া', en: 'Shop/Warehouse Rent' },
+  { key: 'electricity', kind: 'operating', bn: 'বিদ্যুৎ বিল', en: 'Electricity Bill' },
+  { key: 'water', kind: 'operating', bn: 'পানি বিল', en: 'Water Bill' },
+  { key: 'gas', kind: 'operating', bn: 'গ্যাস বিল', en: 'Gas Bill' },
+  { key: 'internet', kind: 'operating', bn: 'ইন্টারনেট/মোবাইল বিল', en: 'Internet/Mobile Bill' },
+  { key: 'lunch', kind: 'operating', bn: 'দুপুরের খাবার', en: 'Lunch' },
+  { key: 'tea', kind: 'operating', bn: 'চা/নাস্তা', en: 'Tea/Snacks' },
+  { key: 'labour', kind: 'landing', bn: 'শ্রমিক খরচ', en: 'Labour Cost' },
+  { key: 'transport', kind: 'transport', bn: 'পরিবহন ভাড়া', en: 'Transport' },
+  { key: 'vehicle', kind: 'transport', bn: 'গাড়ি/ভ্যান ভাড়া', en: 'Vehicle/Van Rent' },
+  { key: 'fuel', kind: 'transport', bn: 'জ্বালানি', en: 'Fuel' },
+  { key: 'bags', kind: 'operating', bn: 'বস্তা/প্যাকেজিং', en: 'Bags/Packaging' },
+  { key: 'shopRepair', kind: 'operating', bn: 'দোকান/গুদাম মেরামত', en: 'Shop/Warehouse Maintenance' },
+  { key: 'vehicleRepair', kind: 'operating', bn: 'গাড়ি মেরামত', en: 'Vehicle Maintenance' },
+  { key: 'cleaning', kind: 'operating', bn: 'পরিষ্কার-পরিচ্ছন্নতা', en: 'Cleaning' },
+  { key: 'office', kind: 'operating', bn: 'অফিস সামগ্রী', en: 'Office Supplies' },
+  { key: 'bankCharge', kind: 'operating', bn: 'ব্যাংক/মোবাইল ব্যাংকিং চার্জ', en: 'Bank/Mobile Banking Charge' },
+];
+
+const KIND_OPTIONS: { id: ExpenseCategoryKind; bn: string; en: string }[] = [
+  { id: 'operating', bn: 'পরিচালন খরচ', en: 'Operating Expenses' },
+  { id: 'landing', bn: 'ল্যান্ডিং খরচ', en: 'Landing Cost' },
+  { id: 'transport', bn: 'পরিবহন খরচ', en: 'Transport Cost' },
+  { id: 'other', bn: 'অন্যান্য', en: 'Other' },
+];
+
+const PAGE_SIZE = 10;
 
 interface ExpenseDashboardProps {
   go?: (route: string) => void;
 }
 
-export interface ExpenseRowData {
-  id: string;
-  date: string;
-  voucherNo: string;
-  type: 'operation' | 'transport' | 'landing';
-  typeLabel: string;
-  category: string;
-  amount: number;
-  description?: string;
-  payerName?: string;
-  responsiblePerson?: string;
-  paymentMethod?: string;
-  accountId?: string;
-}
-
-// Date Arithmetic Helpers
-const pad2n = (n: number) => String(n).padStart(2, '0');
-const addDays = (ds: string, delta: number) => {
-  const [y, m1, d] = ds.split('-').map(Number);
-  const dt = new Date(Date.UTC(y, m1 - 1, d + delta));
-  return `${dt.getUTCFullYear()}-${pad2n(dt.getUTCMonth() + 1)}-${pad2n(dt.getUTCDate())}`;
-};
-const monthStart = (ds: string) => `${ds.slice(0, 7)}-01`;
-const monthEnd = (ds: string) => {
-  const [y, m1] = ds.split('-').map(Number);
-  return `${ds.slice(0, 7)}-${pad2n(new Date(Date.UTC(y, m1, 0)).getUTCDate())}`;
-};
-const monthShiftStart = (ds: string, delta: number) => {
-  const [y, m1] = ds.split('-').map(Number);
-  const dt = new Date(Date.UTC(y, m1 - 1 + delta, 1));
-  return `${dt.getUTCFullYear()}-${pad2n(dt.getUTCMonth() + 1)}-01`;
-};
-
-const presetRange = (id: 'today' | 'last7' | 'thisMonth' | 'last3m' | 'thisYear', td: string): AcctFilter => {
-  if (id === 'last7') return { from: addDays(td, -6), to: td };
-  if (id === 'thisMonth') return { from: monthStart(td), to: monthEnd(td) };
-  if (id === 'last3m') return { from: monthStart(monthShiftStart(td, -3)), to: monthEnd(monthShiftStart(td, -1)) };
-  if (id === 'thisYear') return { from: `${td.slice(0, 4)}-01-01`, to: `${td.slice(0, 4)}-12-31` };
-  return { from: td, to: td };
-};
-
-export function ExpenseDashboard({ go }: ExpenseDashboardProps = {}) {
-  const { t, lang, expenses, saveExpense, deleteExpense, moneyAccounts, sales } = useApp();
+export function ExpenseDashboard(_props: ExpenseDashboardProps) {
+  const { expenses, moneyAccounts, saveExpense, deleteExpense, lang } = useApp();
   const m = useMoney();
   const n = useNum();
   const fd = useDateStr();
-  const td = today();
-  const { isDesktop, isTablet, isMobile } = useBreakpoint();
+  const accountName = useAccountName();
+  const { isMobile } = useBreakpoint();
+  const fs = useFs(13, 14);
+  const tx = useCallback((bn: string, en: string) => (lang === 'bn' ? bn : en), [lang]);
 
-  // Active Type Tab: 'all' | 'operation' | 'transport' | 'landing'
-  const [activeTab, setActiveTab] = useState<'all' | 'operation' | 'transport' | 'landing'>('all');
-
-  // Period Filter State
-  const [fltPreset, setFltPreset] = useState<'today' | 'last7' | 'thisMonth' | 'last3m' | 'thisYear' | 'custom'>('thisMonth');
-  const [flt, setFlt] = useState<AcctFilter>(() => presetRange('thisMonth', today()));
-  const [fltModalOpen, setFltModalOpen] = useState(false);
-
-  // Search & Category Dropdown
-  const [searchQuery, setSearchQuery] = useState('');
-  const [selectedCatFilter, setSelectedCatFilter] = useState('সব ক্যাটাগরি');
-  const [catDropdownOpen, setCatDropdownOpen] = useState(false);
-
-  // Pagination
+  const [customCats, setCustomCats] = useState<ExpenseCategoryRow[]>([]);
+  const [search, setSearch] = useState('');
+  const [catFilter, setCatFilter] = useState('all');
   const [page, setPage] = useState(1);
-  const [pageSize, setPageSize] = useState(10);
-
-  // Transfer Modal
-  const [transferModalOpen, setTransferModalOpen] = useState(false);
-
-  // Add/Edit Modal State
-  const [modalOpen, setModalOpen] = useState(false);
-  const [editingExpenseId, setEditingExpenseId] = useState<string | null>(null);
-
-  // Modal Fields
-  const [modalDate, setModalDate] = useState(td);
-  const [modalType, setModalType] = useState<'operation' | 'transport' | 'landing'>('operation');
-  const [modalVoucherNo, setModalVoucherNo] = useState('EXP-0001');
-  const [modalCategory, setModalCategory] = useState('অফিস ভাড়া');
-  const [modalDescription, setModalDescription] = useState('');
-  const [modalAmount, setModalAmount] = useState('');
-  const [modalAccountId, setModalAccountId] = useState(moneyAccounts[0]?.id || 'cash');
-  const [modalPayer, setModalPayer] = useState('');
-  const [modalResponsible, setModalResponsible] = useState('');
-
-  // Modal Dropdown toggles
-  const [modalTypeDropdownOpen, setModalTypeDropdownOpen] = useState(false);
-  const [modalCatDropdownOpen, setModalCatDropdownOpen] = useState(false);
-  const [modalAccountDropdownOpen, setModalAccountDropdownOpen] = useState(false);
-
-  // View Details Modal
-  const [viewExpense, setViewExpense] = useState<ExpenseRowData | null>(null);
-
-  // Curve inspection point
-  const [activeCurvePoint, setActiveCurvePoint] = useState<{ date: string; amount: number; label: string } | null>(null);
-
-  const expenseTypes = [
-    { key: 'operation', label: 'অপারেশন খরচ' },
-    { key: 'transport', label: 'পরিবহন খরচ' },
-    { key: 'landing', label: 'লোডিং/ল্যান্ডিং খরচ' },
-  ];
-
-  const expenseCategories = [
-    'অফিস ভাড়া',
-    'কর্মচারীর বেতন ও ভাতা',
-    'বিদ্যুৎ বিল',
-    'লোডিং ও আনলোডিং',
-    'ট্রাক ও পরিবহন ভাড়া',
-    'গুদাম ভাড়া ও রক্ষণাবেক্ষণ',
-    'বন্দর ও ঘাট চার্জ',
-    'শুল্ক ও সরকারি ট্যাক্স',
-    'লোকাল পরিবহন ও ভ্যান ভাড়া',
-    'বস্তা ও সুতলি ক্রয়',
-    'খাবার ও আপ্যায়ন',
-    'অন্যান্য পরিচালনা ব্যয়',
-  ];
-
-  // Helper: check if date falls in active filter
-  const inPeriod = (d: string) => d >= flt.from && d <= flt.to;
-
-  // Resolve type from category / note
-  const resolveExpenseType = (cat: string, note?: string | null): 'operation' | 'transport' | 'landing' => {
-    if (note && note.includes('ধরন: পরিবহন')) return 'transport';
-    if (note && note.includes('ধরন: ল্যান্ডিং')) return 'landing';
-    if (cat === 'transport' || cat === 'vehicle' || cat === 'fuel') return 'transport';
-    if (cat === 'loading' || cat === 'landing' || cat === 'labour') return 'landing';
-    return 'operation';
-  };
-
-  const getCategoryLabel = (cat: string, customName?: string | null) => {
-    if (customName) return customName;
-    const catMap: Record<string, string> = {
-      salary: 'কর্মচারীর বেতন ও ভাতা',
-      rent: 'অফিস ভাড়া',
-      electricity: 'বিদ্যুৎ বিল',
-      transport: 'ট্রাক ও পরিবহন ভাড়া',
-      loading: 'লোডিং ও আনলোডিং',
-      office: 'অফিস সামগ্রী',
-      tea: 'খাবার ও আপ্যায়ন',
-      lunch: 'খাবার ও আপ্যায়ন',
-      bags: 'বস্তা ও সুতলি ক্রয়',
-      shopRepair: 'দোকান মেরামত',
-      bankCharge: 'ব্যাংক চার্জ',
-      other: 'অন্যান্য পরিচালনা ব্যয়',
-    };
-    return catMap[cat] || cat;
-  };
-
-  // Convert raw store expenses to ExpenseRowData
-  const allExpenseRows: ExpenseRowData[] = useMemo(() => {
-    return expenses.map(e => {
-      const type = resolveExpenseType(e.category, e.note);
-      const typeLabel =
-        type === 'operation' ? 'অপারেশন খরচ' : type === 'transport' ? 'পরিবহন খরচ' : 'লোডিং/ল্যান্ডিং';
-      const voucherNo = e.voucherNo ?? '';
-
-      // Extract payer / responsible from note if saved
-      let payerName: string | undefined;
-      let responsiblePerson: string | undefined;
-      let cleanDesc = e.note || '';
-
-      if (e.note && e.note.includes('প্রদানকারী:')) {
-        const m1 = e.note.match(/প্রদানকারী:\s*([^|\]]+)/);
-        if (m1 && m1[1].trim() !== '-') payerName = m1[1].trim();
-      }
-      if (e.note && e.note.includes('দায়িত্বপ্রাপ্ত:')) {
-        const m2 = e.note.match(/দায়িত্বপ্রাপ্ত:\s*([^|\]]+)/);
-        if (m2 && m2[1].trim() !== '-') responsiblePerson = m2[1].trim();
-      }
-      if (cleanDesc.includes(']')) {
-        cleanDesc = cleanDesc.split(']')[1]?.trim() || cleanDesc;
-      }
-
-      // Method label from account
-      const acc = moneyAccounts.find(a => a.id === e.accountId);
-      const paymentMethod = acc ? acc.name : e.method || 'ক্যাশ';
-
-      return {
-        id: e.id,
-        date: e.date,
-        voucherNo,
-        type,
-        typeLabel,
-        category: getCategoryLabel(e.category, e.customName),
-        amount: e.amount,
-        description: cleanDesc,
-        payerName,
-        responsiblePerson,
-        paymentMethod,
-        accountId: e.accountId,
-      };
-    }).sort((a, b) => (a.date < b.date ? 1 : a.date > b.date ? -1 : 0));
-  }, [expenses, moneyAccounts]);
-
-  // Aggregated totals in selected period
-  const periodRows = useMemo(() => {
-    return allExpenseRows.filter(r => inPeriod(r.date));
-  }, [allExpenseRows, flt]);
-
-  const totalPeriodAmount = useMemo(() => {
-    return periodRows.reduce((sum, r) => sum + r.amount, 0);
-  }, [periodRows]);
-
-  const totalOperation = useMemo(() => {
-    return periodRows.filter(r => r.type === 'operation').reduce((sum, r) => sum + r.amount, 0);
-  }, [periodRows]);
-
-  const totalTransport = useMemo(() => {
-    return periodRows.filter(r => r.type === 'transport').reduce((sum, r) => sum + r.amount, 0);
-  }, [periodRows]);
-
-  const totalLanding = useMemo(() => {
-    return periodRows.filter(r => r.type === 'landing').reduce((sum, r) => sum + r.amount, 0);
-  }, [periodRows]);
-
-  const todayExpenses = useMemo(() => {
-    return allExpenseRows.filter(r => r.date === td);
-  }, [allExpenseRows, td]);
-
-  const totalTodayAmount = useMemo(() => {
-    return todayExpenses.reduce((sum, r) => sum + r.amount, 0);
-  }, [todayExpenses]);
-
-  // Period sales for comparison
-  const periodSales = useMemo(() => {
-    return sales.filter(s => inPeriod(s.date)).reduce((sum, s) => sum + s.total, 0);
-  }, [sales, flt]);
-
-  const expenseRatioOfSales = periodSales > 0 ? Math.round((totalPeriodAmount / periodSales) * 100) : 0;
-
-  // Filtered rows for the table
-  const filteredRows = useMemo(() => {
-    return periodRows.filter(r => {
-      // Tab filter
-      if (activeTab !== 'all' && r.type !== activeTab) return false;
-
-      // Category filter
-      if (selectedCatFilter !== 'সব ক্যাটাগরি' && r.category !== selectedCatFilter) return false;
-
-      // Search query
-      if (searchQuery.trim()) {
-        const q = searchQuery.trim().toLowerCase();
-        const matches =
-          r.voucherNo.toLowerCase().includes(q) ||
-          r.category.toLowerCase().includes(q) ||
-          r.typeLabel.toLowerCase().includes(q) ||
-          (r.description && r.description.toLowerCase().includes(q)) ||
-          (r.payerName && r.payerName.toLowerCase().includes(q)) ||
-          (r.responsiblePerson && r.responsiblePerson.toLowerCase().includes(q));
-        if (!matches) return false;
-      }
-
-      return true;
-    });
-  }, [periodRows, activeTab, selectedCatFilter, searchQuery]);
-
-  const totalPages = Math.max(1, Math.ceil(filteredRows.length / pageSize));
-  const pagedRows = useMemo(() => {
-    const start = (page - 1) * pageSize;
-    return filteredRows.slice(start, start + pageSize);
-  }, [filteredRows, page, pageSize]);
-
-  // Formatted date period string
-  const formatPeriodLabel = (dsFrom: string, dsTo: string) => {
-    if (dsFrom === dsTo) {
-      return dsFrom === td ? (lang === 'bn' ? 'আজকের খরচ' : 'Today') : fd(dsFrom);
-    }
-    return `${fd(dsFrom)} – ${fd(dsTo)}`;
-  };
-
-  const handleSelectPreset = (p: 'today' | 'last7' | 'thisMonth' | 'last3m' | 'thisYear') => {
-    setFltPreset(p);
-    setFlt(presetRange(p, td));
-    setPage(1);
-  };
-
-  // Timeline Data Points for Expense Curve
-  const timelineData = useMemo(() => {
-    let dateList: string[] = [];
-    if (flt.from === flt.to) {
-      for (let i = 6; i >= 0; i--) {
-        dateList.push(addDays(flt.to, -i));
-      }
-    } else {
-      const d1 = new Date(flt.from);
-      const d2 = new Date(flt.to);
-      const diffDays = Math.min(31, Math.max(1, Math.round((d2.getTime() - d1.getTime()) / (1000 * 3600 * 24))));
-      if (diffDays <= 14) {
-        for (let i = 0; i <= diffDays; i++) dateList.push(addDays(flt.from, i));
-      } else {
-        const step = Math.ceil(diffDays / 10);
-        for (let i = 0; i <= diffDays; i += step) dateList.push(addDays(flt.from, i));
-        if (!dateList.includes(flt.to)) dateList.push(flt.to);
-      }
-    }
-
-    return dateList.map(ds => {
-      const dayExps = expenses.filter(e => e.date === ds);
-      const amount = dayExps.reduce((sum, e) => sum + e.amount, 0);
-      return {
-        date: ds,
-        label: ds.slice(5),
-        amount,
-      };
-    });
-  }, [flt, expenses]);
+  const [formOpen, setFormOpen] = useState(false);
+  const [catOpen, setCatOpen] = useState(false);
+  const [categoryManageOpen, setCategoryManageOpen] = useState(false);
+  const [catEditId, setCatEditId] = useState<string | null>(null);
+  const [editId, setEditId] = useState<string | null>(null);
+  const [voucher, setVoucher] = useState('');
+  const [date, setDate] = useState(today());
+  const [catId, setCatId] = useState('');
+  const [amount, setAmount] = useState('');
+  const [accountId, setAccountId] = useState('');
+  const [note, setNote] = useState('');
+  const [saving, setSaving] = useState(false);
+  const [formError, setFormError] = useState('');
+  const [catName, setCatName] = useState('');
+  const [catKind, setCatKind] = useState<ExpenseCategoryKind>('operating');
+  const [catBusy, setCatBusy] = useState(false);
+  const [catError, setCatError] = useState('');
+  const [deleteCategoryTarget, setDeleteCategoryTarget] = useState<ExpenseCategoryRow | null>(null);
 
   useEffect(() => {
-    if (timelineData.length > 0 && !activeCurvePoint) {
-      setActiveCurvePoint(timelineData[timelineData.length - 1]);
-    }
-  }, [timelineData]);
+    let live = true;
+    api.expenseCategories()
+      .then(rows => { if (live) setCustomCats(rows); })
+      .catch(() => {});
+    return () => { live = false; };
+  }, []);
 
-  // Expense Categories Breakdown
-  const categoryBreakdown = useMemo(() => {
-    const catMap: Record<string, number> = {};
-    for (const r of periodRows) {
-      catMap[r.category] = (catMap[r.category] || 0) + r.amount;
-    }
-    return Object.entries(catMap)
-      .map(([cat, amt]) => ({
-        category: cat,
-        amount: amt,
-        pct: totalPeriodAmount > 0 ? Math.round((amt / totalPeriodAmount) * 100) : 0,
-      }))
-      .sort((a, b) => b.amount - a.amount);
-  }, [periodRows, totalPeriodAmount]);
+  const categoryByLower = useMemo(
+    () => new Map(customCats.map(c => [c.name.toLowerCase(), c])),
+    [customCats],
+  );
 
-  // Bezier Curve SVG Calculations
-  const chartHeight = 160;
-  const chartWidth = 720;
-  const paddingLeft = 45;
-  const paddingRight = 20;
-  const paddingTop = 20;
-  const paddingBottom = 30;
-  const usableWidth = chartWidth - paddingLeft - paddingRight;
-  const usableHeight = chartHeight - paddingTop - paddingBottom;
-
-  const maxChartVal = useMemo(() => {
-    let mx = 500;
-    for (const p of timelineData) {
-      if (p.amount > mx) mx = p.amount;
-    }
-    return Math.ceil(mx * 1.2);
-  }, [timelineData]);
-
-  const getCurvePath = (values: number[]) => {
-    if (values.length === 0) return '';
-    const points = values.map((val, idx) => {
-      const x = paddingLeft + (idx / Math.max(1, values.length - 1)) * usableWidth;
-      const normalizedY = Math.max(0, val) / maxChartVal;
-      const y = paddingTop + usableHeight - normalizedY * usableHeight;
-      return { x, y };
+  const allCategories = useMemo<Cat[]>(() => {
+    const list: Cat[] = [];
+    const seen = new Set<string>();
+    const add = (cat: Cat, dedupe: string) => {
+      if (seen.has(dedupe)) return;
+      seen.add(dedupe);
+      list.push(cat);
+    };
+    add({ id: 'builtin:other', name: lang === 'bn' ? '\u0985\u09a8\u09cd\u09af\u09be\u09a8\u09cd\u09af' : 'Other', kind: 'other', key: 'other' }, 'builtin:other');
+    customCats.forEach(c => {
+      add(
+        { id: `custom:${c.id}`, name: c.name, kind: c.kind, custom: true },
+        `name:${c.name.toLowerCase()}`,
+      );
     });
+    expenses.forEach(e => {
+      if (e.category === 'other') {
+        if (!e.customName) return;
+        const lower = e.customName.toLowerCase();
+        if (categoryByLower.has(lower)) return;
+        add(
+          { id: `custom-name:${e.customName}`, name: e.customName, kind: 'other', custom: true },
+          `name:${lower}`,
+        );
+        return;
+      }
+      const meta = SYSTEM_META.find(b => b.key === e.category);
+      const customName = e.customName ?? '';
+      add(
+        {
+          id: customName ? `expense:${e.category}:${customName}` : `builtin:${e.category}`,
+          name: customName || (meta ? (lang === 'bn' ? meta.bn : meta.en) : e.category),
+          kind: meta?.kind ?? 'operating',
+          key: e.category,
+          customName: customName || undefined,
+        },
+        customName ? `system:${e.category}:${customName.toLowerCase()}` : `builtin:${e.category}`,
+      );
+    });
+    return list;
+  }, [customCats, expenses, lang, categoryByLower]);
 
-    if (points.length === 1) return `M ${points[0].x} ${points[0].y}`;
+  const defaultCatId = useMemo(() => allCategories[0]?.id ?? '', [allCategories]);
+  const defaultAccountId = useMemo(() => moneyAccounts.find(a => a.active)?.id ?? '', [moneyAccounts]);
 
-    let d = `M ${points[0].x.toFixed(1)} ${points[0].y.toFixed(1)}`;
-    for (let i = 0; i < points.length - 1; i++) {
-      const p0 = points[Math.max(0, i - 1)];
-      const p1 = points[i];
-      const p2 = points[i + 1];
-      const p3 = points[Math.min(points.length - 1, i + 2)];
-
-      const cp1x = p1.x + (p2.x - p0.x) / 6;
-      const cp1y = p1.y + (p2.y - p0.y) / 6;
-      const cp2x = p2.x - (p3.x - p1.x) / 6;
-      const cp2y = p2.y - (p3.y - p1.y) / 6;
-
-      d += ` C ${cp1x.toFixed(1)} ${cp1y.toFixed(1)}, ${cp2x.toFixed(1)} ${cp2y.toFixed(1)}, ${p2.x.toFixed(1)} ${p2.y.toFixed(1)}`;
+  const catIdOf = useCallback((e: Expense) => {
+    if (e.category === 'other' && e.customName) {
+      const row = categoryByLower.get(e.customName.toLowerCase());
+      return row ? `custom:${row.id}` : `custom-name:${e.customName}`;
     }
-    return d;
-  };
+    return e.customName ? `expense:${e.category}:${e.customName}` : `builtin:${e.category}`;
+  }, [categoryByLower]);
 
-  const getAreaPath = (values: number[]) => {
-    const curve = getCurvePath(values);
-    if (!curve) return '';
-    const lastX = paddingLeft + usableWidth;
-    const bottomY = paddingTop + usableHeight;
-    return `${curve} L ${lastX.toFixed(1)} ${bottomY.toFixed(1)} L ${paddingLeft.toFixed(1)} ${bottomY.toFixed(1)} Z`;
-  };
-
-  // Open Modal for Adding Expense
-  const handleOpenAdd = () => {
-    setEditingExpenseId(null);
-    setModalDate(td);
-    setModalType('operation');
-    setModalVoucherNo(`EXP-${String(expenses.length + 1).padStart(4, '0')}`);
-    setModalCategory('অফিস ভাড়া');
-    setModalDescription('');
-    setModalAmount('');
-    setModalAccountId(moneyAccounts[0]?.id || 'cash');
-    setModalPayer('');
-    setModalResponsible('');
-    setModalOpen(true);
-  };
-
-  // Open Modal for Editing Expense
-  const handleOpenEdit = (item: ExpenseRowData) => {
-    setEditingExpenseId(item.id);
-    setModalDate(item.date);
-    setModalType(item.type);
-    setModalVoucherNo(item.voucherNo);
-    setModalCategory(item.category);
-    setModalDescription(item.description || '');
-    setModalAmount(String(item.amount));
-    setModalAccountId(item.accountId || moneyAccounts[0]?.id || 'cash');
-    setModalPayer(item.payerName || '');
-    setModalResponsible(item.responsiblePerson || '');
-    setModalOpen(true);
-  };
-
-  // Save Modal Action
-  const handleSaveModal = async () => {
-    const amt = parseFloat(modalAmount);
-    if (!amt || amt <= 0) {
-      Alert.alert('সতর্কতা', 'অনুগ্রহ করে খরচের সঠিক পরিমাণ লিখুন।');
-      return;
+  const kindOf = useCallback((e: Expense): ExpenseCategoryKind => {
+    if (e.category === 'other' && e.customName) {
+      return categoryByLower.get(e.customName.toLowerCase())?.kind ?? 'other';
     }
+    return SYSTEM_META.find(b => b.key === e.category)?.kind ?? (e.category === 'other' ? 'other' : 'operating');
+  }, [categoryByLower]);
 
-    const typeLabel =
-      modalType === 'operation' ? 'অপারেশন খরচ' : modalType === 'transport' ? 'পরিবহন খরচ' : 'ল্যান্ডিং খরচ';
-    const noteText = `[ভাউচার: ${modalVoucherNo} | ধরন: ${typeLabel} | প্রদানকারী: ${modalPayer || '-'} | দায়িত্বপ্রাপ্ত: ${modalResponsible || '-'}] ${modalDescription}`;
+  const catLabel = useCallback((e: Expense) => {
+    if (e.customName) return e.customName;
+    const b = SYSTEM_META.find(x => x.key === e.category);
+    return b ? (lang === 'bn' ? b.bn : b.en) : e.category === 'other' ? (lang === 'bn' ? '\u0985\u09a8\u09cd\u09af\u09be\u09a8\u09cd\u09af' : 'Other') : e.category;
+  }, [lang]);
 
+  const total = useMemo(() => expenses.reduce((s, e) => s + e.amount, 0), [expenses]);
+  const operating = useMemo(() => expenses.filter(e => kindOf(e) === 'operating').reduce((s, e) => s + e.amount, 0), [expenses, kindOf]);
+  const landing = useMemo(() => expenses.filter(e => kindOf(e) === 'landing').reduce((s, e) => s + e.amount, 0), [expenses, kindOf]);
+  const todayTotal = useMemo(() => {
+    const d = today();
+    return expenses.filter(e => e.date === d).reduce((s, e) => s + e.amount, 0);
+  }, [expenses]);
+
+  const filterItems = useMemo(
+    () => [{ id: 'all', name: tx('সব', 'All') }, ...allCategories.map(c => ({ id: c.id, name: c.name }))],
+    [allCategories, tx],
+  );
+
+  const filtered = useMemo(() => {
+    const q = search.trim().toLowerCase();
+    return expenses
+      .filter(e => catFilter === 'all' || catIdOf(e) === catFilter)
+      .filter(e => {
+        if (!q) return true;
+        return [e.voucherNo, catLabel(e), e.note, accountName(e.accountId), String(e.amount)]
+          .some(v => String(v ?? '').toLowerCase().includes(q));
+      })
+      .sort((a, b) => b.date.localeCompare(a.date));
+  }, [expenses, catFilter, search, catIdOf, catLabel, accountName]);
+
+  const pageCount = Math.max(1, Math.ceil(filtered.length / PAGE_SIZE));
+  const safePage = Math.min(page, pageCount);
+  const paged = useMemo(
+    () => filtered.slice((safePage - 1) * PAGE_SIZE, safePage * PAGE_SIZE),
+    [filtered, safePage],
+  );
+
+  useEffect(() => { setPage(1); }, [search, catFilter]);
+
+  const openNew = useCallback((initialCat?: string) => {
+    setEditId(null);
+    setVoucher('');
+    setDate(today());
+    setAmount('');
+    setNote('');
+    setFormError('');
+    setAccountId(defaultAccountId);
+    setCatId(initialCat && initialCat !== 'all' ? initialCat : defaultCatId);
+    setFormOpen(true);
+  }, [defaultAccountId, defaultCatId]);
+
+  const openEdit = useCallback((e: Expense) => {
+    const current = catIdOf(e);
+    setEditId(e.id);
+    setVoucher(e.voucherNo ?? '');
+    setDate(e.date);
+    setAmount(String(e.amount));
+    setNote(e.note ?? '');
+    setAccountId(e.accountId ?? defaultAccountId);
+    setCatId(allCategories.some(c => c.id === current) ? current : defaultCatId);
+    setFormError('');
+    setFormOpen(true);
+  }, [allCategories, catIdOf, defaultAccountId, defaultCatId]);
+
+  const save = async () => {
+    const cat = allCategories.find(c => c.id === catId);
+    const value = parseNum(amount);
+    if (!cat) { setFormError(tx('একটি ক্যাটাগরি বাছুন।', 'Choose a category.')); return; }
+    if (value <= 0) { setFormError(tx('সঠিক পরিমাণ লিখুন।', 'Enter a valid amount.')); return; }
+    if (!accountId) { setFormError(tx('টাকার অ্যাকাউন্ট বাছুন।', 'Choose a money account.')); return; }
+    setSaving(true);
+    setFormError('');
     try {
       await saveExpense({
-        id: editingExpenseId || undefined,
-        category: modalCategory === 'অন্যান্য পরিচালনা ব্যয়' ? 'other' : 'office',
-        customName: modalCategory,
-        amount: amt,
-        accountId: modalAccountId,
-        date: modalDate,
-        note: noteText,
+        id: editId ?? undefined,
+        category: cat.custom ? 'other' : cat.key!,
+        customName: cat.custom ? cat.name : '',
+        amount: value,
+        accountId,
+        date: toEnDigits(date),
+        note: note.trim() || undefined,
       });
-
-      setModalOpen(false);
-      Alert.alert('সফল', 'খরচ সফলভাবে সংরক্ষণ করা হয়েছে।');
-    } catch (e) {
-      Alert.alert('ব্যর্থ', e instanceof Error ? e.message : 'খরচ সংরক্ষণ করা যায়নি।');
+      setFormOpen(false);
+    } catch (e: any) {
+      setFormError(e?.message ?? tx('খরচ সংরক্ষণ করা যায়নি।', 'Could not save the expense.'));
+    } finally {
+      setSaving(false);
     }
   };
 
-  // Delete Action
-  const handleDelete = (id: string) => {
-    Alert.alert('নিশ্চিত করুন', 'আপনি কি এই খরচটি মুছে ফেলতে চান?', [
-      { text: 'বাতিল', style: 'cancel' },
-      {
-        text: 'মুছুন',
-        style: 'destructive',
-        onPress: async () => {
-          try {
-            await deleteExpense(id);
-          } catch (e) {
-            Alert.alert('ব্যর্থ', 'খরচ মুছে ফেলা যায়নি।');
-          }
+  const remove = () => {
+    if (!editId) return;
+    Alert.alert(
+      tx('খরচ মুছবেন?', 'Delete expense?'),
+      tx('এই খরচটি ট্র্যাশে যাবে।', 'This expense will be moved to Trash.'),
+      [
+        { text: tx('বাতিল', 'Cancel'), style: 'cancel' },
+        {
+          text: tx('মুছুন', 'Delete'),
+          style: 'destructive',
+          onPress: async () => {
+            try {
+              await deleteExpense(editId);
+              setFormOpen(false);
+            } catch (e: any) {
+              setFormError(e?.message ?? tx('খরচ মোছা যায়নি।', 'Could not delete the expense.'));
+            }
+          },
         },
-      },
-    ]);
+      ],
+    );
   };
 
-  // Print Expense Audit Statement
-  const handlePrintAudit = () => {
-    const doc: ReportDoc = {
-      shop: lang === 'bn' ? 'চালের আড়ত লিমিটেড' : 'Chaler Arot Ltd',
-      title: lang === 'bn' ? 'ব্যয় বিবরণী ও পরিচালন খরচ অডিট রিপোর্ট' : 'Expense & Operating Cost Audit Report',
-      period: formatPeriodLabel(flt.from, flt.to),
-      meta: [
-        { label: lang === 'bn' ? 'তারিখ পরিসীমা' : 'Date Range', value: `${flt.from} to ${flt.to}` },
-        { label: lang === 'bn' ? 'প্রিন্ট সময়' : 'Printed At', value: printedAtStamp(lang) },
-      ],
-      sections: [
-        {
-          title: lang === 'bn' ? '১. ব্যয়ের ধরন অনুযায়ী সংক্ষেপ' : '1. Summary by Type',
-          rows: [
-            { label: lang === 'bn' ? 'অপারেশন ও দোকান পরিচালনা খরচ' : 'Operation Expense', right: m(totalOperation) },
-            { label: lang === 'bn' ? 'পরিবহন ও ট্রাক ভাড়া' : 'Transport Expense', right: m(totalTransport) },
-            { label: lang === 'bn' ? 'লোডিং ও ল্যান্ডিং খরচ' : 'Landing / Loading Expense', right: m(totalLanding) },
-            { label: lang === 'bn' ? 'নির্বাচিত সময়ের সর্বমোট ব্যয়' : 'Total Period Expenses', right: m(totalPeriodAmount), bold: true },
-          ],
-        },
-        {
-          title: lang === 'bn' ? '২. ব্যয়ের শীর্ষ খাতসমূহ' : '2. Top Categories Breakdown',
-          rows: categoryBreakdown.slice(0, 6).map(cb => ({
-            label: cb.category,
-            sub: `${cb.pct}% of total`,
-            right: m(cb.amount),
-          })),
-        },
-      ],
-      total: {
-        label: lang === 'bn' ? 'সর্বমোট পরিচালন খরচ' : 'Grand Total Expenses',
-        value: m(totalPeriodAmount),
-        neg: true,
-      },
-      printedAt: printedAtStamp(lang === 'bn'),
-      printLabel: lang === 'bn' ? 'প্রিন্ট করুন' : 'Print',
-    };
-    printReport(doc);
+  const createCategory = async () => {
+    const name = catName.trim();
+    if (!name) { setCatError(tx('ক্যাটাগরির নাম লিখুন।', 'Enter a category name.')); return; }
+    if (allCategories.some(c => c.id !== `custom:${catEditId}` && c.name.trim().toLowerCase() === name.toLowerCase())) {
+      setCatError(tx('এই নামে ক্যাটাগরি আছে।', 'A category with this name already exists.'));
+      return;
+    }
+    setCatBusy(true);
+    setCatError('');
+    try {
+      const row = catEditId
+        ? await api.updateExpenseCategory(catEditId, { name, kind: catKind })
+        : await api.createExpenseCategory({ name, kind: catKind });
+      setCustomCats(prev => catEditId ? prev.map(c => c.id === row.id ? row : c) : [...prev, row]);
+      const id = `custom:${row.id}`;
+      setCatOpen(false);
+      if (formOpen) setCatId(id);
+      else setCatFilter(id);
+      setCatEditId(null);
+    } catch (e: any) {
+      setCatError(e?.message ?? tx('ক্যাটাগরি তৈরি করা যায়নি।', 'Could not create the category.'));
+    } finally {
+      setCatBusy(false);
+    }
   };
+
+  const editCategory = (category: ExpenseCategoryRow) => {
+    setCatEditId(category.id);
+    setCatName(category.name);
+    setCatKind(category.kind);
+    setCatError('');
+    setCategoryManageOpen(false);
+    setCatOpen(true);
+  };
+
+  const removeCategory = (category: ExpenseCategoryRow) => setDeleteCategoryTarget(category);
+
+  const confirmDeleteCategory = async () => {
+    const category = deleteCategoryTarget;
+    if (!category) return;
+    setCatError('');
+    try {
+      await api.deleteExpenseCategory(category.id);
+      setCustomCats(prev => prev.filter(c => c.id !== category.id));
+      if (catFilter === 'custom:' + category.id) setCatFilter('all');
+      if (catId === 'custom:' + category.id) {
+        setCatId(allCategories.find(c => c.id !== 'custom:' + category.id)?.id ?? 'builtin:other');
+      }
+      setDeleteCategoryTarget(null);
+    } catch (e: any) {
+      setCatError(e?.message ?? 'Could not delete the category.');
+      setDeleteCategoryTarget(null);
+    }
+  };
+  const columns = useMemo<TableColumn<Expense>[]>(() => {
+    const cols: TableColumn<Expense>[] = [
+      {
+        key: 'date',
+        label: tx('তারিখ', 'Date'),
+        flex: 1,
+        sort: r => r.date,
+        render: (r, size) => (
+          <View>
+            <Text style={{ fontSize: size, color: color.text, fontWeight: '600' }}>{fd(r.date)}</Text>
+            {r.voucherNo ? <Text style={{ fontSize: size - 2, color: color.muted }}>#{r.voucherNo}</Text> : null}
+          </View>
+        ),
+      },
+      {
+        key: 'category',
+        label: tx('ক্যাটাগরি', 'Category'),
+        flex: 1.7,
+        render: (r, size) => (
+          <View>
+            <Text style={{ fontSize: size, color: color.text, fontWeight: '600' }}>{catLabel(r)}</Text>
+            {r.note ? <Text numberOfLines={1} style={{ fontSize: size - 2, color: color.muted }}>{r.note}</Text> : null}
+            {isMobile && accountName(r.accountId) ? <Text style={{ fontSize: size - 2, color: color.muted }}>{accountName(r.accountId)}</Text> : null}
+          </View>
+        ),
+      },
+    ];
+    if (!isMobile) {
+      cols.push({
+        key: 'account',
+        label: tx('অ্যাকাউন্ট', 'Account'),
+        flex: 1.2,
+        render: (r, size) => (
+          <Text style={{ fontSize: size, color: color.text }}>{accountName(r.accountId) || '-'}</Text>
+        ),
+      });
+    }
+    cols.push({
+      key: 'amount',
+      label: tx('পরিমাণ', 'Amount'),
+      flex: 1,
+      align: 'right',
+      sort: r => r.amount,
+      render: (r, size) => (
+        <Text style={{ fontSize: size, color: color.red, fontWeight: '700', textAlign: 'right' }}>-{m(r.amount)}</Text>
+      ),
+    });
+    return cols;
+  }, [accountName, catLabel, fd, isMobile, m, tx]);
 
   return (
-    <ScrollView style={styles.screenBg} contentContainerStyle={styles.scrollContent}>
-      {/* 1. EXECUTIVE HEADER BANNER */}
-      {/* 1. SKEUOMORPHIC HEADER BAR - Royal Blue #1c70b9 */}
-      <View style={styles.headerBar}>
-        <View style={styles.headerGlossSheen} pointerEvents="none" />
-        <View style={styles.headerLeft}>
-          <View style={styles.titleIconBadge}>
-            <AppIcon name={icons.expense} size={22} iconColor="#FFFFFF" />
-          </View>
-          <View>
-            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
-              <Text style={styles.headerTitle}>
-                {lang === 'bn' ? 'খরচ ও ব্যয় ব্যবস্থাপনা' : 'Expense & Cost Management'}
-              </Text>
-              
-            </View>
-            
-          </View>
-        </View>
+    <Screen maxWidth={1400}>
+      <PageHeader
+        title={tx('খরচ ড্যাশবোর্ড', 'Expense Dashboard')}
+        subtitle={tx('সব খরচ, ক্যাটাগরি ও ল্যান্ডিং খরচ এক জায়গায়', 'All expenses, categories and landing costs in one place')}
+        icon={icons.expense}
+        actions={<Btn label={tx('নতুন খরচ', 'New Expense')} icon={icons.plus} onPress={() => openNew(catFilter)} testID="expense-new" />}
+      />
 
-        {/* Action Toolbar */}
-        <View style={styles.headerRight}>
-          <TouchableOpacity
-            style={styles.headerActionBtnWhite}
-            onPress={handleOpenAdd}
-            activeOpacity={0.85}
-          >
-            <AppIcon name={icons.add} size={16} iconColor="#1c70b9" />
-            <Text style={styles.headerActionBtnWhiteText}>
-              {lang === 'bn' ? 'নতুন খরচ' : 'Add Expense'}
-            </Text>
-          </TouchableOpacity>
+      <RGrid mobile={2} tablet={2} desktop={4}>
+        <SummaryCard label={tx('সর্বমোট খরচ', 'Total Expenses')} value={m(total)} sub={`${n(expenses.length)} ${tx('এন্ট্রি', 'entries')}`} icon={icons.expense} tone={color.primary} />
+        <SummaryCard label={tx('পরিচালন খরচ', 'Operating')} value={m(operating)} sub={tx('দৈনন্দিন খরচ', 'Running costs')} icon={icons.office} tone={color.amber} />
+        <SummaryCard label={tx('ল্যান্ডিং খরচ', 'Landing Cost')} value={m(landing)} sub={tx('লোডিং ও শ্রমিক', 'Loading and labour')} icon={icons.ship} tone={color.purple} />
+        <SummaryCard label={tx('আজকের খরচ', 'Today')} value={m(todayTotal)} sub={fd(today())} icon={icons.history} tone={color.green} />
+      </RGrid>
 
-          <TouchableOpacity
-            style={styles.headerActionBtnTranslucent}
-            onPress={handlePrintAudit}
-            activeOpacity={0.85}
-          >
-            <AppIcon name={icons.print} size={16} iconColor="#FFFFFF" />
-            <Text style={styles.headerActionBtnTranslucentText}>
-              {lang === 'bn' ? 'প্রিন্ট রিপোর্ট' : 'Print Audit'}
-            </Text>
-          </TouchableOpacity>
-
-          <TouchableOpacity
-            style={styles.headerActionBtnTranslucent}
-            onPress={() => setTransferModalOpen(true)}
-            activeOpacity={0.85}
-          >
-            <AppIcon name={icons.transfer} size={16} iconColor="#FFFFFF" />
-            <Text style={styles.headerActionBtnTranslucentText}>
-              {lang === 'bn' ? 'ফান্ড ট্রান্সফার' : 'Transfer'}
-            </Text>
-          </TouchableOpacity>
-
-          {go && (
-            <TouchableOpacity
-              style={styles.headerActionBtnTranslucent}
-              onPress={() => go('accounts')}
-              activeOpacity={0.85}
-            >
-              <AppIcon name={icons.accounts} size={16} iconColor="#FFFFFF" />
-              <Text style={styles.headerActionBtnTranslucentText}>
-                {lang === 'bn' ? 'হিসাব ড্যাশবোর্ড' : 'Accounts'}
-              </Text>
-            </TouchableOpacity>
-          )}
-        </View>
-      </View>
-
-      {/* Period Preset Filter Card */}
-      <View style={styles.periodCard}>
-        <View style={styles.presetButtonsRow}>
-          {(['today', 'last7', 'thisMonth', 'last3m', 'thisYear'] as const).map(p => {
-            const active = fltPreset === p;
-            const label =
-              p === 'today'
-                ? (lang === 'bn' ? 'আজ' : 'Today')
-                : p === 'last7'
-                ? (lang === 'bn' ? 'গত ৭ দিন' : 'Last 7 Days')
-                : p === 'thisMonth'
-                ? (lang === 'bn' ? 'এই মাস' : 'This Month')
-                : p === 'last3m'
-                ? (lang === 'bn' ? 'শেষ ৩ মাস' : 'Last 3 Months')
-                : (lang === 'bn' ? 'চলতি বছর' : 'This Year');
-            return (
-              <TouchableOpacity
-                key={p}
-                style={[styles.presetChip, active && styles.presetChipActive]}
-                onPress={() => handleSelectPreset(p)}
-              >
-                <Text style={[styles.presetChipText, active && styles.presetChipTextActive]}>
-                  {label}
-                </Text>
-              </TouchableOpacity>
-            );
-          })}
-
-          <TouchableOpacity
-            style={[
-              styles.presetChip,
-              fltPreset === 'custom' && styles.presetChipActive,
-              { flexDirection: 'row', alignItems: 'center', gap: 6 },
-            ]}
-            onPress={() => setFltModalOpen(true)}
-          >
-            <AppIcon
-              name={icons.calendar}
-              size={16}
-              iconColor={fltPreset === 'custom' ? '#1c70b9' : '#0F172A'}
-            />
-            <Text
-              style={[
-                styles.presetChipText,
-                fltPreset === 'custom' && styles.presetChipTextActive,
-              ]}
-            >
-              {formatPeriodLabel(flt.from, flt.to)}
-            </Text>
-          </TouchableOpacity>
-        </View>
-
-        {/* Quick Expense Metric Banner */}
-        <View style={styles.ratioBannerPill}>
-          <Text style={styles.ratioPillLabel}>
-            {lang === 'bn' ? 'বিক্রয়ের তুলনায় ব্যয়:' : 'Exp/Sales Ratio:'}
-          </Text>
-          <Text style={styles.ratioPillValue}>
-            {expenseRatioOfSales}%
-          </Text>
-        </View>
-      </View>
-
-      {/* 2. EXECUTIVE EXPENSE KPI CARDS */}
-      <View style={styles.kpiGridContainer}>
-        {/* Card 1: Total Period Expenses */}
-        <View style={[styles.kpiCard, { borderTopColor: '#DC2626', borderTopWidth: 4 }]}>
-          <View style={styles.kpiCardHeader}>
-            <Text style={styles.kpiCardTitle}>
-              {lang === 'bn' ? 'নির্বাচিত সময়ের মোট ব্যয়' : 'Total Period Expenses'}
-            </Text>
-            <View style={[styles.kpiIconBadge, { backgroundColor: '#FEE2E2' }]}>
-              <AppIcon name={icons.expense} size={20} iconColor="#DC2626" />
-            </View>
-          </View>
-          <Text style={[styles.kpiCardAmount, { color: '#B91C1C' }]}>{m(totalPeriodAmount)}</Text>
-          <View style={styles.kpiCardFooter}>
-            <Text style={styles.kpiFooterNote}>
-              {lang === 'bn'
-                ? `মোট ${n(periodRows.length)} টি ভাউচার এন্ট্রি`
-                : `${periodRows.length} total expense entries`}
-            </Text>
-          </View>
-        </View>
-
-        {/* Card 2: Operation Expenses */}
-        <View style={[styles.kpiCard, { borderTopColor: '#3B82F6', borderTopWidth: 4 }]}>
-          <View style={styles.kpiCardHeader}>
-            <Text style={styles.kpiCardTitle}>
-              {lang === 'bn' ? 'অপারেশন ও দোকান পরিচালনা' : 'Operation Expenses'}
-            </Text>
-            <View style={[styles.kpiIconBadge, { backgroundColor: '#EFF6FF' }]}>
-              <AppIcon name={icons.office} size={20} iconColor="#2563EB" />
-            </View>
-          </View>
-          <Text style={[styles.kpiCardAmount, { color: '#1E293B' }]}>{m(totalOperation)}</Text>
-          <View style={styles.kpiCardFooter}>
-            <Text style={styles.kpiFooterNote}>
-              {totalPeriodAmount > 0
-                ? `${lang === 'bn' ? 'মোট ব্যয়ের' : 'Of Total'}: ${Math.round((totalOperation / totalPeriodAmount) * 100)}%`
-                : '—'}
-            </Text>
-          </View>
-        </View>
-
-        {/* Card 3: Transport Expenses */}
-        <View style={[styles.kpiCard, { borderTopColor: '#F59E0B', borderTopWidth: 4 }]}>
-          <View style={styles.kpiCardHeader}>
-            <Text style={styles.kpiCardTitle}>
-              {lang === 'bn' ? 'পরিবহন ও ট্রাক ভাড়া' : 'Transport Expenses'}
-            </Text>
-            <View style={[styles.kpiIconBadge, { backgroundColor: '#FFFBEB' }]}>
-              <AppIcon name={icons.vendors} size={20} iconColor="#D97706" />
-            </View>
-          </View>
-          <Text style={[styles.kpiCardAmount, { color: '#D97706' }]}>{m(totalTransport)}</Text>
-          <View style={styles.kpiCardFooter}>
-            <Text style={styles.kpiFooterNote}>
-              {totalPeriodAmount > 0
-                ? `${lang === 'bn' ? 'মোট ব্যয়ের' : 'Of Total'}: ${Math.round((totalTransport / totalPeriodAmount) * 100)}%`
-                : '—'}
-            </Text>
-          </View>
-        </View>
-
-        {/* Card 4: Landing & Labor */}
-        <View style={[styles.kpiCard, { borderTopColor: '#8B5CF6', borderTopWidth: 4 }]}>
-          <View style={styles.kpiCardHeader}>
-            <Text style={styles.kpiCardTitle}>
-              {lang === 'bn' ? 'লোডিং, ঘাট ও কুলি খরচ' : 'Loading & Labor'}
-            </Text>
-            <View style={[styles.kpiIconBadge, { backgroundColor: '#F5F3FF' }]}>
-              <AppIcon name={icons.ship} size={20} iconColor="#8B5CF6" />
-            </View>
-          </View>
-          <Text style={[styles.kpiCardAmount, { color: '#7C3AED' }]}>{m(totalLanding)}</Text>
-          <View style={styles.kpiCardFooter}>
-            <Text style={styles.kpiFooterNote}>
-              {totalPeriodAmount > 0
-                ? `${lang === 'bn' ? 'মোট ব্যয়ের' : 'Of Total'}: ${Math.round((totalLanding / totalPeriodAmount) * 100)}%`
-                : '—'}
-            </Text>
-          </View>
-        </View>
-
-        {/* Card 5: Today's Expense */}
-        <View style={[styles.kpiCard, { borderTopColor: '#10B981', borderTopWidth: 4 }]}>
-          <View style={styles.kpiCardHeader}>
-            <Text style={styles.kpiCardTitle}>
-              {lang === 'bn' ? 'আজকের মোট খরচ' : "Today's Expense"}
-            </Text>
-            <View style={[styles.kpiIconBadge, { backgroundColor: '#ECFDF5' }]}>
-              <AppIcon name={icons.calendar} size={20} iconColor="#10B981" />
-            </View>
-          </View>
-          <Text style={[styles.kpiCardAmount, { color: '#0F172A' }]}>{m(totalTodayAmount)}</Text>
-          <View style={styles.kpiCardFooter}>
-            <Text style={styles.kpiFooterNote}>
-              {lang === 'bn'
-                ? `আজকের এন্ট্রি: ${n(todayExpenses.length)} টি`
-                : `${todayExpenses.length} entries today`}
-            </Text>
-          </View>
-        </View>
-      </View>
-
-      {/* 3. VISUAL CHARTS ROW: EXPENSE TRAJECTORY CURVE & CATEGORY BREAKDOWN */}
-      <View style={[styles.twoColGrid, isMobile && { flexDirection: 'column' }]}>
-        {/* Left: Trend Curve */}
-        <View style={[styles.colCard, { flex: 1.4 }]}>
-          <View style={styles.cardHeaderWithIcon}>
-            <AppIcon name={icons.profit} size={22} iconColor="#DC2626" />
-            <View style={{ flex: 1 }}>
-              <Text style={styles.blockTitle}>
-                {lang === 'bn' ? 'দৈনিক খরচের ট্রেন্ড কার্ভ' : 'Daily Expense Trajectory Curve'}
-              </Text>
-              
-            </View>
-          </View>
-
-          {/* Active Curve Point Badge */}
-          {activeCurvePoint && (
-            <View style={styles.pointInspectorBox}>
-              <Text style={styles.pointInspectorDate}>📅 {fd(activeCurvePoint.date)}</Text>
-              <Text style={styles.pointInspectorAmount}>{m(activeCurvePoint.amount)}</Text>
-            </View>
-          )}
-
-          {/* Bezier Vector Curve */}
-          <View style={styles.chartCanvasContainer}>
-            {Platform.OS === 'web' ? (
-              <svg
-                viewBox={`0 0 ${chartWidth} ${chartHeight}`}
-                style={{ width: '100%', height: chartHeight, overflow: 'visible' }}
-              >
-                <defs>
-                  <linearGradient id="expenseGradient" x1="0" y1="0" x2="0" y2="1">
-                    <stop offset="0%" stopColor="#EF4444" stopOpacity="0.25" />
-                    <stop offset="100%" stopColor="#EF4444" stopOpacity="0.0" />
-                  </linearGradient>
-                </defs>
-
-                {/* Grid Lines */}
-                {[0, 0.5, 1].map((pct, i) => {
-                  const y = paddingTop + usableHeight * (1 - pct);
-                  const val = Math.round(maxChartVal * pct);
-                  return (
-                    <g key={i}>
-                      <line
-                        x1={paddingLeft}
-                        y1={y}
-                        x2={paddingLeft + usableWidth}
-                        y2={y}
-                        stroke="#E2E8F0"
-                        strokeDasharray="4 4"
-                        strokeWidth="1"
-                      />
-                      <text
-                        x={paddingLeft - 8}
-                        y={y + 4}
-                        textAnchor="end"
-                        fontSize="10"
-                        fill="#94A3B8"
-                        fontWeight="600"
-                      >
-                        {val >= 1000 ? `${Math.round(val / 1000)}k` : val}
-                      </text>
-                    </g>
-                  );
-                })}
-
-                {/* Area Gradient */}
-                <path
-                  d={getAreaPath(timelineData.map(p => p.amount))}
-                  fill="url(#expenseGradient)"
-                />
-
-                {/* Main Curve Line */}
-                <path
-                  d={getCurvePath(timelineData.map(p => p.amount))}
-                  fill="none"
-                  stroke="#DC2626"
-                  strokeWidth="3.2"
-                  strokeLinecap="round"
-                />
-
-                {/* Interactive Dots */}
-                {timelineData.map((pt, idx) => {
-                  const x = paddingLeft + (idx / Math.max(1, timelineData.length - 1)) * usableWidth;
-                  const y = paddingTop + usableHeight - (Math.max(0, pt.amount) / maxChartVal) * usableHeight;
-                  const isSelected = activeCurvePoint?.date === pt.date;
-
-                  return (
-                    <g key={pt.date} style={{ cursor: 'pointer' }} onClick={() => setActiveCurvePoint(pt)}>
-                      {isSelected && (
-                        <line
-                          x1={x}
-                          y1={paddingTop}
-                          x2={x}
-                          y2={paddingTop + usableHeight}
-                          stroke="#64748B"
-                          strokeWidth="1.5"
-                          strokeDasharray="3 3"
-                        />
-                      )}
-                      <circle
-                        cx={x}
-                        cy={y}
-                        r={isSelected ? 6.5 : 4}
-                        fill="#DC2626"
-                        stroke="#FFFFFF"
-                        strokeWidth={isSelected ? 3 : 2}
-                      />
-                      <text
-                        x={x}
-                        y={paddingTop + usableHeight + 18}
-                        textAnchor="middle"
-                        fontSize="11"
-                        fontWeight={isSelected ? '700' : '500'}
-                        fill={isSelected ? '#0F172A' : '#64748B'}
-                      >
-                        {pt.label}
-                      </text>
-                    </g>
-                  );
-                })}
-              </svg>
-            ) : null}
-          </View>
-        </View>
-
-        {/* Right: Top Expense Categories Breakdown */}
-        <View style={[styles.colCard, { flex: 1 }]}>
-          <View style={styles.cardHeaderWithIcon}>
-            <AppIcon name={icons.report} size={22} iconColor="#2563EB" />
-            <View style={{ flex: 1 }}>
-              <Text style={styles.blockTitle}>
-                {lang === 'bn' ? 'ব্যয়ের শীর্ষ খাতসমূহ' : 'Top Categories Breakdown'}
-              </Text>
-              
-            </View>
-          </View>
-
-          <View style={{ gap: 12 }}>
-            {categoryBreakdown.slice(0, 5).map(cb => (
-              <View key={cb.category}>
-                <View style={{ flexDirection: 'row', justifyContent: 'space-between', marginBottom: 4 }}>
-                  <Text style={{ fontSize: 13, color: '#0F172A', fontWeight: '700' }}>{cb.category}</Text>
-                  <Text style={{ fontSize: 13, color: '#DC2626', fontWeight: '800' }}>
-                    {m(cb.amount)} <Text style={{ color: '#64748B', fontWeight: '500' }}>({cb.pct}%)</Text>
-                  </Text>
-                </View>
-                <View style={styles.progressBarTrack}>
-                  <View style={[styles.progressBarFill, { width: `${Math.min(100, cb.pct * 1.5)}%` }]} />
-                </View>
-              </View>
-            ))}
-          </View>
-        </View>
-      </View>
-
-      {/* 4. TYPE TABS & CONTROLS */}
-      <View style={styles.tabNavContainer}>
-        {[
-          { key: 'all', labelBn: 'সকল খরচ', labelEn: 'All Expenses', icon: icons.more },
-          { key: 'operation', labelBn: 'অপারেশন খরচ', labelEn: 'Operation', icon: icons.office },
-          { key: 'transport', labelBn: 'পরিবহন খরচ', labelEn: 'Transport', icon: icons.vendors },
-          { key: 'landing', labelBn: 'লোডিং ও ঘাট খরচ', labelEn: 'Loading / Labor', icon: icons.ship },
-        ].map(tTab => {
-          const active = activeTab === tTab.key;
-          return (
-            <TouchableOpacity
-              key={tTab.key}
-              style={[styles.tabNavButton, active && styles.tabNavButtonActive]}
-              onPress={() => {
-                setActiveTab(tTab.key as any);
-                setPage(1);
-              }}
-            >
-              <AppIcon
-                name={tTab.icon as any}
-                size={18}
-                iconColor={active ? '#FFFFFF' : '#0F172A'}
-              />
-              <Text style={[styles.tabNavText, active && styles.tabNavTextActive]}>
-                {lang === 'bn' ? tTab.labelBn : tTab.labelEn}
-              </Text>
-            </TouchableOpacity>
-          );
-        })}
-      </View>
-
-      {/* 5. SEARCH & FILTER CARD */}
-      <View style={styles.filterCard}>
-        {/* Search Input */}
-        <View style={styles.searchBarWrap}>
-          <AppIcon name={icons.search} size={20} iconColor="#0F172A" />
-          <TextInput
-            value={searchQuery}
-            onChangeText={tVal => {
-              setSearchQuery(tVal);
-              setPage(1);
-            }}
-            style={styles.searchBarInput}
-            placeholder={
-              lang === 'bn'
-                ? 'বিবরণ, ভাউচার নং বা প্রদানকারীর নাম দিয়ে খুঁজুন...'
-                : 'Search voucher no, note, or payer...'
-            }
+      <Card>
+        <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 8, flexWrap: 'wrap' }}>
+          <Title>{tx('ক্যাটাগরি', 'Categories')}</Title>
+          <Btn
+            label='Categories'
+            kind="ghost"
+            icon={icons.plus}
+            onPress={() => { setCatError(''); setCategoryManageOpen(true); }}
           />
-          {searchQuery.length > 0 && (
-            <TouchableOpacity onPress={() => setSearchQuery('')}>
-              <AppIcon name={icons.cancel} size={18} iconColor="#94A3B8" />
-            </TouchableOpacity>
-          )}
+        </View>
+        <Muted>{tx('ক্যাটাগরি বেছে নিলে নিচের টেবিলে সেই খরচগুলো দেখাবে।', 'Pick a category to filter the expense table below.')}</Muted>
+        <Chips items={filterItems} value={catFilter} onPick={setCatFilter} />
+      </Card>
+
+      <Card>
+        <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 10, flexWrap: 'wrap' }}>
+          <View style={{ flex: 1, minWidth: 220 }}>
+            <Title>{tx('সাম্প্রতিক খরচ', 'Recent Expenses')}</Title>
+            <Muted>{`${n(filtered.length)} ${tx('টি খরচ', 'expenses')}`}</Muted>
+          </View>
+          <View style={{ width: 280, maxWidth: '100%' }}>
+            <SearchField value={search} onChange={setSearch} placeholder={tx('খরচ, নোট বা ভাউচার খুঁজুন', 'Search expense, note or voucher')} />
+          </View>
         </View>
 
-        {/* Category Dropdown Filter */}
-        <View style={{ position: 'relative', zIndex: 30 }}>
-          <TouchableOpacity
-            onPress={() => setCatDropdownOpen(prev => !prev)}
-            style={styles.dropdownSelectorBox}
-          >
-            <Text style={styles.dropdownSelectorText}>{selectedCatFilter}</Text>
-            <AppIcon name={icons.chevR} size={16} iconColor="#0F172A" />
-          </TouchableOpacity>
-
-          {catDropdownOpen && (
-            <View style={styles.dropdownList}>
-              {['সব ক্যাটাগরি', ...expenseCategories].map(cat => (
-                <TouchableOpacity
-                  key={cat}
-                  onPress={() => {
-                    setSelectedCatFilter(cat);
-                    setCatDropdownOpen(false);
-                    setPage(1);
-                  }}
-                  style={styles.dropdownListItem}
-                >
-                  <Text style={styles.dropdownListItemText}>{cat}</Text>
-                </TouchableOpacity>
-              ))}
-            </View>
-          )}
-        </View>
-      </View>
-
-      {/* 6. EXPENSE LEDGER TABLE */}
-      <View style={styles.tableCard}>
-        {/* Table Header */}
-        <View style={styles.tableHeaderRow}>
-          <Text style={[styles.th, { width: 50, textAlign: 'center' }]}>#</Text>
-          <Text style={[styles.th, { flex: 1.2 }]}>তারিখ</Text>
-          <Text style={[styles.th, { flex: 1.2 }]}>ভাউচার নং</Text>
-          <Text style={[styles.th, { flex: 1.4, textAlign: 'center' }]}>ধরন</Text>
-          <Text style={[styles.th, { flex: 1.8 }]}>খাত / ক্যাটাগরি</Text>
-          <Text style={[styles.th, { flex: 1.5 }]}>অ্যাকাউন্ট</Text>
-          <Text style={[styles.th, { flex: 1.4, textAlign: 'right' }]}>পরিমাণ (৳)</Text>
-          <Text style={[styles.th, { width: 120, textAlign: 'center' }]}>অ্যাকশন</Text>
-        </View>
-
-        {/* Table Rows */}
-        {pagedRows.length === 0 ? (
-          <Empty />
+        {filtered.length ? (
+          <ListTable
+            columns={columns}
+            rows={paged}
+            rowKey={r => r.id}
+            onRowPress={openEdit}
+            empty={<Empty />}
+          />
         ) : (
-          pagedRows.map((row, idx) => {
-            const pillBg =
-              row.type === 'operation' ? '#EFF6FF' : row.type === 'transport' ? '#FFFBEB' : '#F5F3FF';
-            const pillText =
-              row.type === 'operation' ? '#1E40AF' : row.type === 'transport' ? '#92400E' : '#6B21A8';
-
-            return (
-              <View key={row.id} style={styles.tableDataRow}>
-                <View style={[styles.td, { width: 50, alignItems: 'center' }]}>
-                  <Text style={styles.cellMuted}>{(page - 1) * pageSize + idx + 1}</Text>
-                </View>
-
-                <View style={[styles.td, { flex: 1.2 }]}>
-                  <Text style={styles.cellText}>{fd(row.date)}</Text>
-                </View>
-
-                <View style={[styles.td, { flex: 1.2 }]}>
-                  <Text style={styles.cellBold}>{row.voucherNo}</Text>
-                </View>
-
-                <View style={[styles.td, { flex: 1.4, alignItems: 'center' }]}>
-                  <View style={[styles.typePill, { backgroundColor: pillBg }]}>
-                    <Text style={[styles.typePillText, { color: pillText }]}>{row.typeLabel}</Text>
-                  </View>
-                </View>
-
-                <View style={[styles.td, { flex: 1.8 }]}>
-                  <Text style={styles.cellText}>{row.category}</Text>
-                  {row.description ? (
-                    <Text style={styles.cellSub} numberOfLines={1}>
-                      {row.description}
-                    </Text>
-                  ) : null}
-                </View>
-
-                <View style={[styles.td, { flex: 1.5 }]}>
-                  <Text style={styles.cellText}>{row.paymentMethod}</Text>
-                </View>
-
-                <View style={[styles.td, { flex: 1.4, alignItems: 'flex-end' }]}>
-                  <Text style={[styles.cellBold, { color: '#DC2626' }]}>- {m(row.amount)}</Text>
-                </View>
-
-                {/* High Contrast Action Buttons */}
-                <View style={[styles.td, { width: 120, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 6 }]}>
-                  <TouchableOpacity
-                    onPress={() => setViewExpense(row)}
-                    style={[styles.actionBtnIconBox, { backgroundColor: '#EFF6FF', borderColor: '#BFDBFE' }]}
-                  >
-                    <AppIcon name={icons.eye} size={16} iconColor="#1D4ED8" />
-                  </TouchableOpacity>
-
-                  <TouchableOpacity
-                    onPress={() => handleOpenEdit(row)}
-                    style={[styles.actionBtnIconBox, { backgroundColor: '#F0FDF4', borderColor: '#BBF7D0' }]}
-                  >
-                    <AppIcon name={icons.edit} size={16} iconColor="#15803D" />
-                  </TouchableOpacity>
-
-                  <TouchableOpacity
-                    onPress={() => handleDelete(row.id)}
-                    style={[styles.actionBtnIconBox, { backgroundColor: '#FEF2F2', borderColor: '#FECACA' }]}
-                  >
-                    <AppIcon name={icons.del} size={16} iconColor="#DC2626" />
-                  </TouchableOpacity>
-                </View>
-              </View>
-            );
-          })
+          <Empty />
         )}
 
-        {/* Pagination Footer */}
-        <View style={styles.paginationFooter}>
-          <Text style={styles.footerCountText}>
-            মোট {toBnDigits(String(filteredRows.length))} টি খরচ রেকর্ড
-          </Text>
-
-          <View style={styles.paginationControls}>
-            <View style={styles.pageButtonsRow}>
-              <TouchableOpacity
-                disabled={page <= 1}
-                onPress={() => setPage(p => Math.max(1, p - 1))}
-                style={[styles.pageNavBtn, page <= 1 && styles.pageNavBtnDisabled]}
-              >
-                <Text style={styles.pageNavText}>‹</Text>
-              </TouchableOpacity>
-
-              {Array.from({ length: totalPages }, (_, i) => i + 1).map(pNum => (
-                <TouchableOpacity
-                  key={pNum}
-                  onPress={() => setPage(pNum)}
-                  style={[styles.pageNumberBtn, page === pNum && styles.pageNumberBtnActive]}
-                >
-                  <Text style={[styles.pageNumberText, page === pNum && styles.pageNumberTextActive]}>
-                    {toBnDigits(String(pNum))}
-                  </Text>
-                </TouchableOpacity>
-              ))}
-
-              <TouchableOpacity
-                disabled={page >= totalPages}
-                onPress={() => setPage(p => Math.min(totalPages, p + 1))}
-                style={[styles.pageNavBtn, page >= totalPages && styles.pageNavBtnDisabled]}
-              >
-                <Text style={styles.pageNavText}>›</Text>
-              </TouchableOpacity>
+        {filtered.length > PAGE_SIZE ? (
+          <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginTop: 10, gap: 8 }}>
+            <Text style={{ color: color.muted, fontSize: fs }}>
+              {tx('পৃষ্ঠা', 'Page')} {n(safePage)} / {n(pageCount)}
+            </Text>
+            <View style={{ flexDirection: 'row', gap: 8 }}>
+              {safePage > 1 ? <Btn label={tx('আগের', 'Previous')} kind="ghost" onPress={() => setPage(p => Math.max(1, p - 1))} /> : null}
+              {safePage < pageCount ? <Btn label={tx('পরের', 'Next')} kind="ghost" onPress={() => setPage(p => Math.min(pageCount, p + 1))} /> : null}
             </View>
           </View>
-        </View>
-      </View>
+        ) : null}
+      </Card>
 
-      {/* 7. ADD / EDIT EXPENSE MODAL */}
-      <Modal visible={modalOpen} transparent animationType="fade" onRequestClose={() => setModalOpen(false)}>
-        <View style={styles.modalBackdrop}>
-          <View style={styles.modalBox}>
-            <View style={styles.modalHeader}>
-              <View style={styles.modalTitleRow}>
-                <AppIcon name={editingExpenseId ? icons.edit : icons.add} size={22} iconColor="#DC2626" />
-                <Text style={styles.modalTitle}>
-                  {editingExpenseId ? 'খরচ সম্পাদনা করুন' : 'নতুন খরচ যোগ করুন'}
-                </Text>
-              </View>
-              <TouchableOpacity onPress={() => setModalOpen(false)}>
-                <AppIcon name={icons.cancel} size={20} iconColor="#0F172A" />
-              </TouchableOpacity>
+      {formOpen ? (
+        <DetailShell
+          title={editId ? tx('খরচ সম্পাদনা', 'Edit Expense') : tx('নতুন খরচ', 'New Expense')}
+          onClose={() => setFormOpen(false)}
+          footer={
+            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+              {editId ? <Btn label={tx('মুছুন', 'Delete')} kind="danger" icon={icons.del} onPress={remove} /> : null}
+              <View style={{ flex: 1 }} />
+              <Btn label={saving ? tx('সংরক্ষণ হচ্ছে...', 'Saving...') : tx('সংরক্ষণ', 'Save')} onPress={save} />
             </View>
-
-            <ScrollView style={styles.modalBody} keyboardShouldPersistTaps="handled">
-              {/* Row 1: Date & Type */}
-              <View style={styles.modalTwoCol}>
-                <View style={styles.modalCol}>
-                  <Text style={styles.modalLabel}>খরচের তারিখ *</Text>
-                  <TextInput
-                    value={modalDate}
-                    onChangeText={setModalDate}
-                    style={styles.modalInput}
-                    placeholder="YYYY-MM-DD"
-                  />
-                </View>
-
-                <View style={[styles.modalCol, { position: 'relative', zIndex: 50 }]}>
-                  <Text style={styles.modalLabel}>খরচের ধরন *</Text>
-                  <TouchableOpacity
-                    onPress={() => setModalTypeDropdownOpen(prev => !prev)}
-                    style={styles.modalSelectWrap}
-                  >
-                    <Text style={styles.modalSelectText}>
-                      {expenseTypes.find(t => t.key === modalType)?.label}
-                    </Text>
-                    <AppIcon name={icons.chevR} size={16} iconColor="#0F172A" />
-                  </TouchableOpacity>
-
-                  {modalTypeDropdownOpen && (
-                    <View style={styles.modalDropdownPopup}>
-                      {expenseTypes.map(t => (
-                        <TouchableOpacity
-                          key={t.key}
-                          onPress={() => {
-                            setModalType(t.key as any);
-                            setModalTypeDropdownOpen(false);
-                          }}
-                          style={styles.dropdownPopupItem}
-                        >
-                          <Text style={styles.dropdownPopupItemText}>{t.label}</Text>
-                        </TouchableOpacity>
-                      ))}
-                    </View>
-                  )}
-                </View>
-              </View>
-
-              {/* Row 2: Voucher No & Category */}
-              <View style={styles.modalTwoCol}>
-                <View style={styles.modalCol}>
-                  <Text style={styles.modalLabel}>ভাউচার নং *</Text>
-                  <TextInput
-                    value={modalVoucherNo}
-                    onChangeText={setModalVoucherNo}
-                    style={styles.modalInput}
-                    placeholder="EXP-0001"
-                  />
-                </View>
-
-                <View style={[styles.modalCol, { position: 'relative', zIndex: 40 }]}>
-                  <Text style={styles.modalLabel}>খরচের ক্যাটাগরি *</Text>
-                  <TouchableOpacity
-                    onPress={() => setModalCatDropdownOpen(prev => !prev)}
-                    style={styles.modalSelectWrap}
-                  >
-                    <Text style={styles.modalSelectText}>{modalCategory}</Text>
-                    <AppIcon name={icons.chevR} size={16} iconColor="#0F172A" />
-                  </TouchableOpacity>
-
-                  {modalCatDropdownOpen && (
-                    <View style={styles.modalDropdownPopup}>
-                      <ScrollView style={{ maxHeight: 160 }} keyboardShouldPersistTaps="handled">
-                        {expenseCategories.map(cat => (
-                          <TouchableOpacity
-                            key={cat}
-                            onPress={() => {
-                              setModalCategory(cat);
-                              setModalCatDropdownOpen(false);
-                            }}
-                            style={styles.dropdownPopupItem}
-                          >
-                            <Text style={styles.dropdownPopupItemText}>{cat}</Text>
-                          </TouchableOpacity>
-                        ))}
-                      </ScrollView>
-                    </View>
-                  )}
-                </View>
-              </View>
-
-              {/* Row 3: Amount & Payment Account */}
-              <View style={styles.modalTwoCol}>
-                <View style={styles.modalCol}>
-                  <Text style={styles.modalLabel}>পরিমাণ (৳) *</Text>
-                  <TextInput
-                    value={modalAmount}
-                    onChangeText={setModalAmount}
-                    style={styles.modalInput}
-                    placeholder="0"
-                    keyboardType="numeric"
-                  />
-                </View>
-
-                <View style={[styles.modalCol, { position: 'relative', zIndex: 30 }]}>
-                  <Text style={styles.modalLabel}>পরিশোধ অ্যাকাউন্ট *</Text>
-                  <TouchableOpacity
-                    onPress={() => setModalAccountDropdownOpen(prev => !prev)}
-                    style={styles.modalSelectWrap}
-                  >
-                    <Text style={styles.modalSelectText}>
-                      {moneyAccounts.find(a => a.id === modalAccountId)?.name || 'ক্যাশ ড্রয়ার'}
-                    </Text>
-                    <AppIcon name={icons.chevR} size={16} iconColor="#0F172A" />
-                  </TouchableOpacity>
-
-                  {modalAccountDropdownOpen && (
-                    <View style={styles.modalDropdownPopup}>
-                      {moneyAccounts.map(acc => (
-                        <TouchableOpacity
-                          key={acc.id}
-                          onPress={() => {
-                            setModalAccountId(acc.id);
-                            setModalAccountDropdownOpen(false);
-                          }}
-                          style={styles.dropdownPopupItem}
-                        >
-                          <Text style={styles.dropdownPopupItemText}>
-                            {acc.name} ({m(acc.balance || 0)})
-                          </Text>
-                        </TouchableOpacity>
-                      ))}
-                    </View>
-                  )}
-                </View>
-              </View>
-
-              {/* Row 4: Description */}
-              <View style={styles.modalFormGroup}>
-                <Text style={styles.modalLabel}>বিবরণ বা নোট</Text>
-                <TextInput
-                  value={modalDescription}
-                  onChangeText={setModalDescription}
-                  style={[styles.modalInput, { height: 60, textAlignVertical: 'top' }]}
-                  placeholder="খরচের বিবরণ লিখুন..."
-                  multiline
-                />
-              </View>
-
-              {/* Row 5: Payer Name & Responsible Person */}
-              <View style={styles.modalTwoCol}>
-                <View style={styles.modalCol}>
-                  <Text style={styles.modalLabel}>প্রদানকারীর নাম</Text>
-                  <TextInput
-                    value={modalPayer}
-                    onChangeText={setModalPayer}
-                    style={styles.modalInput}
-                    placeholder="নাম..."
-                  />
-                </View>
-
-                <View style={styles.modalCol}>
-                  <Text style={styles.modalLabel}>দায়িত্বপ্রাপ্ত ব্যক্তি</Text>
-                  <TextInput
-                    value={modalResponsible}
-                    onChangeText={setModalResponsible}
-                    style={styles.modalInput}
-                    placeholder="নাম..."
-                  />
-                </View>
-              </View>
-            </ScrollView>
-
-            {/* High Contrast Modal Actions */}
-            <View style={styles.modalFooter}>
-              <TouchableOpacity onPress={() => setModalOpen(false)} style={styles.modalCancelBtn}>
-                <AppIcon name={icons.cancel} size={18} iconColor="#0F172A" />
-                <Text style={styles.modalCancelBtnText}>বাতিল</Text>
-              </TouchableOpacity>
-
-              <TouchableOpacity onPress={handleSaveModal} style={styles.modalSaveBtn}>
-                <AppIcon name={icons.save} size={18} iconColor="#FFFFFF" />
-                <Text style={styles.modalSaveBtnText}>সংরক্ষণ করুন</Text>
-              </TouchableOpacity>
-            </View>
+          }
+        >
+          {voucher ? <Muted>{tx('ভাউচার', 'Voucher')}: #{voucher}</Muted> : null}
+          <Field label={tx('তারিখ', 'Date')} value={date} onChange={setDate} />
+          <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginTop: 2 }}>
+            <Muted>{tx('ক্যাটাগরি', 'Category')} *</Muted>
           </View>
-        </View>
-      </Modal>
+          <Chips items={allCategories} value={catId} onPick={setCatId} />
+          <Field label={tx('পরিমাণ', 'Amount')} value={amount} onChange={setAmount} num />
+          <AccountPicker accountId={accountId} onPick={setAccountId} label={tx('টাকার অ্যাকাউন্ট', 'Money Account')} required />
+          <Field label={tx('নোট (ঐচ্ছিক)', 'Note (optional)')} value={note} onChange={setNote} />
+          {formError ? <Text style={{ color: color.red, marginTop: 4, fontSize: fs }}>{formError}</Text> : null}
+        </DetailShell>
+      ) : null}
 
-      {/* 8. VIEW EXPENSE DETAILS MODAL */}
-      {viewExpense && (
-        <Modal visible={!!viewExpense} transparent animationType="fade" onRequestClose={() => setViewExpense(null)}>
-          <View style={styles.modalBackdrop}>
-            <View style={[styles.modalBox, { maxWidth: 460 }]}>
-              <View style={styles.modalHeader}>
-                <Text style={styles.modalTitle}>
-                  {viewExpense.voucherNo} - {viewExpense.category}
-                </Text>
-                <TouchableOpacity onPress={() => setViewExpense(null)}>
-                  <AppIcon name={icons.cancel} size={20} iconColor="#0F172A" />
-                </TouchableOpacity>
+      {categoryManageOpen ? (
+        <DetailShell title="Manage Categories" onClose={() => setCategoryManageOpen(false)}>
+          <Btn
+            label="New Category"
+            icon={icons.plus}
+            onPress={() => {
+              setCatEditId(null);
+              setCatName('');
+              setCatKind('operating');
+              setCatError('');
+              setCategoryManageOpen(false);
+              setCatOpen(true);
+            }}
+          />
+          {deleteCategoryTarget ? (
+            <View style={{ padding: 14, borderWidth: 1, borderColor: color.line, borderRadius: 10, gap: 10, marginTop: 12 }}>
+              <Text style={{ color: color.text }}>
+                Delete "{deleteCategoryTarget.name}"? Existing expenses will stay under Other.
+              </Text>
+              <View style={{ flexDirection: 'row', justifyContent: 'flex-end', gap: 8 }}>
+                <Btn label="Cancel" kind="ghost" onPress={() => setDeleteCategoryTarget(null)} />
+                <Btn label="Delete" kind="danger" icon={icons.del} onPress={confirmDeleteCategory} />
               </View>
-
-              <View style={{ padding: 20, gap: 12 }}>
-                <View style={styles.viewRow}>
-                  <Text style={styles.viewLabel}>তারিখ:</Text>
-                  <Text style={styles.viewValue}>{fd(viewExpense.date)}</Text>
-                </View>
-
-                <View style={styles.viewRow}>
-                  <Text style={styles.viewLabel}>খরচের ধরন:</Text>
-                  <Text style={styles.viewValue}>{viewExpense.typeLabel}</Text>
-                </View>
-
-                <View style={styles.viewRow}>
-                  <Text style={styles.viewLabel}>ক্যাটাগরি:</Text>
-                  <Text style={styles.viewValue}>{viewExpense.category}</Text>
-                </View>
-
-                <View style={styles.viewRow}>
-                  <Text style={styles.viewLabel}>পরিশোধ পদ্ধতি:</Text>
-                  <Text style={styles.viewValue}>{viewExpense.paymentMethod}</Text>
-                </View>
-
-                <View style={styles.viewRow}>
-                  <Text style={styles.viewLabel}>পরিমাণ:</Text>
-                  <Text style={[styles.viewValue, { color: '#DC2626', fontSize: 18, fontWeight: '800' }]}>
-                    - {m(viewExpense.amount)}
+            </View>
+          ) : null}
+          <View style={{ gap: 8, marginTop: 10 }}>
+            {customCats.length ? customCats.map(category => (
+              <View key={category.id} style={{ flexDirection: 'row', alignItems: 'center', gap: 8, padding: 10, borderWidth: 1, borderColor: color.line, borderRadius: 10 }}>
+                <View style={{ flex: 1 }}>
+                  <Text style={{ color: color.text, fontWeight: '700' }}>{category.name}</Text>
+                  <Text style={{ color: color.muted, fontSize: 12 }}>
+                    {KIND_OPTIONS.find(k => k.id === category.kind)?.[lang === 'bn' ? 'bn' : 'en'] ?? category.kind}
                   </Text>
                 </View>
-
-                {viewExpense.description ? (
-                  <View style={styles.viewRow}>
-                    <Text style={styles.viewLabel}>বিবরণ:</Text>
-                    <Text style={styles.viewValue}>{viewExpense.description}</Text>
-                  </View>
-                ) : null}
-
-                {viewExpense.payerName ? (
-                  <View style={styles.viewRow}>
-                    <Text style={styles.viewLabel}>প্রদানকারী:</Text>
-                    <Text style={styles.viewValue}>{viewExpense.payerName}</Text>
-                  </View>
-                ) : null}
-
-                {viewExpense.responsiblePerson ? (
-                  <View style={styles.viewRow}>
-                    <Text style={styles.viewLabel}>দায়িত্বপ্রাপ্ত:</Text>
-                    <Text style={styles.viewValue}>{viewExpense.responsiblePerson}</Text>
-                  </View>
-                ) : null}
-              </View>
-
-              <View style={styles.modalFooter}>
-                <TouchableOpacity onPress={() => setViewExpense(null)} style={styles.modalCancelBtn}>
-                  <Text style={styles.modalCancelBtnText}>বন্ধ করুন</Text>
+                <TouchableOpacity accessibilityRole="button" accessibilityLabel="Edit category" onPress={() => editCategory(category)} style={{ padding: 8 }}>
+                  <AppIcon name={icons.edit} size={18} iconColor={color.primary} />
+                </TouchableOpacity>
+                <TouchableOpacity accessibilityRole="button" accessibilityLabel="Delete category" onPress={() => removeCategory(category)} style={{ padding: 8 }}>
+                  <AppIcon name={icons.del} size={18} iconColor={color.red} />
                 </TouchableOpacity>
               </View>
-            </View>
+            )) : <Muted>No custom categories yet.</Muted>}
+            {catError ? <Text style={{ color: color.red, fontSize: fs }}>{catError}</Text> : null}
           </View>
-        </Modal>
-      )}
-
-      {/* 9. DATE RANGE FILTER MODAL */}
-      {fltModalOpen && (
-        <FilterModal
-          init={flt}
-          onClose={() => setFltModalOpen(false)}
-          onApply={newFlt => {
-            setFlt(newFlt);
-            setFltPreset('custom');
-            setFltModalOpen(false);
-          }}
-        />
-      )}
-
-      {/* 10. MONEY TRANSFER MODAL */}
-      {transferModalOpen && (
-        <MoneyTransferModal onClose={() => setTransferModalOpen(false)} />
-      )}
-    </ScrollView>
+        </DetailShell>
+      ) : null}
+      {catOpen ? (
+        <DetailShell
+          title={catEditId ? 'Edit Category' : 'New Category'}
+          onClose={() => { setCatOpen(false); setCatEditId(null); }}
+          footer={<Btn label={catBusy ? tx('তৈরি হচ্ছে...', 'Creating...') : catEditId ? 'Save Category' : 'Create Category'} onPress={createCategory} />}
+        >
+          <Field label={tx('ক্যাটাগরির নাম', 'Category Name')} value={catName} onChange={setCatName} />
+          <Muted>{tx('ধরন', 'Type')}</Muted>
+          <Chips
+            items={KIND_OPTIONS.map(k => ({ id: k.id, name: lang === 'bn' ? k.bn : k.en }))}
+            value={catKind}
+            onPick={id => setCatKind(id as ExpenseCategoryKind)}
+          />
+          {catError ? <Text style={{ color: color.red, marginTop: 4, fontSize: fs }}>{catError}</Text> : null}
+        </DetailShell>
+      ) : null}
+    </Screen>
   );
 }
 
-// STYLES — Consistent with Executive Brand Standard
-const styles = StyleSheet.create({
-  screenBg: {
-    flex: 1,
-    backgroundColor: '#F8FAFC',
-  },
-  scrollContent: {
-    padding: 18,
-    paddingBottom: 60,
-  },
-
-  // 1. Header Bar
-  headerBar: {
-    backgroundColor: '#1c70b9',
-    borderRadius: 16,
-    paddingHorizontal: 18,
-    paddingVertical: 14,
-    marginBottom: 16,
-    borderTopWidth: 1.5,
-    borderTopColor: '#60b0f4',
-    borderBottomWidth: 3.5,
-    borderBottomColor: '#124c7e',
-    overflow: 'hidden',
-    position: 'relative',
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    flexWrap: 'wrap',
-    gap: 12,
-    ...(Platform.OS === 'web' ? {
-      backgroundImage: 'linear-gradient(135deg, #2592ed 0%, #1c70b9 52%, #12518e 100%)',
-      boxShadow: '0 8px 22px rgba(28, 112, 185, 0.38), inset 0 1px 0 rgba(255, 255, 255, 0.45)',
-    } as any : {
-      elevation: 4,
-    }),
-  },
-  headerGlossSheen: {
-    position: 'absolute',
-    top: 0,
-    left: 0,
-    right: 0,
-    height: 18,
-    backgroundColor: 'rgba(255, 255, 255, 0.18)',
-  },
-  headerLeft: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 12,
-    zIndex: 2,
-    flex: 1,
-    minWidth: 260,
-  },
-  titleIconBadge: {
-    width: 40,
-    height: 40,
-    borderRadius: 12,
-    backgroundColor: 'rgba(255, 255, 255, 0.2)',
-    alignItems: 'center',
-    justifyContent: 'center',
-    borderTopWidth: 1,
-    borderTopColor: 'rgba(255, 255, 255, 0.45)',
-    borderBottomWidth: 2,
-    borderBottomColor: 'rgba(0, 0, 0, 0.2)',
-  },
-  headerTitle: {
-    color: '#FFFFFF',
-    fontSize: 20,
-    fontWeight: '800',
-    letterSpacing: 0.3,
-  },
-  liveTag: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 5,
-    backgroundColor: 'rgba(255, 255, 255, 0.2)',
-    paddingHorizontal: 8,
-    paddingVertical: 2,
-    borderRadius: 10,
-    borderWidth: 1,
-    borderColor: 'rgba(255, 255, 255, 0.35)',
-  },
-  liveDot: {
-    width: 6,
-    height: 6,
-    borderRadius: 3,
-    backgroundColor: '#86EFAC',
-  },
-  liveTagText: {
-    color: '#FFFFFF',
-    fontSize: 11,
-    fontWeight: '800',
-  },
-  headerSub: {
-    color: '#DCEBFA',
-    fontSize: 12.5,
-    fontWeight: '500',
-    marginTop: 2,
-  },
-  headerRight: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 8,
-    zIndex: 2,
-    flexWrap: 'wrap',
-  },
-  headerActionBtnWhite: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 6,
-    backgroundColor: '#FFFFFF',
-    paddingHorizontal: 12,
-    paddingVertical: 8,
-    borderRadius: 10,
-    borderTopWidth: 1,
-    borderTopColor: '#FFFFFF',
-    borderBottomWidth: 2,
-    borderBottomColor: 'rgba(0, 0, 0, 0.25)',
-    ...(Platform.OS === 'web' ? ({ cursor: 'pointer' } as any) : {}),
-  },
-  headerActionBtnWhiteText: {
-    color: '#1c70b9',
-    fontSize: 13,
-    fontWeight: '800',
-  },
-  headerActionBtnTranslucent: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 6,
-    backgroundColor: 'rgba(255, 255, 255, 0.2)',
-    paddingHorizontal: 12,
-    paddingVertical: 8,
-    borderRadius: 10,
-    borderTopWidth: 1,
-    borderTopColor: 'rgba(255, 255, 255, 0.45)',
-    borderBottomWidth: 2,
-    borderBottomColor: 'rgba(0, 0, 0, 0.25)',
-    ...(Platform.OS === 'web' ? ({ cursor: 'pointer' } as any) : {}),
-  },
-  headerActionBtnTranslucentText: {
-    color: '#FFFFFF',
-    fontSize: 13,
-    fontWeight: '800',
-  },
-  periodCard: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    backgroundColor: '#FFFFFF',
-    borderRadius: 12,
-    padding: 12,
-    marginBottom: 16,
-    borderWidth: 1,
-    borderColor: '#E2E8F0',
-    gap: 12,
-  },
-  presetButtonsRow: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    alignItems: 'center',
-    gap: 6,
-  },
-  presetChip: {
-    paddingHorizontal: 12,
-    paddingVertical: 7,
-    borderRadius: 8,
-    backgroundColor: '#F8FAFC',
-    borderWidth: 1,
-    borderColor: '#CBD5E1',
-  },
-  presetChipActive: {
-    backgroundColor: '#FEE2E2',
-    borderColor: '#DC2626',
-  },
-  presetChipText: {
-    fontSize: 12,
-    fontWeight: '700',
-    color: '#0F172A',
-  },
-  presetChipTextActive: {
-    color: '#991B1B',
-    fontWeight: '800',
-  },
-  ratioBannerPill: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 6,
-    backgroundColor: '#F8FAFC',
-    paddingHorizontal: 12,
-    paddingVertical: 6,
-    borderRadius: 8,
-    borderWidth: 1,
-    borderColor: '#CBD5E1',
-  },
-  ratioPillLabel: {
-    fontSize: 12,
-    color: '#0F172A',
-    fontWeight: '600',
-  },
-  ratioPillValue: {
-    fontSize: 12,
-    fontWeight: '800',
-    color: '#DC2626',
-  },
-
-  // 2. KPI Cards Grid
-  kpiGridContainer: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    gap: 12,
-    marginBottom: 16,
-  },
-  kpiCard: {
-    flex: 1,
-    minWidth: 160,
-    backgroundColor: '#FFFFFF',
-    borderRadius: 14,
-    padding: 14,
-    borderWidth: 1,
-    borderColor: '#E2E8F0',
-    shadowColor: '#0F172A',
-    shadowOffset: { width: 0, height: 1 },
-    shadowOpacity: 0.04,
-    shadowRadius: 4,
-  },
-  kpiCardHeader: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    marginBottom: 6,
-  },
-  kpiCardTitle: {
-    fontSize: 12,
-    fontWeight: '700',
-    color: '#475569',
-    flex: 1,
-  },
-  kpiIconBadge: {
-    width: 32,
-    height: 32,
-    borderRadius: 8,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  kpiCardAmount: {
-    fontSize: 18,
-    fontWeight: '800',
-    color: '#0F172A',
-    marginVertical: 4,
-  },
-  kpiCardFooter: {
-    borderTopWidth: 1,
-    borderTopColor: '#F1F5F9',
-    paddingTop: 6,
-    marginTop: 4,
-  },
-  kpiFooterNote: {
-    fontSize: 11,
-    color: '#64748B',
-    fontWeight: '500',
-  },
-
-  // 3. Two Column Grid
-  twoColGrid: {
-    flexDirection: 'row',
-    gap: 16,
-    marginBottom: 16,
-  },
-  colCard: {
-    backgroundColor: '#FFFFFF',
-    borderRadius: 16,
-    padding: 18,
-    borderWidth: 1,
-    borderColor: '#E2E8F0',
-    shadowColor: '#0F172A',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.04,
-    shadowRadius: 6,
-  },
-  cardHeaderWithIcon: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 10,
-    marginBottom: 14,
-    borderBottomWidth: 1,
-    borderBottomColor: '#F1F5F9',
-    paddingBottom: 10,
-  },
-  blockTitle: {
-    fontSize: 16,
-    fontWeight: '800',
-    color: '#0F172A',
-  },
-  blockSubtitle: {
-    fontSize: 12,
-    color: '#64748B',
-    marginTop: 2,
-  },
-
-  pointInspectorBox: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    backgroundColor: '#F8FAFC',
-    borderRadius: 8,
-    padding: 8,
-    marginBottom: 8,
-    borderWidth: 1,
-    borderColor: '#E2E8F0',
-  },
-  pointInspectorDate: {
-    fontSize: 13,
-    fontWeight: '700',
-    color: '#0F172A',
-  },
-  pointInspectorAmount: {
-    fontSize: 15,
-    fontWeight: '800',
-    color: '#DC2626',
-  },
-  chartCanvasContainer: {
-    width: '100%',
-    paddingVertical: 4,
-  },
-
-  progressBarTrack: {
-    height: 8,
-    backgroundColor: '#F1F5F9',
-    borderRadius: 4,
-    overflow: 'hidden',
-  },
-  progressBarFill: {
-    height: 8,
-    backgroundColor: '#DC2626',
-    borderRadius: 4,
-  },
-
-  // 4. Tab Navigation
-  tabNavContainer: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    gap: 8,
-    marginBottom: 14,
-  },
-  tabNavButton: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 8,
-    paddingHorizontal: 16,
-    paddingVertical: 10,
-    borderRadius: 10,
-    backgroundColor: '#FFFFFF',
-    borderWidth: 1.5,
-    borderColor: '#CBD5E1',
-  },
-  tabNavButtonActive: {
-    backgroundColor: '#0F172A',
-    borderColor: '#0F172A',
-  },
-  tabNavText: {
-    fontSize: 13,
-    fontWeight: '700',
-    color: '#0F172A',
-  },
-  tabNavTextActive: {
-    color: '#FFFFFF',
-    fontWeight: '800',
-  },
-
-  // 5. Search & Filters
-  filterCard: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    alignItems: 'center',
-    gap: 12,
-    marginBottom: 14,
-  },
-  searchBarWrap: {
-    flex: 1,
-    minWidth: 260,
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 10,
-    backgroundColor: '#FFFFFF',
-    borderRadius: 10,
-    borderWidth: 1.5,
-    borderColor: '#CBD5E1',
-    paddingHorizontal: 12,
-    height: 44,
-  },
-  searchBarInput: {
-    flex: 1,
-    fontSize: 14,
-    color: '#0F172A',
-    fontWeight: '600',
-    ...(Platform.OS === 'web' ? ({ outlineStyle: 'none' } as any) : {}),
-  },
-  dropdownSelectorBox: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    backgroundColor: '#FFFFFF',
-    borderRadius: 10,
-    borderWidth: 1.5,
-    borderColor: '#CBD5E1',
-    paddingHorizontal: 14,
-    height: 44,
-    minWidth: 170,
-  },
-  dropdownSelectorText: {
-    fontSize: 13,
-    fontWeight: '700',
-    color: '#0F172A',
-  },
-  dropdownList: {
-    position: 'absolute',
-    top: 50,
-    left: 0,
-    width: 220,
-    backgroundColor: '#FFFFFF',
-    borderRadius: 10,
-    borderWidth: 1,
-    borderColor: '#CBD5E1',
-    shadowColor: '#000',
-    shadowOpacity: 0.1,
-    shadowRadius: 8,
-    elevation: 8,
-    zIndex: 100,
-  },
-  dropdownListItem: {
-    paddingHorizontal: 14,
-    paddingVertical: 10,
-    borderBottomWidth: 1,
-    borderBottomColor: '#F1F5F9',
-  },
-  dropdownListItemText: {
-    fontSize: 13,
-    fontWeight: '600',
-    color: '#0F172A',
-  },
-
-  // 6. Table Card
-  tableCard: {
-    backgroundColor: '#FFFFFF',
-    borderRadius: 16,
-    borderWidth: 1,
-    borderColor: '#E2E8F0',
-    overflow: 'hidden',
-    shadowColor: '#0F172A',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.04,
-    shadowRadius: 6,
-  },
-  tableHeaderRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    backgroundColor: '#F8FAFC',
-    borderBottomWidth: 1.5,
-    borderBottomColor: '#E2E8F0',
-    paddingVertical: 12,
-    paddingHorizontal: 10,
-  },
-  th: {
-    fontSize: 13,
-    fontWeight: '800',
-    color: '#0F172A',
-    paddingHorizontal: 6,
-  },
-  tableDataRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    borderBottomWidth: 1,
-    borderBottomColor: '#F1F5F9',
-    paddingVertical: 12,
-    paddingHorizontal: 10,
-  },
-  td: {
-    paddingHorizontal: 6,
-  },
-  cellMuted: {
-    fontSize: 13,
-    color: '#64748B',
-    fontWeight: '600',
-  },
-  cellBold: {
-    fontSize: 13,
-    fontWeight: '800',
-    color: '#0F172A',
-  },
-  cellText: {
-    fontSize: 13,
-    color: '#0F172A',
-    fontWeight: '600',
-  },
-  cellSub: {
-    fontSize: 11,
-    color: '#64748B',
-    marginTop: 2,
-  },
-  typePill: {
-    paddingHorizontal: 10,
-    paddingVertical: 4,
-    borderRadius: 12,
-  },
-  typePillText: {
-    fontSize: 11,
-    fontWeight: '700',
-  },
-
-  // Action Icon Buttons (High Contrast)
-  actionBtnIconBox: {
-    width: 32,
-    height: 32,
-    borderRadius: 8,
-    borderWidth: 1,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-
-  // Pagination Footer
-  paginationFooter: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    paddingHorizontal: 16,
-    paddingVertical: 12,
-    borderTopWidth: 1,
-    borderTopColor: '#F1F5F9',
-    backgroundColor: '#FFFFFF',
-  },
-  footerCountText: {
-    fontSize: 13,
-    color: '#0F172A',
-    fontWeight: '700',
-  },
-  paginationControls: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 12,
-  },
-  pageButtonsRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 6,
-  },
-  pageNavBtn: {
-    width: 32,
-    height: 32,
-    borderRadius: 8,
-    borderWidth: 1.5,
-    borderColor: '#CBD5E1',
-    backgroundColor: '#FFFFFF',
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  pageNavBtnDisabled: {
-    opacity: 0.35,
-  },
-  pageNavText: {
-    fontSize: 16,
-    fontWeight: '800',
-    color: '#0F172A',
-  },
-  pageNumberBtn: {
-    width: 32,
-    height: 32,
-    borderRadius: 8,
-    borderWidth: 1,
-    borderColor: '#CBD5E1',
-    backgroundColor: '#FFFFFF',
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  pageNumberBtnActive: {
-    backgroundColor: '#0F172A',
-    borderColor: '#0F172A',
-  },
-  pageNumberText: {
-    fontSize: 13,
-    color: '#0F172A',
-    fontWeight: '700',
-  },
-  pageNumberTextActive: {
-    color: '#FFFFFF',
-    fontWeight: '800',
-  },
-
-  // 7. Modals
-  modalBackdrop: {
-    flex: 1,
-    backgroundColor: 'rgba(15, 23, 42, 0.65)',
-    alignItems: 'center',
-    justifyContent: 'center',
-    padding: 16,
-  },
-  modalBox: {
-    width: '100%',
-    maxWidth: 580,
-    backgroundColor: '#FFFFFF',
-    borderRadius: 16,
-    overflow: 'hidden',
-    shadowColor: '#000',
-    shadowOpacity: 0.2,
-    shadowRadius: 10,
-    elevation: 8,
-  },
-  modalHeader: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    paddingHorizontal: 20,
-    paddingVertical: 16,
-    borderBottomWidth: 1,
-    borderBottomColor: '#F1F5F9',
-  },
-  modalTitleRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 10,
-  },
-  modalTitle: {
-    fontSize: 17,
-    fontWeight: '800',
-    color: '#0F172A',
-  },
-  modalBody: {
-    padding: 20,
-    maxHeight: 480,
-  },
-  modalTwoCol: {
-    flexDirection: 'row',
-    gap: 14,
-    marginBottom: 14,
-  },
-  modalCol: {
-    flex: 1,
-  },
-  modalFormGroup: {
-    marginBottom: 14,
-  },
-  modalLabel: {
-    fontSize: 13,
-    color: '#0F172A',
-    fontWeight: '700',
-    marginBottom: 6,
-  },
-  modalInput: {
-    borderWidth: 1.5,
-    borderColor: '#CBD5E1',
-    borderRadius: 10,
-    backgroundColor: '#FFFFFF',
-    paddingHorizontal: 12,
-    height: 44,
-    fontSize: 14,
-    fontWeight: '600',
-    color: '#0F172A',
-    ...(Platform.OS === 'web' ? ({ outlineStyle: 'none' } as any) : {}),
-  },
-  modalSelectWrap: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    borderWidth: 1.5,
-    borderColor: '#CBD5E1',
-    borderRadius: 10,
-    backgroundColor: '#FFFFFF',
-    paddingHorizontal: 12,
-    height: 44,
-  },
-  modalSelectText: {
-    fontSize: 14,
-    fontWeight: '700',
-    color: '#0F172A',
-  },
-  modalDropdownPopup: {
-    position: 'absolute',
-    top: 72,
-    left: 0,
-    right: 0,
-    backgroundColor: '#FFFFFF',
-    borderRadius: 10,
-    borderWidth: 1,
-    borderColor: '#CBD5E1',
-    shadowColor: '#000',
-    shadowOpacity: 0.12,
-    shadowRadius: 8,
-    elevation: 8,
-    zIndex: 100,
-  },
-  dropdownPopupItem: {
-    paddingHorizontal: 14,
-    paddingVertical: 10,
-    borderBottomWidth: 1,
-    borderBottomColor: '#F1F5F9',
-  },
-  dropdownPopupItemText: {
-    fontSize: 13,
-    fontWeight: '600',
-    color: '#0F172A',
-  },
-  modalFooter: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'flex-end',
-    gap: 12,
-    paddingHorizontal: 20,
-    paddingVertical: 14,
-    borderTopWidth: 1,
-    borderTopColor: '#F1F5F9',
-    backgroundColor: '#F8FAFC',
-  },
-  modalCancelBtn: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 6,
-    borderWidth: 1.5,
-    borderColor: '#CBD5E1',
-    borderRadius: 10,
-    paddingHorizontal: 18,
-    paddingVertical: 10,
-    backgroundColor: '#FFFFFF',
-  },
-  modalCancelBtnText: {
-    fontSize: 13,
-    color: '#0F172A',
-    fontWeight: '700',
-  },
-  modalSaveBtn: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 6,
-    backgroundColor: '#DC2626',
-    borderRadius: 10,
-    paddingHorizontal: 20,
-    paddingVertical: 10,
-  },
-  modalSaveBtnText: {
-    fontSize: 13,
-    color: '#FFFFFF',
-    fontWeight: '800',
-  },
-
-  // View Row Details
-  viewRow: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    borderBottomWidth: 1,
-    borderBottomColor: '#F1F5F9',
-    paddingVertical: 8,
-  },
-  viewLabel: {
-    fontSize: 13,
-    fontWeight: '700',
-    color: '#475569',
-  },
-  viewValue: {
-    fontSize: 14,
-    fontWeight: '700',
-    color: '#0F172A',
-    textAlign: 'right',
-  },
-});
+function SummaryCard({
+  label,
+  value,
+  sub,
+  icon,
+  tone,
+}: {
+  label: string;
+  value: string;
+  sub: string;
+  icon: IconName;
+  tone: string;
+}) {
+  const fs = useFs(12, 13);
+  return (
+    <Card style={{ borderLeftWidth: 4, borderLeftColor: tone }}>
+      <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10 }}>
+        <View style={{ width: 38, height: 38, borderRadius: 12, backgroundColor: color.primaryLight, alignItems: 'center', justifyContent: 'center' }}>
+          <AppIcon name={icon} size={20} iconColor={tone} />
+        </View>
+        <View style={{ flex: 1, minWidth: 0 }}>
+          <Text style={{ fontSize: fs, color: color.muted, fontWeight: '600' }}>{label}</Text>
+          <Text numberOfLines={1} style={{ fontSize: fs + 8, color: color.text, fontWeight: '800', marginTop: 2 }}>{value}</Text>
+          <Text numberOfLines={1} style={{ fontSize: fs - 1, color: color.muted }}>{sub}</Text>
+        </View>
+      </View>
+    </Card>
+  );
+}

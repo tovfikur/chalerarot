@@ -37,8 +37,15 @@ async function req<T>(path: string, init?: RequestInit): Promise<T> {
 }
 
 export type IdRes = { id: string };
-export type AppUser = { id: string; name: string; phone: string; username: string; role: 'admin' | 'staff'; active: boolean };
-export type UserInput = { name: string; phone: string; username: string; password: string; role: 'admin' | 'staff'; active: boolean };
+export type AppUser = { id: string; name: string; phone: string; email: string; role: 'admin' | 'staff'; active: boolean };
+export type UserInput = { name: string; phone: string; email: string; password: string; role: 'admin' | 'staff'; active: boolean };
+export type ActivityRow = {
+  id: string; userId?: string | null; userName: string; userRole?: string | null;
+  action: string; entity: string; entityId?: string | null; reference?: string | null;
+  amount?: number | null; summary: string; detail?: Record<string, any> | null;
+  createdAt: string;
+};
+export type ActivityQuery = { group?: string; q?: string; userId?: string; from?: string; to?: string; take?: number; skip?: number };
 let authExpired: (() => void) | undefined;
 export const onAuthExpired = (callback?: () => void) => { authExpired = callback; };
 export type MoneyMovementRow = { id: string; moneyAccountId: string; direction: string; amount: number; date: string; sourceType: string; transferId?: string | null; note?: string | null; moneyAccount?: { name: string; type: string } };
@@ -86,6 +93,12 @@ export type MoneyMethod = 'cash' | 'bkash' | 'nagad' | 'bank';
 export type Expense = {
   id: string; voucherNo?: string; category: string; customName?: string;
   amount: number; date: string; note?: string; method?: MoneyMethod; accountId?: string;
+};
+
+export type ExpenseCategoryKind = 'operating' | 'landing' | 'transport' | 'other';
+
+export type ExpenseCategoryRow = {
+  id: string; name: string; kind: ExpenseCategoryKind; createdAt?: string;
 };
 
 export const MONEY_METHODS: MoneyMethod[] = ['cash', 'bkash', 'nagad', 'bank'];
@@ -143,12 +156,12 @@ export type MoneyTransfer = {
 
 export const api = {
   authStatus: () => req<{ setup: boolean; user: AppUser | null }>('/auth/status'),
-  login: (username: string, password: string) => req<AppUser>('/auth/login', { method: 'POST', body: JSON.stringify({ username, password }) }),
+  login: (email: string, password: string) => req<AppUser>('/auth/login', { method: 'POST', body: JSON.stringify({ email, password }) }),
   setup: (body: UserInput) => req<AppUser>('/auth/setup', { method: 'POST', body: JSON.stringify(body) }),
   logout: () => req('/auth/logout', { method: 'POST' }),
   users: () => req<AppUser[]>('/users'),
   saveUser: (body: UserInput, id?: string) => req<AppUser>(id ? `/users/${id}` : '/users', { method: id ? 'PUT' : 'POST', body: JSON.stringify(body) }),
-  profile: (body: { name: string; phone: string; password: string; currentPassword: string }) => req<AppUser>('/auth/profile', { method: 'PUT', body: JSON.stringify(body) }),
+  profile: (body: { name: string; phone: string; email: string; password: string; currentPassword: string }) => req<AppUser>('/auth/profile', { method: 'PUT', body: JSON.stringify(body) }),
   moneyMovements: () => req<MoneyMovementRow[]>('/money/movements?limit=30'),
   moneyEntry: (body: { accountId: string; direction: 'in' | 'out'; amount: number; date: string; note: string; requestId: string }) => req<MoneyMovementRow>('/money/entries', { method: 'POST', body: JSON.stringify(body) }),
   settings: () => req<BusinessSettings>('/settings'),
@@ -198,6 +211,13 @@ export const api = {
   createExpense: (b: object) => req<IdRes>('/expenses', { method: 'POST', body: JSON.stringify(b) }),
   updateExpense: (id: string, b: object) => req<IdRes>(`/expenses/${id}`, { method: 'PUT', body: JSON.stringify(b) }),
   deleteExpense: (id: string) => req<IdRes>(`/expenses/${id}`, { method: 'DELETE' }),
+  expenseCategories: () => req<ExpenseCategoryRow[]>('/expense-categories'),
+  createExpenseCategory: (b: { name: string; kind: ExpenseCategoryKind }) =>
+    req<ExpenseCategoryRow>('/expense-categories', { method: 'POST', body: JSON.stringify(b) }),
+  updateExpenseCategory: (id: string, b: { name: string; kind: ExpenseCategoryKind }) =>
+    req<ExpenseCategoryRow>(`/expense-categories/${id}`, { method: 'PUT', body: JSON.stringify(b) }),
+  deleteExpenseCategory: (id: string) =>
+    req<{ id: string }>(`/expense-categories/${id}`, { method: 'DELETE' }),
 
   moneyBalances: () => req<MoneyBalance[]>('/money/balances'),
   moneyAccounts: () => req<MoneyAccountList>('/money/accounts'),
@@ -234,6 +254,14 @@ export const api = {
 
   reminders: () => req<{ reminders: Reminder[]; unreadCount: number }>('/reminders'),
   reminderRead: (id: string) => req<IdRes>(`/reminders/${id}/read`, { method: 'POST' }),
+
+  activity: (query: ActivityQuery = {}) => {
+    const params = Object.entries(query)
+      .filter(([, v]) => v !== undefined && v !== null && v !== '')
+      .map(([k, v]) => `${k}=${encodeURIComponent(String(v))}`)
+      .join('&');
+    return req<{ rows: ActivityRow[]; total: number; take: number; skip: number }>(`/activity${params ? '?' + params : ''}`);
+  },
 
   gsearch: (q: string, limit?: number) =>
     req<GSearchRes>(`/search?q=${encodeURIComponent(q)}${limit ? `&limit=${limit}` : ''}`),

@@ -4,6 +4,7 @@ import { useApp } from '../store';
 import { Card, Title, Field, Btn, Chips } from '../ui';
 import { Trash } from '../screens';
 import { UserSettings } from './UserSettings';
+import { ActivityLog } from './ActivityLog';
 import { useAuth } from '../auth';
 import { AppIcon, icons, IconName } from '../icons';
 
@@ -11,7 +12,7 @@ export function Settings() {
   const { user } = useAuth();
   const { business, saveBusiness, lang } = useApp();
   const [draft, setDraft] = useState(business);
-  const [section, setSection] = useState<'business' | 'language' | 'profile' | 'users' | 'trash' | null>(null);
+  const [section, setSection] = useState<'business' | 'language' | 'profile' | 'users' | 'log' | 'trash' | null>(null);
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState('');
   const [failed, setFailed] = useState(false);
@@ -33,6 +34,7 @@ export function Settings() {
     { id: 'language', title: label('ভাষা', 'Language'), icon: icons.language, admin: true },
     { id: 'profile', title: label('আমার প্রোফাইল', 'My profile'), icon: icons.customers },
     { id: 'users', title: label('ব্যবহারকারী', 'Users'), icon: icons.customers, admin: true },
+    { id: 'log', title: label('লগ নোট', 'Log Note'), icon: icons.history, admin: true },
     { id: 'trash', title: label('ট্র্যাশ', 'Trash'), icon: icons.del },
   ];
   if (section === 'trash') return <View style={{ flex: 1 }}><View style={{ padding: 16 }}>{back}</View><Trash /></View>;
@@ -46,6 +48,7 @@ export function Settings() {
       </TouchableOpacity>
     )}</View> : null}
     {section === 'profile' || section === 'users' ? <UserSettings key={section} section={section} /> : null}
+    {section === 'log' ? <ActivityLog /> : null}
     {user.role === 'admin' && (section === 'business' || section === 'language') ? <>
     {section === 'business' ?
     <Card>

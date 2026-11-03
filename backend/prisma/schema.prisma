@@ -6,7 +6,7 @@ model User {
   id String @id @default(cuid())
   name String
   phone String
-  username String @unique
+  email String @unique
   passwordHash String
   role String @default("staff")
   active Boolean @default(true)
@@ -259,6 +259,15 @@ model Expense {
   @@index([category])
 }
 
+model ExpenseCategory {
+  id        String   @id @default(cuid())
+  name      String   @unique
+  kind      String // operating | landing | transport | other
+  createdAt DateTime @default(now())
+
+  @@index([kind])
+}
+
 // One row per payment method holding the manually entered starting balance.
 // Opening balances are pure baseline: they never touch sales, due, profit or
 // expense reporting.
@@ -339,6 +348,29 @@ model MoneyMovement {
   @@index([date])
   @@index([transferId])
   @@index([moneyAccountId, date])
+}
+
+// Universal, append-only audit trail. The user name/role are snapshotted so an
+// entry stays readable after the account is renamed, deactivated or removed.
+// `detail` holds a small whitelisted JSON payload (never passwords or tokens).
+model ActivityLog {
+  id        String   @id @default(cuid())
+  userId    String?
+  userName  String
+  userRole  String?
+  action    String // create | update | delete | bulk | adjust | opening | login | restore | purge
+  entity    String // sale | purchase | customerPayment | vendorPayment | transfer | ...
+  entityId  String?
+  reference String?
+  amount    Float?
+  summary   String
+  detail    Json?
+  ip        String?
+  createdAt DateTime @default(now())
+
+  @@index([createdAt])
+  @@index([userId])
+  @@index([entity, createdAt])
 }
 
 model Notification {

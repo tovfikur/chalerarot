@@ -70,6 +70,7 @@ export const icons = {
   lock: 'lock-outline',
   unlock: 'lock-open-outline',
   phone: 'phone',
+  mail: 'email-outline',
   upload: 'cloud-upload-outline',
   download: 'cloud-download-outline',
 } as const satisfies Record<string, IconName>;
