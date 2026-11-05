@@ -269,7 +269,7 @@ products.post('/adjust', async (req: Request, res: Response) => {
         if (deltaKg !== 0) {
           const unitCost = cur.stockValue > 0 && cur.qtyKg > 0 ? round2(cur.stockValue / cur.qtyKg) : cur.cost;
           const lineReason = it.reason ? `${auditNote} - ${String(it.reason).trim()}` : auditNote;
-          await writeMovement(tx, cur.id, {
+          const movement = await writeMovement(tx, cur.id, {
             type: 'ADJUSTMENT',
             bucket: 'sellable',
             qtyKg: deltaKg,
@@ -285,6 +285,8 @@ products.post('/adjust', async (req: Request, res: Response) => {
             deltaKg,
             afterKg: round2(cur.qtyKg + deltaKg),
             unitCost,
+            value: movement.value,
+            reason: lineReason,
           });
         }
       }

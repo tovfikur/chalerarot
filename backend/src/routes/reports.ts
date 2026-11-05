@@ -124,8 +124,9 @@ async function buildJournalRows(from: string, to: string) {
   for (const v of vendors) { add('0001-01-01', `OPEN-V-${v.id}`, 'Owner equity', 'Vendor opening payable', v.openingPayable, 0); add('0001-01-01', `OPEN-V-${v.id}`, 'Accounts payable', 'Vendor opening payable', 0, v.openingPayable); }
   for (const s of stockAdjustments) {
     const isDebit = s.value >= 0; const amount = Math.abs(s.value); const counterpart = s.type === 'OPENING' ? 'Owner equity' : 'Inventory adjustments';
-    add(s.date, s.refId ?? s.id, isDebit ? 'Inventory' : counterpart, `${s.type.toLowerCase()} stock valuation`, isDebit ? amount : 0, isDebit ? 0 : amount);
-    add(s.date, s.refId ?? s.id, isDebit ? counterpart : 'Inventory', `${s.type.toLowerCase()} stock valuation`, isDebit ? 0 : amount, isDebit ? amount : 0);
+    const description = s.type === 'ADJUSTMENT' ? `Stock audit adjustment · ${s.refId ?? s.id}` : `${s.type.toLowerCase()} stock valuation`;
+    add(s.date, s.refId ?? s.id, isDebit ? 'Inventory' : counterpart, description, isDebit ? amount : 0, isDebit ? 0 : amount);
+    add(s.date, s.refId ?? s.id, isDebit ? counterpart : 'Inventory', description, isDebit ? 0 : amount, isDebit ? amount : 0);
   }
   for (const s of sales) { const ref = s.invoiceNo ?? s.id; const cogs = s.items.reduce((n, i) => n + i.cogs, 0); add(s.date, ref, 'Accounts receivable', 'Credit sale', s.total, 0); add(s.date, ref, 'Sales revenue', 'Sale', 0, s.total); if (cogs) { add(s.date, ref, 'Cost of goods sold', 'AVCO cost at sale', cogs, 0); add(s.date, ref, 'Inventory', 'Stock issued', 0, cogs); } }
   for (const p of purchases) { const ref = p.invoiceNo ?? p.id; add(p.date, ref, 'Inventory', 'Purchase at invoice cost', p.total, 0); add(p.date, ref, 'Accounts payable', 'Purchase invoice', 0, p.total); }

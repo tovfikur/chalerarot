@@ -90,7 +90,7 @@ export async function periodFinance(mode: PeriodMode, ref?: string, end?: string
   const inRange = { gte: start, lte: endDate };
   const before = { lt: start };
 
-  const [sales, rets, purchases, expenses, purchaseItems, openV, closeV, openingAdded, journalLines] = await Promise.all([
+  const [sales, rets, purchases, expenses, purchaseItems, openV, closeV, openingAdded, journalLines, stockAdjustments] = await Promise.all([
     db.sale.findMany({ where: { date: inRange }, select: { total: true } }),
     db.productReturn.findMany({ where: { date: inRange }, select: { kind: true, totalAmount: true } }),
     db.purchase.findMany({ where: { date: inRange }, select: { total: true } }),
@@ -103,13 +103,16 @@ export async function periodFinance(mode: PeriodMode, ref?: string, end?: string
     // existed would show a negative COGS.
     db.stockMovement.findMany({ where: { type: 'OPENING', bucket: 'sellable', date: inRange }, select: { value: true } }),
     db.journalLine.findMany({ where: { entry: { active: true, date: inRange } }, select: { debit: true, credit: true, account: { select: { type: true } } } }),
+    db.stockMovement.findMany({ where: { type: { in: ['ADJUSTMENT', 'REVALUE'] }, bucket: 'sellable', date: inRange }, select: { value: true } }),
   ]);
 
   const salesTotal = sum(sales.map(s => s.total));
   const salesReturn = sum(rets.filter(r => r.kind === 'sale').map(r => r.totalAmount));
   const purchase = sum(purchases.map(p => p.total));
   const purchaseReturn = sum(rets.filter(r => r.kind === 'purchase').map(r => r.totalAmount));
-  const expense = sum(expenses.filter(e => !e.capitalized).map(e => e.amount));
+  // Stock audits and cost revaluations do not move cash, but their signed
+  // inventory value change is an expense (or expense credit) in account 6100.
+  const expense = round2(sum(expenses.filter(e => !e.capitalized).map(e => e.amount)) - sum(stockAdjustments.map(m => m.value)));
 
   // Other cost per bag is capitalized into PurchaseItem.unitCost and already
   // lives in the stock movement value. Include it with purchases in the
@@ -126,7 +129,11 @@ export async function periodFinance(mode: PeriodMode, ref?: string, end?: string
   const openingStockAdded = round2(openingAdded.reduce((acc, x) => acc + x.value, 0));
   const openingStockValue = round2(openingStockCarryIn + openingStockAdded);
   const closingStockValue = closeV.sellable;
-  const cogs = round2(openingStockValue + netPurchase + capitalizedLandedCost - closingStockValue);
+  const stockAdjustmentValue = sum(stockAdjustments.map(m => m.value));
+  // Inventory adjustment movements change the stock asset directly. Add their
+  // signed value back here so shrinkage/revaluation is reported in expenses,
+  // not also inside COGS.
+  const cogs = round2(openingStockValue + netPurchase + capitalizedLandedCost - closingStockValue + stockAdjustmentValue);
   const grossProfit = round2(netSales - cogs);
   const otherIncomeExpense = round2(journalLines.reduce((total, line) => total + (line.account.type === 'income' ? line.credit - line.debit : line.account.type === 'expense' ? line.debit - line.credit : 0) * -1, 0));
   const netProfit = round2(grossProfit - expense - otherIncomeExpense);

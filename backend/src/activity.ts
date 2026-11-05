@@ -210,6 +210,9 @@ async function build(req: Request, responseBody: any, actor: any) {
   } else if (entity === 'stock') {
     put('count', typeof b.count === 'number' ? b.count : Array.isArray(body.items) ? body.items.length : undefined);
     put('names', Array.isArray(b.adjusted) ? b.adjusted.map((x: any) => x.name).filter(Boolean).slice(0, 5) : undefined);
+    put('adjustments', Array.isArray(b.adjusted) ? b.adjusted.slice(0, 100).map((x: any) => ({
+      product: text(x.name), deltaKg: x.deltaKg, value: x.value, reason: text(x.reason),
+    })) : undefined);
   } else if (entity === 'trash') {
     const parts = path.split('/').filter(Boolean);
     put('kind', parts[2]);

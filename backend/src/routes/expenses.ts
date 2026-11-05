@@ -64,10 +64,20 @@ export const expenses = Router();
 
 // GET /api/expenses (active only, newest first)
 expenses.get('/', async (_req: Request, res: Response) => {
-  const list = await db.expense.findMany({ where: { deletedAt: null }, orderBy: [{ date: 'desc' }, { createdAt: 'desc' }] });
+  const [list, adjustments] = await Promise.all([
+    db.expense.findMany({ where: { deletedAt: null }, orderBy: [{ date: 'desc' }, { createdAt: 'desc' }] }),
+    db.stockMovement.findMany({ where: { type: { in: ['ADJUSTMENT', 'REVALUE'] }, bucket: 'sellable' }, include: { product: { select: { name: true } } }, orderBy: [{ date: 'desc' }, { createdAt: 'desc' }] }),
+  ]);
   const mv = await db.moneyMovement.findMany({ where: { sourceType: 'expense', sourceId: { in: list.map(e => e.id) } }, select: { sourceId: true, method: true, moneyAccountId: true } });
   const byId = new Map(mv.map(m => [m.sourceId, { method: m.method, moneyAccountId: m.moneyAccountId }]));
-  res.json(list.map(e => shape(e, byId.get(e.id))));
+  const ordinary = list.map(e => shape(e, byId.get(e.id)));
+  const stockAdjustments = adjustments.map(m => ({
+    id: `stockadj:${m.id}`, voucherNo: `ADJ-${m.id.slice(-8).toUpperCase()}`,
+    category: 'other', customName: 'Inventory adjustment', amount: -m.value, date: m.date,
+    note: `${m.product.name}${m.refId ? ` · ${m.refId}` : m.type === 'REVALUE' ? ' · Stock cost revaluation' : ''}`, capitalized: false,
+    sourceMovementId: m.id, stockAdjustment: true, accountName: 'Inventory adjustments',
+  }));
+  res.json([...ordinary, ...stockAdjustments].sort((a, b) => b.date.localeCompare(a.date)));
 });
 
 // GET /api/expenses/:id

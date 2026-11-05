@@ -869,7 +869,7 @@ tx.get('/stock-movements', async (req: Request, res: Response) => {
 
 // GET /api/bootstrap — everything the app needs in one round trip
 tx.get('/bootstrap', async (_req: Request, res: Response) => {
-  const [products, customers, vendors, sales, purchases, customerPayments, vendorPayments, movements, expenses, rets, balances, accountList, ledger, transfers, todayFinance, lifetime] = await Promise.all([
+  const [products, customers, vendors, sales, purchases, customerPayments, vendorPayments, movements, expenses, rets, balances, accountList, ledger, transfers, todayFinance, lifetime, stockAdjustments] = await Promise.all([
     db.product.findMany({ where: { deletedAt: null }, orderBy: { name: 'asc' } }),
     db.customer.findMany({ where: { deletedAt: null }, orderBy: { name: 'asc' } }),
     db.vendor.findMany({ where: { deletedAt: null }, orderBy: { name: 'asc' } }),
@@ -886,6 +886,7 @@ tx.get('/bootstrap', async (_req: Request, res: Response) => {
     db.moneyTransfer.findMany({ orderBy: [{ date: 'desc' }, { createdAt: 'desc' }], take: 50 }),
     periodFinance('day'),
     lifetimeFinance(),
+    db.stockMovement.findMany({ where: { type: { in: ['ADJUSTMENT', 'REVALUE'] }, bucket: 'sellable' }, include: { product: { select: { name: true } } }, orderBy: [{ date: 'desc' }, { createdAt: 'desc' }] }),
   ]);
   const retNo = new Map(rets.map(r => [r.id, r.returnNo ?? '']));
   const expMethod = new Map(ledger.filter(m => m.sourceType === 'expense').map(m => [m.sourceId, m]));
@@ -944,7 +945,10 @@ tx.get('/bootstrap', async (_req: Request, res: Response) => {
       const isEditReversal = mv.type === 'SALE_EDIT_REVERSAL' || mv.type === 'PURCHASE_EDIT_REVERSAL';
       return { id: mv.id, productId: mv.productId, productName: mv.product.name, type: mv.type, qty: mv.qtyKg, bags: mv.product.mediumBagKg > 0 ? round2(mv.qtyKg / mv.product.mediumBagKg) : 0, unitCost: mv.unitCost, bagUnitPrice: round2(mv.unitCost * (mv.product.mediumBagKg || 0)), amount: mv.value, date: mv.date, transactionNo, note: transactionNo ? `${isEditReversal ? 'Correction reversal for' : 'Posted against'} ${transactionNo}` : undefined };
     }),
-    expenses: expenses.map(e => ({ id: e.id, voucherNo: e.voucherNo ?? undefined, category: e.category, customName: e.customName ?? undefined, amount: e.amount, date: e.date, note: e.note ?? undefined, capitalized: e.capitalized, method: expMethod.get(e.id)?.method, accountId: expMethod.get(e.id)?.moneyAccountId ?? undefined })),
+    expenses: [
+      ...expenses.map(e => ({ id: e.id, voucherNo: e.voucherNo ?? undefined, category: e.category, customName: e.customName ?? undefined, amount: e.amount, date: e.date, note: e.note ?? undefined, capitalized: e.capitalized, method: expMethod.get(e.id)?.method, accountId: expMethod.get(e.id)?.moneyAccountId ?? undefined })),
+      ...stockAdjustments.map(mv => ({ id: `stockadj:${mv.id}`, voucherNo: `ADJ-${mv.id.slice(-8).toUpperCase()}`, category: 'other', customName: 'Inventory adjustment', amount: -mv.value, date: mv.date, note: `${mv.product.name}${mv.refId ? ` · ${mv.refId}` : mv.type === 'REVALUE' ? ' · Stock cost revaluation' : ''}`, capitalized: false, sourceMovementId: mv.id, stockAdjustment: true, accountName: 'Inventory adjustments' })),
+    ],
     returns: rets.map(r => ({ id: r.id, kind: r.kind, date: r.date, amount: r.totalAmount, profit: r.profitImpact, returnNo: r.returnNo ?? undefined })),
     money: balances,
     moneyAccounts: accountList,

@@ -177,7 +177,8 @@ export function ExpenseDashboard(_props: ExpenseDashboardProps) {
     return b ? (lang === 'bn' ? b.bn : b.en) : e.category === 'other' ? (lang === 'bn' ? '\u0985\u09a8\u09cd\u09af\u09be\u09a8\u09cd\u09af' : 'Other') : e.category;
   }, [lang]);
 
-  const total = useMemo(() => expenses.reduce((s, e) => s + e.amount, 0), [expenses]);
+  const total = useMemo(() => expenses.filter(e => !e.stockAdjustment).reduce((s, e) => s + e.amount, 0), [expenses]);
+  const stockAdjustmentTotal = useMemo(() => expenses.filter(e => e.stockAdjustment).reduce((s, e) => s + e.amount, 0), [expenses]);
   const operating = useMemo(() => expenses.filter(e => !e.capitalized && kindOf(e) === 'operating').reduce((s, e) => s + e.amount, 0), [expenses, kindOf]);
   const landing = useMemo(() => expenses.filter(e => kindOf(e) === 'landing').reduce((s, e) => s + e.amount, 0), [expenses, kindOf]);
   const todayTotal = useMemo(() => {
@@ -362,7 +363,7 @@ export function ExpenseDashboard(_props: ExpenseDashboardProps) {
             <Text style={{ fontSize: size, color: color.text, fontWeight: '600' }}>{catLabel(r)}</Text>
             {r.capitalized ? <Text style={{ fontSize: size - 2, color: color.purple }}>{tx('মজুদের মূল্যে যোগ; পরিচালন খরচ নয়', 'Added to inventory cost; not an operating expense')}</Text> : null}
             {r.note ? <Text numberOfLines={1} style={{ fontSize: size - 2, color: color.muted }}>{r.note}</Text> : null}
-            {isMobile && accountName(r.accountId) ? <Text style={{ fontSize: size - 2, color: color.muted }}>{accountName(r.accountId)}</Text> : null}
+            {isMobile && (r.accountName || accountName(r.accountId)) ? <Text style={{ fontSize: size - 2, color: color.muted }}>{r.accountName || accountName(r.accountId)}</Text> : null}
           </View>
         ),
       },
@@ -373,7 +374,7 @@ export function ExpenseDashboard(_props: ExpenseDashboardProps) {
         label: tx('অ্যাকাউন্ট', 'Account'),
         flex: 1.2,
         render: (r, size) => (
-          <Text style={{ fontSize: size, color: color.text }}>{accountName(r.accountId) || '-'}</Text>
+          <Text style={{ fontSize: size, color: color.text }}>{r.accountName || accountName(r.accountId) || '-'}</Text>
         ),
       });
     }
@@ -384,7 +385,7 @@ export function ExpenseDashboard(_props: ExpenseDashboardProps) {
       align: 'right',
       sort: r => r.amount,
       render: (r, size) => (
-        <Text style={{ fontSize: size, color: color.red, fontWeight: '700', textAlign: 'right' }}>-{m(r.amount)}</Text>
+        <Text style={{ fontSize: size, color: r.amount < 0 ? color.green : color.red, fontWeight: '700', textAlign: 'right' }}>{r.amount < 0 ? '+' : '-'}{m(Math.abs(r.amount))}</Text>
       ),
     });
     return cols;
@@ -415,6 +416,7 @@ export function ExpenseDashboard(_props: ExpenseDashboardProps) {
         <SummaryCard label={tx('মোট পরিশোধ', 'Total Cash Paid')} value={m(total)} sub={tx('মজুদে যোগ করা ল্যান্ডিং খরচসহ', 'Includes costs capitalized into stock')} icon={icons.expense} tone={color.primary} />
         <SummaryCard label={tx('পরিচালন খরচ', 'Operating')} value={m(operating)} sub={tx('দৈনন্দিন খরচ', 'Running costs')} icon={icons.office} tone={color.amber} />
         <SummaryCard label={tx('ল্যান্ডিং খরচ', 'Landing Cost')} value={m(landing)} sub={tx('লোডিং ও শ্রমিক', 'Loading and labour')} icon={icons.ship} tone={color.purple} />
+        <SummaryCard label={tx('স্টক সমন্বয়', 'Stock adjustments')} value={`${stockAdjustmentTotal < 0 ? '+' : '-'}${m(Math.abs(stockAdjustmentTotal))}`} sub={tx('নগদ লেনদেন নয় · হিসাব ৬১০০', 'Non-cash · account 6100')} icon={icons.history} tone={stockAdjustmentTotal < 0 ? color.green : color.red} />
         <SummaryCard label={tx('আজকের খরচ', 'Today')} value={m(todayTotal)} sub={fd(today())} icon={icons.history} tone={color.green} />
       </RGrid>
 
@@ -448,7 +450,13 @@ export function ExpenseDashboard(_props: ExpenseDashboardProps) {
             columns={columns}
             rows={paged}
             rowKey={r => r.id}
-            onRowPress={openEdit}
+            onRowPress={row => {
+              if (row.stockAdjustment) {
+                Alert.alert(tx('স্টক সমন্বয়', 'Stock adjustment'), tx('এই হিসাবটি স্টক অডিট থেকে এসেছে এবং অপরিবর্তনীয়।', 'This expense is linked to a stock audit and is read-only.'));
+                return;
+              }
+              openEdit(row);
+            }}
             empty={<Empty />}
           />
         ) : (

@@ -94,6 +94,7 @@ export type MoneyMethod = 'cash' | 'bkash' | 'nagad' | 'bank';
 export type Expense = {
   id: string; voucherNo?: string; category: string; customName?: string;
   amount: number; date: string; note?: string; method?: MoneyMethod; accountId?: string; capitalized?: boolean;
+  sourceMovementId?: string; stockAdjustment?: boolean; accountName?: string;
 };
 
 export type ExpenseCategoryKind = 'operating' | 'landing' | 'transport' | 'other';
