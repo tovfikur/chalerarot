@@ -6,7 +6,7 @@ import { Screen, Card, Title, Btn, Field, Chips, Row, ListTable, TableColumn, us
 import { RGrid } from '../responsive';
 import { icons } from '../icons';
 import { toEnDigits } from '../bn';
-import { AccountFormModal, AccountDetailModal } from '../screens';
+import { AccountFormModal, AccountDetailModal, DateField } from '../screens';
 import { MoneyMovementDetail, MoneyMovementItem } from './MoneyMovementDetail';
 
 export function AccountPage({ id, onBack }: { id: string; onBack: () => void }) {
@@ -65,7 +65,7 @@ export function AccountPage({ id, onBack }: { id: string; onBack: () => void }) 
       </RGrid>
       <Card><Title>{l('লেনদেনের তালিকা', 'Transactions')}</Title>
         <Field label={l('খুঁজুন', 'Search transactions')} value={query} onChange={setQuery} />
-        <RGrid mobile={1} tablet={2} desktop={2}><Field label={l('শুরুর তারিখ (YYYY-MM-DD)', 'From date (YYYY-MM-DD)')} value={from} onChange={setFrom} /><Field label={l('শেষ তারিখ (YYYY-MM-DD)', 'To date (YYYY-MM-DD)')} value={to} onChange={setTo} /></RGrid>
+        <RGrid mobile={1} tablet={2} desktop={2}><DateField label={l('শুরুর তারিখ', 'From date')} value={from} onChange={setFrom} clearable /><DateField label={l('শেষ তারিখ', 'To date')} value={to} onChange={setTo} clearable minDate={from || undefined} /></RGrid>
         <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8 }}><Btn kind="ghost" label={l('আজ', 'Today')} onPress={() => { setFrom(today()); setTo(today()); }} /><Btn kind="ghost" label={l('চলতি মাস', 'This month')} onPress={() => { setFrom(today().slice(0, 7) + '-01'); setTo(today()); }} /><Btn kind="ghost" label={l('ফিল্টার মুছুন', 'Clear filters')} onPress={() => { setFrom(''); setTo(''); setQuery(''); setKind('all'); setDirection('all'); }} testID="clear-account-filters" /></View>
         <Chips value={direction} onPick={setDirection} items={[{ id: 'all', name: l('সব লেনদেন', 'All directions') }, { id: 'in', name: l('জমা', 'Money in') }, { id: 'out', name: l('উত্তোলন', 'Money out') }]} />
         <Chips value={kind} onPick={setKind} items={[{ id: 'all', name: l('সব ধরন', 'All types') }, ...Object.entries(names).map(([id, name]) => ({ id, name }))]} />

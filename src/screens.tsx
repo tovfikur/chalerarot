@@ -11,6 +11,7 @@ import { unitDetail, fmtTime, buildInvoiceText, buildInvoiceHTML, InvData, UnitN
 import { tp, Key } from './i18n';
 import { toEnDigits, toBnDigits, parseNum } from './bn';
 import { printReport, printedAtStamp, type ReportDoc, type ReportRow } from './report';
+import { downloadCSV } from './stockReport';
 import { TradeDashboardForm } from './screens/TradeDashboardForm';
 import { StockDashboard } from './screens/StockDashboard';
 import { ExpenseDashboard } from './screens/ExpenseDashboard';
@@ -631,7 +632,7 @@ export function Trade({ mode }: { mode: 'sale' | 'purchase' }) {
  * here without any extra fetch and without a reload. Desktop gets the shared
  * Odoo-style table; mobile keeps the card pattern.
  */
-type TxnRow = { id: string; no: string; date: string; partyId?: string; partyName: string; total: number; paid: number; due: number; status: SettlementStatus };
+type TxnRow = { id: string; no: string; date: string; partyId?: string; partyName: string; partyCode?: string; productNames: string[]; total: number; paid: number; due: number; status: SettlementStatus };
 // Canonical status label: paid (due 0) / partial (some paid, due remains) / due.
 const statusLabel = (t: (k: Key) => string, r: { due: number; status?: SettlementStatus }) => {
   const st: SettlementStatus = r.status ?? (r.due > 0 ? 'due' : 'paid');
@@ -640,13 +641,19 @@ const statusLabel = (t: (k: Key) => string, r: { due: number; status?: Settlemen
 function TxnHistory({ kind, onNew, focus, onFocusDone }: {
   kind: 'sale' | 'purchase'; onNew: () => void; focus?: string | null; onFocusDone?: () => void;
 }) {
-  const { t, sales, purchases, customers, vendors } = useApp();
+  const { t, sales, purchases, customers, vendors, business, lang } = useApp();
   const m = useMoney(); const fd = useDateStr();
   const { isDesktop } = useBreakpoint();
   const isSale = kind === 'sale';
   // List state kept here so it survives opening a document.
   const [q, setQ] = useState('');
   const [period, setPeriod] = useState<'today' | 'all'>('all');
+  const [dateFrom, setDateFrom] = useState('');
+  const [dateTo, setDateTo] = useState('');
+  const [productQuery, setProductQuery] = useState('');
+  const [memoQuery, setMemoQuery] = useState('');
+  const [partyNameQuery, setPartyNameQuery] = useState('');
+  const [partyCodeQuery, setPartyCodeQuery] = useState('');
   const [status, setStatus] = useState<'all' | 'paid' | 'due'>('all');
   const [sort, setSort] = useState<TableSort | null>(null);
   const [inv, setInv] = useState<string | null>(focus ?? null);
@@ -673,21 +680,46 @@ function TxnHistory({ kind, onNew, focus, onFocusDone }: {
   const nameOf = (id?: string) => (isSale
     ? (customers.find(c => c.id === id)?.name ?? t('cashSale'))
     : (vendors.find(v => v.id === id)?.name ?? '-'));
+  const codeOf = (id?: string) => (isSale
+    ? customers.find(c => c.id === id)?.code
+    : vendors.find(v => v.id === id)?.code) ?? '';
   const rowsAll: TxnRow[] = useMemo(() => (isSale
-    ? sales.map(s => ({ id: s.id, no: s.invoiceNo ?? s.id, date: s.date, partyId: s.customerId, partyName: nameOf(s.customerId), total: s.total, paid: s.paid, due: s.due, status: s.status }))
-    : purchases.map(p => ({ id: p.id, no: p.invoiceNo ?? p.id, date: p.date, partyId: p.vendorId, partyName: nameOf(p.vendorId), total: p.total, paid: p.paid, due: p.due, status: p.status }))),
+    ? sales.map(s => ({ id: s.id, no: s.invoiceNo ?? s.id, date: s.date, partyId: s.customerId, partyName: nameOf(s.customerId), partyCode: codeOf(s.customerId), productNames: (s.items ?? []).flatMap(it => [it.productName, it.productCode ?? '']), total: s.total, paid: s.paid, due: s.due, status: s.status }))
+    : purchases.map(p => ({ id: p.id, no: p.invoiceNo ?? p.id, date: p.date, partyId: p.vendorId, partyName: nameOf(p.vendorId), partyCode: codeOf(p.vendorId), productNames: (p.items ?? []).flatMap(it => [it.productName, it.productCode ?? '']), total: p.total, paid: p.paid, due: p.due, status: p.status }))),
   // Newest first by default: a transaction just completed is the first row.
   [sales, purchases, customers, vendors, isSale, t]);
 
   const todayDate = today();
   const needle = q.trim().toLowerCase();
+  const validDate = (value: string) => {
+    const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(value);
+    if (!match) return false;
+    const year = Number(match[1]), month = Number(match[2]), day = Number(match[3]);
+    const date = new Date(Date.UTC(year, month - 1, day));
+    return date.getUTCFullYear() === year && date.getUTCMonth() === month - 1 && date.getUTCDate() === day;
+  };
+  const fromFilter = validDate(dateFrom) ? dateFrom : '';
+  const toFilter = validDate(dateTo) ? dateTo : '';
+  const rangeError = (dateFrom && !fromFilter) || (dateTo && !toFilter) || (fromFilter && toFilter && fromFilter > toFilter);
   const base = useMemo(() => rowsAll.filter(r => {
     if (period === 'today' && r.date !== todayDate) return false;
+    if (fromFilter && r.date < fromFilter) return false;
+    if (toFilter && r.date > toFilter) return false;
     if (status === 'paid' && r.status !== 'paid') return false;
     if (status === 'due' && r.status === 'paid') return false;
-    return true;
-  }), [rowsAll, period, status, todayDate]);
-  const shown = base.filter(r => !needle || r.no.toLowerCase().includes(needle) || r.partyName.toLowerCase().includes(needle));
+    return !rangeError;
+  }), [rowsAll, period, status, todayDate, fromFilter, toFilter, rangeError]);
+  const productNeedle = productQuery.trim().toLowerCase();
+  const memoNeedle = memoQuery.trim().toLowerCase();
+  const partyNameNeedle = partyNameQuery.trim().toLowerCase();
+  const partyCodeNeedle = partyCodeQuery.trim().toLowerCase();
+  const shown = base.filter(r =>
+    (!needle || r.no.toLowerCase().includes(needle) || r.partyName.toLowerCase().includes(needle) || r.partyCode?.toLowerCase().includes(needle) || r.productNames.some(name => name.toLowerCase().includes(needle)))
+    && (!memoNeedle || r.no.toLowerCase().includes(memoNeedle))
+    && (!partyNameNeedle || r.partyName.toLowerCase().includes(partyNameNeedle))
+    && (!partyCodeNeedle || (r.partyCode ?? '').toLowerCase().includes(partyCodeNeedle))
+    && (!productNeedle || r.productNames.some(name => name.toLowerCase().includes(productNeedle)))
+  );
   const rows = useMemo(() => [...shown].sort((a, b) => (a.date < b.date ? 1 : a.date > b.date ? -1 : 0)), [shown]);
 
   const money = (v: number) => <Text style={{ fontSize: 14, fontWeight: '600', color: color.text }}>{m(v)}</Text>;
@@ -716,19 +748,79 @@ function TxnHistory({ kind, onNew, focus, onFocusDone }: {
     </TouchableOpacity>
   );
   const sums = rows.reduce((s, r) => ({ total: s.total + r.total, paid: s.paid + r.paid, due: s.due + r.due }), { total: 0, paid: 0, due: 0 });
+  const dateRangeLabel = `${fromFilter || 'Beginning'} – ${toFilter || 'Today'}`;
+  const exportExcel = () => {
+    const cell = (value: unknown) => `"${String(value ?? '').replace(/"/g, '""')}"`;
+    const csv = [
+      ['Date', 'Memo / Invoice', isSale ? 'Customer' : 'Supplier', isSale ? 'Customer code' : 'Supplier code', 'Products', 'Total', 'Paid', 'Due', 'Status'].map(cell).join(','),
+      ...rows.map(r => [r.date, r.no, r.partyName, r.partyCode, [...new Set(r.productNames)].join('; '), r.total, r.paid, r.due, statusLabel(t, r)].map(cell).join(',')),
+      ['', '', '', '', 'Filtered totals', sums.total, sums.paid, sums.due, ''].map(cell).join(','),
+    ].join('\r\n');
+    const filename = `${isSale ? 'sales' : 'purchases'}_${fromFilter || 'all'}_${toFilter || todayDate}.csv`;
+    if (!downloadCSV(filename, '\uFEFF' + csv)) Alert.alert(isSale ? 'Sales export' : 'Purchase export', 'Could not create the Excel compatible CSV file.');
+  };
+  const exportPdf = () => {
+    const lines: ReportRow[] = rows.map(r => ({
+      label: r.no,
+      sub: [r.date, r.partyName, r.partyCode ? `Code ${r.partyCode}` : '', [...new Set(r.productNames)].join(', ')].filter(Boolean).join(' · '),
+      right: `${m(r.total)} · Paid ${m(r.paid)} · Due ${m(r.due)} · ${statusLabel(t, r)}`,
+      neg: r.due > 0,
+    }));
+    const doc: ReportDoc = {
+      shop: business.name,
+      title: isSale ? 'Sales report' : 'Purchase report',
+      period: dateRangeLabel,
+      meta: [
+        { label: 'Product', value: productQuery || 'All' },
+        { label: 'Memo / Invoice', value: memoQuery || 'All' },
+        { label: isSale ? 'Customer' : 'Supplier', value: partyNameQuery || 'All' },
+        { label: isSale ? 'Customer code' : 'Supplier code', value: partyCodeQuery || 'All' },
+      ],
+      sections: [{ title: 'Filtered transactions', rows: lines }],
+      total: { label: 'Total / Paid / Due', value: `${m(sums.total)} / ${m(sums.paid)} / ${m(sums.due)}` },
+      printedAt: printedAtStamp(lang),
+      printLabel: lang === 'bn' ? 'প্রিন্ট / PDF হিসেবে সংরক্ষণ' : 'Print / Save as PDF',
+    };
+    if (!printReport(doc)) Alert.alert(isSale ? 'Sales report' : 'Purchase report', 'PDF export is available in the web app.');
+  };
+  const filterInput = (label: string, value: string, onChangeText: (value: string) => void, placeholder: string, width: number) => (
+    <View style={{ flex: 1, minWidth: width }}>
+      <Text style={{ color: '#475569', fontSize: 12, fontWeight: '700', marginBottom: 5 }}>{label}</Text>
+      <TextInput value={value} onChangeText={onChangeText} placeholder={placeholder} accessibilityLabel={label} style={{ minHeight: 42, borderWidth: 1, borderColor: '#CBD5E1', borderRadius: 8, backgroundColor: '#FFFFFF', color: '#0F172A', paddingHorizontal: 10, paddingVertical: 8 }} />
+    </View>
+  );
 
   if (editingId) return <TradeDashboardForm mode={kind} editId={editingId} onDone={() => setEditingId(null)} onOpenHistory={() => setEditingId(null)} />;
   return (
     <Screen scrollRef={scrollRef} onScrollY={onScrollY}>
       <ListPageHeader title={isSale ? t('saleHistory') : t('purchaseHistory')} addLabel={isSale ? t('newSale') : t('newPurchase')} onAdd={onNew} />
+      <Card>
+        <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 8, marginBottom: 10 }}>
+          <Title>{lang === 'bn' ? 'বিস্তারিত ফিল্টার' : 'Detailed filters'}</Title>
+          <View style={{ flexDirection: 'row', gap: 8, flexWrap: 'wrap' }}>
+            <Btn kind="ghost" icon={icons.excel} label={lang === 'bn' ? 'এক্সেল / CSV' : 'Excel / CSV'} onPress={exportExcel} />
+            <Btn kind="ghost" icon={icons.print} label="PDF" onPress={exportPdf} />
+            <Btn kind="ghost" label={lang === 'bn' ? 'ফিল্টার মুছুন' : 'Clear filters'} onPress={() => { setDateFrom(''); setDateTo(''); setProductQuery(''); setMemoQuery(''); setPartyNameQuery(''); setPartyCodeQuery(''); setQ(''); setPeriod('all'); setStatus('all'); }} />
+          </View>
+        </View>
+        <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 10 }}>
+          <View style={{ flex: 1, minWidth: 150 }}><DateField label={lang === 'bn' ? 'শুরুর তারিখ' : 'Date from'} value={dateFrom} onChange={setDateFrom} clearable /></View>
+          <View style={{ flex: 1, minWidth: 150 }}><DateField label={lang === 'bn' ? 'শেষ তারিখ' : 'Date to'} value={dateTo} onChange={setDateTo} clearable minDate={dateFrom || undefined} /></View>
+          {filterInput(lang === 'bn' ? 'পণ্যের নাম বা কোড' : 'Product name or code', productQuery, setProductQuery, 'Search products…', 210)}
+          {filterInput(lang === 'bn' ? 'মেমো / ইনভয়েস নম্বর' : 'Memo / invoice number', memoQuery, setMemoQuery, 'Search memo…', 190)}
+          {filterInput(isSale ? (lang === 'bn' ? 'গ্রাহকের নাম' : 'Customer name') : (lang === 'bn' ? 'সরবরাহকারীর নাম' : 'Supplier name'), partyNameQuery, setPartyNameQuery, isSale ? 'Search customer…' : 'Search supplier…', 190)}
+          {filterInput(isSale ? (lang === 'bn' ? 'গ্রাহক কোড' : 'Customer code') : (lang === 'bn' ? 'সরবরাহকারী কোড' : 'Supplier code'), partyCodeQuery, setPartyCodeQuery, 'Search code…', 160)}
+        </View>
+        {rangeError ? <Text style={{ color: color.red, fontSize: 12, fontWeight: '600', marginTop: 8 }}>Enter valid YYYY-MM-DD dates and make sure the start date is not after the end date.</Text> : null}
+      </Card>
       <SearchDropdown
-        items={base as (TxnRow & { name: string })[]}
+        items={shown as (TxnRow & { name: string })[]}
         query={q}
         setQuery={setQ}
         placeholder={isSale ? t('searchSales') : t('searchPurchases')}
         match={(r, _n) => {
           const n = q.trim().toLowerCase();
-          return !n || r.no.toLowerCase().includes(n) || r.partyName.toLowerCase().includes(n);
+          return !n || r.no.toLowerCase().includes(n) || r.partyName.toLowerCase().includes(n) || (r.partyCode ?? '').toLowerCase().includes(n) || r.productNames.some(product => product.toLowerCase().includes(n));
         }}
         titleOf={r => r.no}
         subOf={r => `${fd(r.date)} • ${r.partyName}`}
@@ -922,10 +1014,10 @@ export function Products() {
   const save = () => {
     if (!v.name.trim()) return Alert.alert(t('invalid'));
     if (!(num(v.sb) > 0) || !(num(v.mb) > 0) || !(num(v.lb) > 0)) return Alert.alert(t('invalidBag'));
-    // Sale Price: numeric and > 0, at the app's 2-decimal money precision.
-    // Blank/garbage used to be saved as 0, which silently sold the product free.
-    const price = parseNum(v.price);
-    if (!Number.isFinite(price) || !(price > 0)) return Alert.alert(t('invalidSalePrice'));
+    // New products may be created without a default selling rate. Existing
+    // products can still set or clear their sale price here.
+    const price = v.price.trim() ? parseNum(v.price) : 0;
+    if (v.price.trim() && (!Number.isFinite(price) || !(price > 0))) return Alert.alert(t('invalidSalePrice'));
     const o = num(v.opening), id = f!.id || 'p' + Date.now();
     (async () => {
       try {
@@ -953,7 +1045,7 @@ export function Products() {
     <FormGrid>
       <Field label={t('code')} value={v.code} onChange={x => setV({ ...v, code: x })} /><Field label={t('productName')} value={v.name} onChange={x => setV({ ...v, name: x })} />
       <Field label={t('descNote')} value={v.description} onChange={x => setV({ ...v, description: x })} /><Field label={t('costPerKg')} value={v.cost} onChange={x => setV({ ...v, cost: x })} num />
-      <Field label={t('pricePerKg')} value={v.price} onChange={x => setV({ ...v, price: x })} num /><Field label={`${t('openingStock')} (${kg})`} value={v.opening} onChange={x => setV({ ...v, opening: x })} num />
+      {f.id ? <Field label={t('pricePerKg')} value={v.price} onChange={x => setV({ ...v, price: x })} num /> : null}<Field label={`${t('openingStock')} (${kg})`} value={v.opening} onChange={x => setV({ ...v, opening: x })} num />
     </FormGrid>
     <Muted>{t('bagWeight')}</Muted>
     <FormGrid>
@@ -1750,10 +1842,11 @@ const dhakaToday = (): string => {
 export function MonthCal({ selected, onPick, minDate, maxDate }: {
   selected: string; onPick: (date: string) => void; minDate?: string; maxDate?: string;
 }) {
-  const { t } = useApp(); const n = useNum();
+  const { t, lang } = useApp(); const n = useNum();
   const parts = selected.split('-');
   const [vy, setVy] = useState(+(parts[0] || new Date().getFullYear()));
   const [vm, setVm] = useState(Math.min(12, Math.max(1, +(parts[1] || 1))));
+  const [headerView, setHeaderView] = useState<'days' | 'months' | 'years'>('days');
   const pad = (v: number) => String(v).padStart(2, '0');
   const shift = (d: number) => {
     let y = vy, m = vm + d;
@@ -1765,6 +1858,10 @@ export function MonthCal({ selected, onPick, minDate, maxDate }: {
   const days = new Date(Date.UTC(vy, vm, 0)).getUTCDate();
   const cells: (number | null)[] = [...Array(first).fill(null), ...Array.from({ length: days }, (_, i) => i + 1)];
   const todayS = today();
+  const currentYear = Number(todayS.slice(0, 4));
+  const yearOptions = [currentYear, ...Array.from({ length: 100 }, (_, i) => currentYear - i - 1), ...Array.from({ length: 20 }, (_, i) => currentYear + i + 1)];
+  const chooseMonth = (month: number) => { setVm(month); setHeaderView('days'); };
+  const chooseYear = (year: number) => { setVy(year); setHeaderView('days'); };
   // Out-of-range days are shown dimmed and are NOT pressable — the mistake is
   // prevented in the calendar instead of corrected afterwards.
   const blocked = (ds: string) => (minDate ? ds < minDate : false) || (maxDate ? ds > maxDate : false);
@@ -1777,9 +1874,21 @@ export function MonthCal({ selected, onPick, minDate, maxDate }: {
     <View>
       <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginVertical: 4 }}>
         {navBtn('back', () => shift(-1))}
-        <Text style={{ fontSize: 17, fontWeight: '700', color: color.text }}>{t(MON_KEYS[vm - 1])} {n(vy)}</Text>
+        <View style={{ flexDirection: 'row', alignItems: 'center' }}>
+          <TouchableOpacity onPress={() => setHeaderView(headerView === 'months' ? 'days' : 'months')} accessibilityRole="button" accessibilityLabel="Choose month" style={{ minHeight: 44, paddingHorizontal: 5, justifyContent: 'center' }}>
+            <Text style={{ fontSize: 17, fontWeight: '700', color: color.primary }}>{t(MON_KEYS[vm - 1])}</Text>
+          </TouchableOpacity>
+          <TouchableOpacity onPress={() => setHeaderView(headerView === 'years' ? 'days' : 'years')} accessibilityRole="button" accessibilityLabel="Choose year" style={{ minHeight: 44, paddingHorizontal: 5, justifyContent: 'center' }}>
+            <Text style={{ fontSize: 17, fontWeight: '700', color: color.primary }}>{lang === 'bn' ? toBnDigits(String(vy)) : String(vy)}</Text>
+          </TouchableOpacity>
+        </View>
         {navBtn('next', () => shift(1))}
       </View>
+      {headerView === 'months' ? <View style={{ maxHeight: 300 }}><ScrollView contentContainerStyle={{ flexDirection: 'row', flexWrap: 'wrap', paddingVertical: 4 }}>
+        {MON_KEYS.map((key, index) => <TouchableOpacity key={key} onPress={() => chooseMonth(index + 1)} accessibilityRole="button" style={{ width: '33.333%', minHeight: 48, alignItems: 'center', justifyContent: 'center', borderRadius: 10, backgroundColor: vm === index + 1 ? '#DBEAFE' : 'transparent' }}><Text style={{ color: vm === index + 1 ? color.primary : color.text, fontWeight: vm === index + 1 ? '700' : '500' }}>{t(key)}</Text></TouchableOpacity>)}
+      </ScrollView></View> : headerView === 'years' ? <View style={{ maxHeight: 300 }}><ScrollView contentContainerStyle={{ paddingVertical: 4 }}>
+        {yearOptions.map(year => <TouchableOpacity key={year} onPress={() => chooseYear(year)} accessibilityRole="button" style={{ minHeight: 44, alignItems: 'center', justifyContent: 'center', borderRadius: 10, backgroundColor: vy === year ? '#DBEAFE' : 'transparent' }}><Text style={{ color: vy === year ? color.primary : color.text, fontWeight: vy === year ? '700' : '500' }}>{lang === 'bn' ? toBnDigits(String(year)) : String(year)}{year === currentYear ? ` · ${t('today')}` : ''}</Text></TouchableOpacity>)}
+      </ScrollView></View> : <>
       <View style={{ flexDirection: 'row' }}>
         {[0, 1, 2, 3, 4, 5, 6].map(d => (
           <Text key={d} style={{ flex: 1, textAlign: 'center', fontSize: 13, fontWeight: '700', color: color.muted, paddingVertical: 4 }}>{t(DOW_KEYS[d])}</Text>
@@ -1813,6 +1922,7 @@ export function MonthCal({ selected, onPick, minDate, maxDate }: {
           );
         })}
       </View>
+      </>}
     </View>
   );
 }
@@ -1830,7 +1940,7 @@ export function MonthCal({ selected, onPick, minDate, maxDate }: {
  *   forwarded to `onChange` (never saved).
  * - `minDate` / `maxDate` override or narrow the range explicitly.
  */
-function DateField({ label, value, onChange, clearable, allowPast = true, minDate, maxDate }: {
+export function DateField({ label, value, onChange, clearable, allowPast = true, minDate, maxDate }: {
   label: string; value: string; onChange: (v: string) => void; clearable?: boolean;
   allowPast?: boolean; minDate?: string; maxDate?: string;
 }) {
@@ -2127,7 +2237,7 @@ export function JournalEntryModal({ onClose, onSaved, initial }: { onClose: () =
   return <Modal visible transparent animationType="slide" onRequestClose={onClose}><View style={{ flex: 1, backgroundColor: '#0F172A88', justifyContent: 'center', padding: 14 }}><View style={{ maxHeight: '94%', backgroundColor: '#F8FAFC', borderRadius: 18, overflow: 'hidden' }}>
     <View style={{ padding: 16, backgroundColor: '#123D64', flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }}><Text style={{ color: '#fff', fontSize: 19, fontWeight: '800' }}>{label(initial ? 'Edit journal entry' : 'New journal entry', initial ? 'জার্নাল এন্ট্রি সম্পাদনা' : 'নতুন জার্নাল এন্ট্রি')}</Text><TouchableOpacity onPress={onClose}><Text style={{ color: '#fff', fontSize: 24 }}>×</Text></TouchableOpacity></View>
     <ScrollView keyboardShouldPersistTaps="handled" contentContainerStyle={{ padding: 16, gap: 10 }}>
-      <Field label={label('Date (YYYY-MM-DD)', 'তারিখ (YYYY-MM-DD)')} value={date} onChange={setDate} /><Field label={label('Memo', 'বিবরণ')} value={memo} onChange={setMemo} />
+      <DateField label={label('Date', 'তারিখ')} value={date} onChange={setDate} allowPast /><Field label={label('Memo', 'বিবরণ')} value={memo} onChange={setMemo} />
       {lines.map((line, index) => { const selected = accounts.find(a => a.id === line.accountId); const current = Math.max(0, accounts.findIndex(a => a.id === line.accountId)); return <Card key={index}>
         <Text style={{ color: '#123D64', fontWeight: '800', marginBottom: 7 }}>{label('Line', 'লাইন')} {index + 1}</Text>
         <TouchableOpacity onPress={() => setLine(index, { accountId: accounts[(current + 1) % Math.max(accounts.length, 1)]?.id ?? '' })} style={{ padding: 10, borderRadius: 8, backgroundColor: '#EFF6FF', marginBottom: 7 }}><Text style={{ color: '#1D4ED8', fontWeight: '700' }}>{selected ? `${selected.code} · ${selected.name} (${selected.type})` : label('Tap to choose account', 'অ্যাকাউন্ট বাছাই করতে চাপুন')}</Text></TouchableOpacity>
@@ -2242,7 +2352,7 @@ export function AccountFormModal({ id, onClose }: { id?: string; onClose: () => 
           })}
         </View>
         <Field label={`${t('openingBalanceLabel')} *`} value={opening} onChange={setOpening} num />
-        <Field label={`${label('Opening date', 'Opening balance date')} *`} value={openingDate} onChange={setOpeningDate} />
+        <DateField label={`${label('Opening date', 'Opening balance date')} *`} value={openingDate} onChange={setOpeningDate} allowPast />
         {isBank ? (
           <>
             <Field label={t('bankName')} value={bankName} onChange={setBankName} />
@@ -2416,7 +2526,7 @@ function DueRow({ name, sub, amount, neg, icon, onPress }: {
   );
 }
 
-export function DetailShell({ title, onClose, children, footer, bodyScroll = true, maxHeightPct = '90%', overlay }: {
+export function DetailShell({ title, onClose, children, footer, bodyScroll = true, maxHeightPct = '90%', overlay, fullScreen = false }: {
   title: string; onClose: () => void; children: React.ReactNode;
   /** Pinned to the bottom of the sheet; the body scrolls behind it. */
   footer?: React.ReactNode;
@@ -2425,12 +2535,14 @@ export function DetailShell({ title, onClose, children, footer, bodyScroll = tru
   maxHeightPct?: number | `${number}%`;
   /** Dim strength behind the sheet; defaults keep the previous look. */
   overlay?: string;
+  /** Expand the dialog edge-to-edge for dense tabular previews. */
+  fullScreen?: boolean;
 }) {
   const { isDesktop } = useBreakpoint();
   return (
     <Modal visible transparent animationType="fade" onRequestClose={onClose}>
-      <View style={{ flex: 1, backgroundColor: overlay ?? 'rgba(0,0,0,0.45)', alignItems: 'center', justifyContent: 'center', padding: 12 }}>
-        <View style={{ width: '100%', maxWidth: isDesktop ? (footer ? 640 : 560) : 560, maxHeight: maxHeightPct, backgroundColor: color.bg, borderRadius: 16, overflow: 'hidden' }}>
+      <View style={{ flex: 1, backgroundColor: fullScreen ? color.bg : (overlay ?? 'rgba(0,0,0,0.45)'), alignItems: fullScreen ? 'stretch' : 'center', justifyContent: fullScreen ? 'flex-start' : 'center', padding: fullScreen ? 0 : 12 }}>
+        <View style={{ width: '100%', maxWidth: fullScreen ? undefined : (isDesktop ? (footer ? 640 : 560) : 560), height: fullScreen ? '100%' : undefined, maxHeight: fullScreen ? '100%' : maxHeightPct, backgroundColor: color.bg, borderRadius: fullScreen ? 0 : 16, overflow: 'hidden' }}>
           {/* fixed header */}
           <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingLeft: 14, paddingRight: 4, backgroundColor: color.primary }}>
             <Text style={{ color: '#fff', fontSize: 18, fontWeight: '700', flex: 1 }} numberOfLines={1}>{title}</Text>

@@ -214,7 +214,7 @@ export function buildStockReportHTML({
     ? items.map((it, idx) => `
       <tr>
         <td style="text-align: center; color: #64748B;">${toBnDigits(String(idx + 1))}</td>
-        <td style="font-weight: 700; color: #1E293B;">${esc(toBnDigits(it.code || '-'))}</td>
+        <td style="font-weight: 700; color: #1E293B;">${esc(it.code || '-')}</td>
         <td style="font-weight: 600; color: #0F172A;">${esc(it.name)}</td>
         <td style="text-align: center; color: #475569;">${toBnDigits(String(it.product.mediumBagKg || 50))} কেজি</td>
         <td style="text-align: right; font-weight: 700; color: #0F172A;">${toBnDigits(it.bags.toLocaleString('en-IN'))}</td>
@@ -700,7 +700,7 @@ export function buildAuditReportHTML({
     return `
       <tr style="background: ${statusBg};">
         <td style="text-align: center; color: #64748B;">${toBnDigits(String(idx + 1))}</td>
-        <td style="font-weight: 700; color: #1E293B;">${esc(toBnDigits(r.code || '-'))}</td>
+        <td style="font-weight: 700; color: #1E293B;">${esc(r.code || '-')}</td>
         <td style="font-weight: 600; color: #0F172A;">${esc(r.name)}</td>
         <td style="text-align: center; color: #475569;">${toBnDigits(String(r.bagKg))} কেজি</td>
         <td style="text-align: right; color: #334155;">

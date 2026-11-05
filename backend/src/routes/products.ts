@@ -2,6 +2,7 @@ import { Router, Request, Response } from 'express';
 import { db } from '../db';
 import { revalueStock, round2, writeMovement } from '../valuation';
 import { businessToday } from '../units';
+import { lockAndCheckCode } from '../code';
 
 const num = (v: unknown, d = 0) => {
   const n = typeof v === 'number' ? v : parseFloat(String(v ?? ''));
@@ -54,41 +55,51 @@ products.post('/bulk', async (req: Request, res: Response) => {
     const errors: { row: number; name?: string; error: string }[] = [];
 
     await db.$transaction(async tx => {
-      const existing = await tx.product.findMany({
-        where: { deletedAt: null, code: { not: null } },
-        select: { code: true },
-      });
-      const usedCodes = new Set(
-        existing.map(p => p.code?.trim().toLowerCase()).filter(Boolean)
-      );
+      const usedCodes = new Set<string>();
 
       for (let i = 0; i < items.length; i++) {
         const item = items[i];
-        const rowNum = i + 1;
+        const rowNum = Number.isInteger(item.rowNum) && item.rowNum > 0 ? item.rowNum : i + 1;
         const name = String(item.name ?? '').trim();
         if (!name) {
           errors.push({ row: rowNum, error: 'Product name is required' });
           continue;
         }
-        const price = parsePrice(item.price);
+        const rawPrice = item.price;
+        const price = rawPrice === undefined || rawPrice === null || String(rawPrice).trim() === '' || Number(rawPrice) === 0 ? 0 : parsePrice(rawPrice);
         if (price === null) {
-          errors.push({ row: rowNum, name, error: 'Sale price must be a number greater than 0' });
+          errors.push({ row: rowNum, name, error: 'Sale price must be greater than 0 when provided' });
           continue;
         }
         let code = String(item.code ?? '').trim() || null;
         if (code) {
-          const codeLower = code.toLowerCase();
-          if (usedCodes.has(codeLower)) {
-            errors.push({ row: rowNum, name, error: `Product code '${code}' is already in use` });
+          const codeCheck = await lockAndCheckCode(tx, code);
+          const codeKey = codeCheck.normalized.toUpperCase();
+          if (codeCheck.invalid) {
+            errors.push({ row: rowNum, name, error: 'Code must use English letters or numbers; hyphen, underscore, dot and slash are allowed' });
             continue;
           }
-          usedCodes.add(codeLower);
+          if (usedCodes.has(codeKey) || codeCheck.conflict) {
+            const conflictName = codeCheck.conflict === 'customer' ? 'Customer' : codeCheck.conflict === 'supplier' ? 'Supplier' : 'Product';
+            const error = codeCheck.conflict && codeCheck.conflict !== 'product'
+              ? `Code '${code}' is already used by a ${conflictName.toLowerCase()}`
+              : `Product code '${code}' is already in use`;
+            errors.push({ row: rowNum, name, error });
+            continue;
+          }
+          code = codeCheck.normalized;
+          usedCodes.add(codeKey);
         }
         const sb = num(item.smallBagKg, 25);
-        const mb = num(item.mediumBagKg ?? item.bagKg, 50);
+        const rawMb = num(item.mediumBagKg ?? item.bagKg, 50);
+        const mb = rawMb > 0 ? rawMb : 50;
         const lb = num(item.largeBagKg, 50);
-        const o = Math.max(0, num(item.opening ?? item.openingQtyKg));
-        const c = Math.max(0, num(item.cost));
+        const costPerBag = item.costPerBag !== undefined && String(item.costPerBag).trim() !== ''
+          ? Math.max(0, num(item.costPerBag)) : null;
+        const openingBags = item.openingBags !== undefined && String(item.openingBags).trim() !== ''
+          ? Math.max(0, num(item.openingBags)) : null;
+        const o = round2(Math.max(0, openingBags !== null ? openingBags * mb : num(item.opening ?? item.openingQtyKg)));
+        const c = round2(Math.max(0, costPerBag !== null ? costPerBag / (mb > 0 ? mb : 50) : num(item.cost)));
         const openingValue = round2(o * c);
 
         const created = await tx.product.create({
@@ -100,28 +111,28 @@ products.post('/bulk', async (req: Request, res: Response) => {
             cost: c,
             price,
             openingQtyKg: o,
-            qtyKg: o,
+            qtyKg: 0,
             openingUnitCost: c,
             openingValue,
-            stockValue: openingValue,
+            stockValue: 0,
             smallBagKg: sb > 0 ? sb : 25,
             mediumBagKg: mb > 0 ? mb : 50,
             largeBagKg: lb > 0 ? lb : 50,
           },
         });
-        if (o > 0) {
-          await writeMovement(tx, created.id, {
+        const postedStock = o > 0 ? await writeMovement(tx, created.id, {
             type: 'OPENING',
             bucket: 'sellable',
             qtyKg: o,
             unitCost: c,
             date: day,
             refId: created.id,
-          });
-        }
-        createdList.push(productJson(created));
+          }) : null;
+        createdList.push(productJson(postedStock ? {
+          ...created, qtyKg: postedStock.qtyAfter, stockValue: postedStock.valueAfter, cost: postedStock.avgAfter,
+        } : created));
       }
-    });
+    }, { maxWait: 10_000, timeout: 60_000 });
 
     res.status(201).json({
       total: items.length,
@@ -130,7 +141,8 @@ products.post('/bulk', async (req: Request, res: Response) => {
       created: createdList,
     });
   } catch (e) {
-    res.status(500).json({ error: 'Failed to bulk import products' });
+    console.error('Bulk product import failed:', e);
+    res.status(500).json({ error: e instanceof Error ? `Failed to bulk import products: ${e.message}` : 'Failed to bulk import products' });
   }
 });
 
@@ -139,7 +151,8 @@ products.post('/', async (req: Request, res: Response) => {
   try {
     const { code, name, description, uom, cost, opening, smallBagKg, mediumBagKg, largeBagKg } = req.body ?? {};
     if (!String(name ?? '').trim()) return res.status(400).json({ error: 'Product name is required' });
-    const price = parsePrice((req.body ?? {}).price);
+    const rawPrice = (req.body ?? {}).price;
+    const price = rawPrice === undefined || rawPrice === null || String(rawPrice).trim() === '' || Number(rawPrice) === 0 ? 0 : parsePrice(rawPrice);
     if (price === null) return res.status(400).json(priceError);
     const sb = num(smallBagKg, 25), mb = num(mediumBagKg, 40), lb = num(largeBagKg, 50);
     if (!(sb > 0) || !(mb > 0) || !(lb > 0)) return res.status(400).json({ error: 'Bag weights must be greater than 0' });
@@ -149,26 +162,35 @@ products.post('/', async (req: Request, res: Response) => {
     // Opening stock is valued ONCE, here, at the cost entered on this form.
     const openingValue = round2(o * c);
     const p = await db.$transaction(async tx => {
+      const codeValue = String(code ?? '').trim();
+      const codeCheck = codeValue ? await lockAndCheckCode(tx, codeValue) : { normalized: '' };
+      if (codeCheck.invalid) throw Object.assign(new Error('Code must use English letters or numbers; hyphen, underscore, dot and slash are allowed'), { code: 'CODE_INVALID' });
+      if (codeCheck.conflict) throw Object.assign(new Error('Code is already in use'), { code: 'CODE_EXISTS', conflict: codeCheck.conflict });
       const created = await tx.product.create({
         data: {
-          code: String(code ?? '').trim() || null,
+          code: codeCheck.normalized || null,
           name: String(name).trim(), description: String(description ?? '').trim() || null,
           uom: String(uom ?? 'kg').trim() || 'kg', cost: c, price,
-          openingQtyKg: o, qtyKg: o, openingUnitCost: c, openingValue,
-          stockValue: openingValue, smallBagKg: sb, mediumBagKg: mb, largeBagKg: lb,
+          openingQtyKg: o, qtyKg: 0, openingUnitCost: c, openingValue,
+          stockValue: 0, smallBagKg: sb, mediumBagKg: mb, largeBagKg: lb,
         },
       });
-      if (o > 0) {
-        await writeMovement(tx, created.id, {
+      const postedStock = o > 0 ? await writeMovement(tx, created.id, {
           type: 'OPENING', bucket: 'sellable', qtyKg: o, unitCost: c, date: day, refId: created.id,
-        });
-      }
-      return created;
+        }) : null;
+      return postedStock ? {
+        ...created, qtyKg: postedStock.qtyAfter, stockValue: postedStock.valueAfter, cost: postedStock.avgAfter,
+      } : created;
     });
     // The row is returned so the client can patch this one product in place
     // instead of refetching the whole product list.
     res.status(201).json({ id: p.id, product: productJson(p) });
   } catch (e) {
+    if ((e as { code?: string })?.code === 'CODE_INVALID') return res.status(400).json({ error: (e as Error).message, code: 'CODE_INVALID' });
+    if ((e as { code?: string })?.code === 'CODE_EXISTS') {
+      const type = (e as { conflict?: string }).conflict;
+      return res.status(409).json({ error: `Code is already in use${type ? ` by a ${type}` : ''}`, code: 'CODE_EXISTS' });
+    }
     if ((e as { code?: string })?.code === 'P2002') return res.status(409).json({ error: 'Product code is already in use', code: 'PRODUCT_CODE_EXISTS' });
     res.status(500).json({ error: 'Failed to create product' });
   }
@@ -183,15 +205,20 @@ products.put('/:id', async (req: Request, res: Response) => {
     if (name !== undefined && !String(name).trim()) return res.status(400).json({ error: 'Product name is required' });
     // Sale Price only: validated here, then written on its own. `cost` keeps its
     // own revaluation path further down and is never derived from the price.
-    const nextPrice = price === undefined ? undefined : parsePrice(price);
+    const nextPrice = price === undefined ? undefined
+      : price === null || String(price).trim() === '' || Number(price) === 0 ? 0 : parsePrice(price);
     if (price !== undefined && nextPrice === null) return res.status(400).json(priceError);
     const sb = num(smallBagKg, cur.smallBagKg), mb = num(mediumBagKg, cur.mediumBagKg), lb = num(largeBagKg, cur.largeBagKg);
     if (!(sb > 0) || !(mb > 0) || !(lb > 0)) return res.status(400).json({ error: 'Bag weights must be greater than 0' });
     const o = opening === undefined ? cur.openingQtyKg : Math.max(0, num(opening));
     const day = businessToday();
     const updated = await db.$transaction(async tx => {
+      const nextCode = code === undefined ? cur.code : String(code ?? '').trim();
+      const codeCheck = nextCode ? await lockAndCheckCode(tx, nextCode, { entity: 'product', id: cur.id }) : { normalized: '' };
+      if (codeCheck.invalid) throw Object.assign(new Error('Code must use English letters or numbers; hyphen, underscore, dot and slash are allowed'), { code: 'CODE_INVALID' });
+      if (codeCheck.conflict) throw Object.assign(new Error('Code is already in use'), { code: 'CODE_EXISTS', conflict: codeCheck.conflict });
       const data: Record<string, unknown> = {
-        code: code === undefined ? cur.code : (String(code ?? '').trim() || null),
+        code: code === undefined ? cur.code : (codeCheck.normalized || null),
         name: name === undefined ? cur.name : String(name).trim(),
         description: description === undefined ? cur.description : (String(description ?? '').trim() || null),
         uom: uom === undefined ? cur.uom : (String(uom ?? '').trim() || 'kg'),
@@ -219,6 +246,11 @@ products.put('/:id', async (req: Request, res: Response) => {
     });
     res.json({ id: updated.id, product: productJson(updated) });
   } catch (e) {
+    if ((e as { code?: string })?.code === 'CODE_INVALID') return res.status(400).json({ error: (e as Error).message, code: 'CODE_INVALID' });
+    if ((e as { code?: string })?.code === 'CODE_EXISTS') {
+      const type = (e as { conflict?: string }).conflict;
+      return res.status(409).json({ error: `Code is already in use${type ? ` by a ${type}` : ''}`, code: 'CODE_EXISTS' });
+    }
     if ((e as { code?: string })?.code === 'P2002') return res.status(409).json({ error: 'Product code is already in use', code: 'PRODUCT_CODE_EXISTS' });
     res.status(500).json({ error: 'Failed to update product' });
   }

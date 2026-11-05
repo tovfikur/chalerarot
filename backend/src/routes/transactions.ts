@@ -869,7 +869,7 @@ tx.get('/stock-movements', async (req: Request, res: Response) => {
 
 // GET /api/bootstrap — everything the app needs in one round trip
 tx.get('/bootstrap', async (_req: Request, res: Response) => {
-  const [products, customers, vendors, sales, purchases, customerPayments, vendorPayments, movements, expenses, rets, balances, accountList, ledger, transfers, todayFinance, lifetime, stockAdjustments] = await Promise.all([
+  const [products, customers, vendors, sales, purchases, customerPayments, vendorPayments, movements, expenses, rets, balances, accountList, ledger, transfers, todayFinance, lifetime, stockAdjustments, saleLines, purchaseLines] = await Promise.all([
     db.product.findMany({ where: { deletedAt: null }, orderBy: { name: 'asc' } }),
     db.customer.findMany({ where: { deletedAt: null }, orderBy: { name: 'asc' } }),
     db.vendor.findMany({ where: { deletedAt: null }, orderBy: { name: 'asc' } }),
@@ -887,7 +887,21 @@ tx.get('/bootstrap', async (_req: Request, res: Response) => {
     periodFinance('day'),
     lifetimeFinance(),
     db.stockMovement.findMany({ where: { type: { in: ['ADJUSTMENT', 'REVALUE'] }, bucket: 'sellable' }, include: { product: { select: { name: true } } }, orderBy: [{ date: 'desc' }, { createdAt: 'desc' }] }),
+    db.saleItem.findMany({ select: { saleId: true, productId: true, product: { select: { name: true, code: true } } } }),
+    db.purchaseItem.findMany({ select: { purchaseId: true, productId: true, product: { select: { name: true, code: true } } } }),
   ]);
+  const saleLinesById = new Map<string, { productId: string; productName: string; productCode?: string }[]>();
+  for (const line of saleLines) {
+    const list = saleLinesById.get(line.saleId) ?? [];
+    list.push({ productId: line.productId, productName: line.product.name, productCode: line.product.code ?? undefined });
+    saleLinesById.set(line.saleId, list);
+  }
+  const purchaseLinesById = new Map<string, { productId: string; productName: string; productCode?: string }[]>();
+  for (const line of purchaseLines) {
+    const list = purchaseLinesById.get(line.purchaseId) ?? [];
+    list.push({ productId: line.productId, productName: line.product.name, productCode: line.product.code ?? undefined });
+    purchaseLinesById.set(line.purchaseId, list);
+  }
   const retNo = new Map(rets.map(r => [r.id, r.returnNo ?? '']));
   const expMethod = new Map(ledger.filter(m => m.sourceType === 'expense').map(m => [m.sourceId, m]));
   // Payment method for money-in rows: standalone collections and sale-time
@@ -930,11 +944,11 @@ tx.get('/bootstrap', async (_req: Request, res: Response) => {
     vendors: vendors.map(v => ({ id: v.id, code: v.code ?? undefined, name: v.name, mobile: v.mobile, address: v.address ?? undefined, opening: v.openingPayable, next: v.nextDate ?? undefined })),
     sales: sales.map(s => {
       const st = saleSet.get(s.id);
-      return { id: s.id, customerId: s.customerId ?? undefined, date: s.date, total: s.total, paid: st?.paid ?? s.paid, due: st?.due ?? s.due, status: st?.status ?? 'due', profit: s.profit, cogs: cogsBySale.get(s.id) ?? 0, invoiceNo: s.invoiceNo ?? undefined, createdAt: s.createdAt };
+      return { id: s.id, customerId: s.customerId ?? undefined, date: s.date, total: s.total, paid: st?.paid ?? s.paid, due: st?.due ?? s.due, status: st?.status ?? 'due', profit: s.profit, cogs: cogsBySale.get(s.id) ?? 0, invoiceNo: s.invoiceNo ?? undefined, createdAt: s.createdAt, items: saleLinesById.get(s.id) ?? [] };
     }),
     purchases: purchases.map(p => {
       const st = purSet.get(p.id);
-      return { id: p.id, vendorId: p.vendorId, date: p.date, total: p.total, paid: st?.paid ?? p.paid, due: st?.due ?? p.due, status: st?.status ?? 'due', invoiceNo: p.invoiceNo ?? undefined };
+      return { id: p.id, vendorId: p.vendorId, date: p.date, total: p.total, paid: st?.paid ?? p.paid, due: st?.due ?? p.due, status: st?.status ?? 'due', invoiceNo: p.invoiceNo ?? undefined, items: purchaseLinesById.get(p.id) ?? [] };
     }),
     customerPayments: customerPayments.map(p => ({ id: p.id, customerId: p.customerId ?? 'cash', amount: p.amount, date: p.date, note: p.note ?? undefined, returnId: p.returnId ?? undefined, returnNo: p.returnId ? retNo.get(p.returnId) : undefined, createdAt: p.createdAt, saleId: p.saleId ?? undefined, method: p.returnId ? undefined : (inMethod.get(`p:${p.id}`) ?? (p.saleId ? inMethod.get(`s:${p.saleId}`) : undefined)), accountId: p.returnId ? undefined : inAccount.get(p.id)?.accountId, accountName: p.returnId ? undefined : inAccount.get(p.id)?.accountName })),
     vendorPayments: vendorPayments.map(p => ({ id: p.id, vendorId: p.vendorId, amount: p.amount, date: p.date, note: p.note ?? undefined, returnId: p.returnId ?? undefined, returnNo: p.returnId ? retNo.get(p.returnId) : undefined, createdAt: p.createdAt, purchaseId: p.purchaseId ?? undefined, accountId: p.returnId ? undefined : outAccount.get(p.id)?.accountId, accountName: p.returnId ? undefined : outAccount.get(p.id)?.accountName })),

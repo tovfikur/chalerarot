@@ -189,8 +189,8 @@ export const api = {
     products: import('./store').Product[];
     customers: import('./store').Party[];
     vendors: import('./store').Party[];
-    sales: { id: string; customerId?: string; date: string; total: number; paid: number; due: number; status: SettlementStatus; profit: number; cogs: number; invoiceNo?: string; createdAt?: string }[];
-    purchases: { id: string; vendorId: string; date: string; total: number; paid: number; due: number; status: SettlementStatus; invoiceNo?: string }[];
+    sales: { id: string; customerId?: string; date: string; total: number; paid: number; due: number; status: SettlementStatus; profit: number; cogs: number; invoiceNo?: string; createdAt?: string; items?: { productId: string; productName: string; productCode?: string }[] }[];
+    purchases: { id: string; vendorId: string; date: string; total: number; paid: number; due: number; status: SettlementStatus; invoiceNo?: string; items?: { productId: string; productName: string; productCode?: string }[] }[];
     customerPayments: { id: string; customerId: string; amount: number; date: string; note?: string; method?: string; returnId?: string; returnNo?: string; createdAt?: string; saleId?: string; accountId?: string; accountName?: string }[];
     vendorPayments: { id: string; vendorId: string; amount: number; date: string; note?: string; returnId?: string; returnNo?: string; createdAt?: string; purchaseId?: string; accountId?: string; accountName?: string }[];
     movements: { id: string; productId: string; productName: string; type: string; qty: number; bags: number; unitCost: number; bagUnitPrice: number; amount: number; date: string; transactionNo?: string; note?: string }[];

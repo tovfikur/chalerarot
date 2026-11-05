@@ -49,6 +49,7 @@ import {
   type KpiKind,
   JournalEntryModal,
   ChartOfAccountsModal,
+  DateField,
 } from '../screens';
 
 interface AccountsDashboardProps {
@@ -714,8 +715,8 @@ export function AccountsDashboard({ go, focus, onFocusDone }: AccountsDashboardP
           <Text style={{ color: '#475569', textAlign: 'center', fontSize: 13, marginTop: 5 }}>{reportViewDoc.period}</Text>
           {(reportViewDoc.meta ?? []).map((item, index) => <Text key={`meta-${index}`} style={{ color: '#475569', marginTop: 10 }}>{item.label}: {item.value}</Text>)}
           {(reportViewDoc.title === 'Journal entries' || reportViewDoc.title === 'জার্নাল এন্ট্রি') && <View style={{ flexDirection: 'row', alignItems: 'flex-end', flexWrap: 'wrap', gap: 10, marginTop: 18, padding: 14, borderRadius: 12, backgroundColor: '#F8FAFC', borderWidth: 1, borderColor: '#E2E8F0' }}>
-            <View style={{ flex: 1, minWidth: 145 }}><Text style={{ color: '#475569', fontSize: 12, fontWeight: '700', marginBottom: 5 }}>{lang === 'bn' ? 'শুরুর তারিখ' : 'From date'}</Text><TextInput value={journalFrom} onChangeText={setJournalFrom} placeholder="YYYY-MM-DD" keyboardType="numbers-and-punctuation" style={{ color: '#0F172A', backgroundColor: '#FFFFFF', borderWidth: 1, borderColor: '#CBD5E1', borderRadius: 8, paddingHorizontal: 10, paddingVertical: 9 }} /></View>
-            <View style={{ flex: 1, minWidth: 145 }}><Text style={{ color: '#475569', fontSize: 12, fontWeight: '700', marginBottom: 5 }}>{lang === 'bn' ? 'শেষ তারিখ' : 'To date'}</Text><TextInput value={journalTo} onChangeText={setJournalTo} placeholder="YYYY-MM-DD" keyboardType="numbers-and-punctuation" style={{ color: '#0F172A', backgroundColor: '#FFFFFF', borderWidth: 1, borderColor: '#CBD5E1', borderRadius: 8, paddingHorizontal: 10, paddingVertical: 9 }} /></View>
+            <View style={{ flex: 1, minWidth: 145 }}><DateField label={lang === 'bn' ? 'শুরুর তারিখ' : 'From date'} value={journalFrom} onChange={setJournalFrom} clearable /></View>
+            <View style={{ flex: 1, minWidth: 145 }}><DateField label={lang === 'bn' ? 'শেষ তারিখ' : 'To date'} value={journalTo} onChange={setJournalTo} clearable minDate={journalFrom || undefined} /></View>
             <TouchableOpacity accessibilityRole="button" onPress={() => { void applyJournalDateFilter(); }} style={{ backgroundColor: '#1D4ED8', borderRadius: 8, paddingHorizontal: 17, paddingVertical: 12 }}><Text style={{ color: '#FFFFFF', fontWeight: '700' }}>{lang === 'bn' ? 'ফিল্টার করুন' : 'Apply filter'}</Text></TouchableOpacity>
           </View>}
           {(reportViewDoc.title === 'Journal entries' || reportViewDoc.title === 'জার্নাল এন্ট্রি') && reportViewDoc.sections.length === 0 && <Text style={{ color: '#64748B', textAlign: 'center', paddingVertical: 24 }}>{lang === 'bn' ? 'এই তারিখের মধ্যে কোনো জার্নাল এন্ট্রি নেই।' : 'No journal entries in this date range.'}</Text>}
@@ -725,8 +726,8 @@ export function AccountsDashboard({ go, focus, onFocusDone }: AccountsDashboardP
           </View>}
           {journalData?.entries.filter(e => e.editable && e.entryId).map(e => <TouchableOpacity key={e.entryId} onPress={() => setJournalComposer({ initial: { id: e.entryId!, entryNo: e.reference, date: e.date, memo: e.lines[0]?.description.split(' · ')[0] ?? '', sourceType: e.sourceType ?? 'manual', sourceId: e.sourceId, sourceRef: e.sourceRef, active: true, lines: e.lines.map(l => ({ accountId: l.accountId ?? '', description: l.description, debit: l.debit, credit: l.credit })) } })} style={{ alignSelf: 'flex-end', marginTop: 7, backgroundColor: '#EFF6FF', paddingHorizontal: 10, paddingVertical: 7, borderRadius: 8 }}><Text style={{ color: '#1D4ED8', fontWeight: '700' }}>{lang === 'bn' ? `সম্পাদনা ${e.reference}` : `Edit ${e.reference}`}</Text></TouchableOpacity>)}
           {reportViewDoc.title === 'Profit & Loss Statement' && <View style={{ flexDirection: 'row', alignItems: 'flex-end', flexWrap: 'wrap', gap: 10, marginTop: 18, padding: 14, borderRadius: 12, backgroundColor: '#F8FAFC', borderWidth: 1, borderColor: '#E2E8F0' }}>
-            <View style={{ flex: 1, minWidth: 145 }}><Text style={{ color: '#475569', fontSize: 12, fontWeight: '700', marginBottom: 5 }}>{lang === 'bn' ? 'শুরুর তারিখ' : 'From date'}</Text><TextInput value={profitFrom} onChangeText={setProfitFrom} placeholder="YYYY-MM-DD" keyboardType="numbers-and-punctuation" style={{ color: '#0F172A', backgroundColor: '#FFFFFF', borderWidth: 1, borderColor: '#CBD5E1', borderRadius: 8, paddingHorizontal: 10, paddingVertical: 9 }} /></View>
-            <View style={{ flex: 1, minWidth: 145 }}><Text style={{ color: '#475569', fontSize: 12, fontWeight: '700', marginBottom: 5 }}>{lang === 'bn' ? 'শেষ তারিখ' : 'To date'}</Text><TextInput value={profitTo} onChangeText={setProfitTo} placeholder="YYYY-MM-DD" keyboardType="numbers-and-punctuation" style={{ color: '#0F172A', backgroundColor: '#FFFFFF', borderWidth: 1, borderColor: '#CBD5E1', borderRadius: 8, paddingHorizontal: 10, paddingVertical: 9 }} /></View>
+            <View style={{ flex: 1, minWidth: 145 }}><DateField label={lang === 'bn' ? 'শুরুর তারিখ' : 'From date'} value={profitFrom} onChange={setProfitFrom} clearable /></View>
+            <View style={{ flex: 1, minWidth: 145 }}><DateField label={lang === 'bn' ? 'শেষ তারিখ' : 'To date'} value={profitTo} onChange={setProfitTo} clearable minDate={profitFrom || undefined} /></View>
             <TouchableOpacity accessibilityRole="button" onPress={() => { void applyProfitLossDateFilter(); }} style={{ backgroundColor: '#1D4ED8', borderRadius: 8, paddingHorizontal: 17, paddingVertical: 12 }}><Text style={{ color: '#FFFFFF', fontWeight: '700' }}>{lang === 'bn' ? 'ফিল্টার করুন' : 'Apply filter'}</Text></TouchableOpacity>
           </View>}
           {reportViewDoc.title === 'General ledger' && generalLedgerData ? (

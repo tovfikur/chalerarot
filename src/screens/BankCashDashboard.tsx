@@ -6,7 +6,7 @@ import { Screen, Card, Title, Btn, Field, AccountPicker, Row, Empty, useMoney, u
 import { RGrid } from '../responsive';
 import { AppIcon, icons } from '../icons';
 import { parseNum, toEnDigits } from '../bn';
-import { AccountFormModal, MoneyTransferModal, DetailShell } from '../screens';
+import { AccountFormModal, MoneyTransferModal, DetailShell, DateField } from '../screens';
 import { AccountPage } from './AccountPage';
 import { downloadCSV } from '../stockReport';
 import { MoneyMovementDetail, MoneyMovementItem } from './MoneyMovementDetail';
@@ -130,7 +130,7 @@ function MoneyEntry({ direction, onClose, onSaved }: { direction: 'in' | 'out'; 
       <View pointerEvents={busy || saved ? 'none' : 'auto'}>
         <AccountPicker accountId={accountId} onPick={setAccountId} required />
         <Field label={label('পরিমাণ', 'Amount')} value={amount} onChange={setAmount} num />
-        <Field label={label('তারিখ (YYYY-MM-DD)', 'Date (YYYY-MM-DD)')} value={date} onChange={setDate} />
+        <DateField label={label('তারিখ', 'Date')} value={date} onChange={setDate} allowPast />
         <Field label={label('বিবরণ', 'Note')} value={note} onChange={setNote} />
       </View>
       {error ? <Text accessibilityRole="alert" style={{ color: color.red, marginBottom: 12 }}>{error}</Text> : null}

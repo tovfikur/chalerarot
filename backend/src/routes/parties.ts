@@ -1,6 +1,7 @@
 import { Router, Request, Response } from 'express';
 import { db } from '../db';
 import { customerBalance, vendorBalance } from '../balance';
+import { lockAndCheckCode } from '../code';
 
 const num = (v: unknown, d = 0) => {
   const n = typeof v === 'number' ? v : parseFloat(String(v ?? ''));
@@ -34,15 +35,33 @@ customers.post('/bulk', async (req: Request, res: Response) => {
     const errors: { row: number; name?: string; error: string }[] = [];
 
     await db.$transaction(async tx => {
+      const usedCodes = new Set<string>();
       for (let i = 0; i < items.length; i++) {
         const item = items[i];
-        const rowNum = i + 1;
+        const rowNum = Number.isInteger(item.rowNum) && item.rowNum > 0 ? item.rowNum : i + 1;
         const name = String(item.name ?? '').trim();
         if (!name) {
           errors.push({ row: rowNum, error: 'Customer name is required' });
           continue;
         }
-        const code = item.code ? String(item.code).trim() : null;
+        let code = item.code ? String(item.code).trim() : null;
+        if (code) {
+          const codeCheck = await lockAndCheckCode(tx, code);
+          const key = codeCheck.normalized.toUpperCase();
+          if (codeCheck.invalid) {
+            errors.push({ row: rowNum, name, error: 'Code must use English letters or numbers; hyphen, underscore, dot and slash are allowed' });
+            continue;
+          }
+          if (usedCodes.has(key) || codeCheck.conflict) {
+            const error = codeCheck.conflict === 'product' ? `Code '${code}' is already used by a product`
+              : codeCheck.conflict === 'supplier' ? `Code '${code}' is already used by a supplier`
+                : `Customer code '${code}' is already in use`;
+            errors.push({ row: rowNum, name, error });
+            continue;
+          }
+          code = key;
+          usedCodes.add(key);
+        }
         const mobile = String(item.mobile ?? '').trim();
         const address = item.address ? String(item.address).trim() : null;
         const opening = num(item.opening ?? item.openingDue);
@@ -76,17 +95,20 @@ customers.post('/bulk', async (req: Request, res: Response) => {
 customers.post('/', async (req: Request, res: Response) => {
   const { code, name, mobile, address, opening, next } = req.body ?? {};
   if (!String(name ?? '').trim()) return res.status(400).json({ error: 'Name is required' });
-  const c = await db.customer.create({
-    data: {
-      code: code ? String(code).trim() : null,
-      name: String(name).trim(),
-      mobile: String(mobile ?? ''),
-      address: address ?? null,
-      openingDue: num(opening),
-      nextDate: next ?? null,
-    },
-  });
-  res.status(201).json({ id: c.id });
+  try {
+    const c = await db.$transaction(async tx => {
+      const rawCode = String(code ?? '').trim();
+      const checked = rawCode ? await lockAndCheckCode(tx, rawCode) : { normalized: '' };
+      if (checked.invalid) throw Object.assign(new Error('Code must use English letters or numbers; hyphen, underscore, dot and slash are allowed'), { code: 'CODE_INVALID' });
+      if (checked.conflict) throw Object.assign(new Error('Code is already in use'), { code: 'CODE_EXISTS', conflict: checked.conflict });
+      return tx.customer.create({ data: { code: checked.normalized || null, name: String(name).trim(), mobile: String(mobile ?? ''), address: address ?? null, openingDue: num(opening), nextDate: next ?? null } });
+    });
+    res.status(201).json({ id: c.id });
+  } catch (e) {
+    if ((e as { code?: string }).code === 'CODE_INVALID') return res.status(400).json({ error: (e as Error).message, code: 'CODE_INVALID' });
+    if ((e as { code?: string }).code === 'CODE_EXISTS') return res.status(409).json({ error: `Code is already in use${(e as { conflict?: string }).conflict ? ` by a ${(e as { conflict?: string }).conflict}` : ''}`, code: 'CODE_EXISTS' });
+    res.status(500).json({ error: 'Failed to create customer' });
+  }
 });
 
 customers.put('/:id', async (req: Request, res: Response) => {
@@ -94,18 +116,27 @@ customers.put('/:id', async (req: Request, res: Response) => {
   if (!cur || cur.deletedAt) return res.status(404).json({ error: 'Customer not found' });
   const { code, name, mobile, address, opening, next } = req.body ?? {};
   if (name !== undefined && !String(name).trim()) return res.status(400).json({ error: 'Name is required' });
-  const u = await db.customer.update({
-    where: { id: cur.id },
-    data: {
-      code: code === undefined ? cur.code : (code ? String(code).trim() : null),
-      name: name === undefined ? cur.name : String(name).trim(),
-      mobile: mobile === undefined ? cur.mobile : String(mobile),
-      address: address === undefined ? cur.address : (address ?? null),
-      openingDue: opening === undefined ? cur.openingDue : num(opening),
-      nextDate: next === undefined ? cur.nextDate : (next ?? null),
-    },
-  });
-  res.json({ id: u.id });
+  try {
+    const u = await db.$transaction(async tx => {
+      const rawCode = code === undefined ? cur.code : String(code ?? '').trim();
+      const checked = rawCode ? await lockAndCheckCode(tx, rawCode, { entity: 'customer', id: cur.id }) : { normalized: '' };
+      if (checked.invalid) throw Object.assign(new Error('Code must use English letters or numbers; hyphen, underscore, dot and slash are allowed'), { code: 'CODE_INVALID' });
+      if (checked.conflict) throw Object.assign(new Error('Code is already in use'), { code: 'CODE_EXISTS', conflict: checked.conflict });
+      return tx.customer.update({ where: { id: cur.id }, data: {
+        code: code === undefined ? cur.code : (checked.normalized || null),
+        name: name === undefined ? cur.name : String(name).trim(),
+        mobile: mobile === undefined ? cur.mobile : String(mobile),
+        address: address === undefined ? cur.address : (address ?? null),
+        openingDue: opening === undefined ? cur.openingDue : num(opening),
+        nextDate: next === undefined ? cur.nextDate : (next ?? null),
+      } });
+    });
+    res.json({ id: u.id });
+  } catch (e) {
+    if ((e as { code?: string }).code === 'CODE_INVALID') return res.status(400).json({ error: (e as Error).message, code: 'CODE_INVALID' });
+    if ((e as { code?: string }).code === 'CODE_EXISTS') return res.status(409).json({ error: `Code is already in use${(e as { conflict?: string }).conflict ? ` by a ${(e as { conflict?: string }).conflict}` : ''}`, code: 'CODE_EXISTS' });
+    res.status(500).json({ error: 'Failed to update customer' });
+  }
 });
 
 customers.delete('/:id', async (req: Request, res: Response) => {
@@ -158,15 +189,33 @@ vendors.post('/bulk', async (req: Request, res: Response) => {
     const errors: { row: number; name?: string; error: string }[] = [];
 
     await db.$transaction(async tx => {
+      const usedCodes = new Set<string>();
       for (let i = 0; i < items.length; i++) {
         const item = items[i];
-        const rowNum = i + 1;
+        const rowNum = Number.isInteger(item.rowNum) && item.rowNum > 0 ? item.rowNum : i + 1;
         const name = String(item.name ?? '').trim();
         if (!name) {
           errors.push({ row: rowNum, error: 'Vendor name is required' });
           continue;
         }
-        const code = item.code ? String(item.code).trim() : null;
+        let code = item.code ? String(item.code).trim() : null;
+        if (code) {
+          const codeCheck = await lockAndCheckCode(tx, code);
+          const key = codeCheck.normalized.toUpperCase();
+          if (codeCheck.invalid) {
+            errors.push({ row: rowNum, name, error: 'Code must use English letters or numbers; hyphen, underscore, dot and slash are allowed' });
+            continue;
+          }
+          if (usedCodes.has(key) || codeCheck.conflict) {
+            const error = codeCheck.conflict === 'product' ? `Code '${code}' is already used by a product`
+              : codeCheck.conflict === 'customer' ? `Code '${code}' is already used by a customer`
+                : `Supplier code '${code}' is already in use`;
+            errors.push({ row: rowNum, name, error });
+            continue;
+          }
+          code = key;
+          usedCodes.add(key);
+        }
         const mobile = String(item.mobile ?? '').trim();
         const address = item.address ? String(item.address).trim() : null;
         const opening = num(item.opening ?? item.openingPayable);
@@ -200,17 +249,20 @@ vendors.post('/bulk', async (req: Request, res: Response) => {
 vendors.post('/', async (req: Request, res: Response) => {
   const { code, name, mobile, address, opening, next } = req.body ?? {};
   if (!String(name ?? '').trim()) return res.status(400).json({ error: 'Name is required' });
-  const v = await db.vendor.create({
-    data: {
-      code: code ? String(code).trim() : null,
-      name: String(name).trim(),
-      mobile: String(mobile ?? ''),
-      address: address ?? null,
-      openingPayable: num(opening),
-      nextDate: next ?? null,
-    },
-  });
-  res.status(201).json({ id: v.id });
+  try {
+    const v = await db.$transaction(async tx => {
+      const rawCode = String(code ?? '').trim();
+      const checked = rawCode ? await lockAndCheckCode(tx, rawCode) : { normalized: '' };
+      if (checked.invalid) throw Object.assign(new Error('Code must use English letters or numbers; hyphen, underscore, dot and slash are allowed'), { code: 'CODE_INVALID' });
+      if (checked.conflict) throw Object.assign(new Error('Code is already in use'), { code: 'CODE_EXISTS', conflict: checked.conflict });
+      return tx.vendor.create({ data: { code: checked.normalized || null, name: String(name).trim(), mobile: String(mobile ?? ''), address: address ?? null, openingPayable: num(opening), nextDate: next ?? null } });
+    });
+    res.status(201).json({ id: v.id });
+  } catch (e) {
+    if ((e as { code?: string }).code === 'CODE_INVALID') return res.status(400).json({ error: (e as Error).message, code: 'CODE_INVALID' });
+    if ((e as { code?: string }).code === 'CODE_EXISTS') return res.status(409).json({ error: `Code is already in use${(e as { conflict?: string }).conflict ? ` by a ${(e as { conflict?: string }).conflict}` : ''}`, code: 'CODE_EXISTS' });
+    res.status(500).json({ error: 'Failed to create supplier' });
+  }
 });
 
 vendors.put('/:id', async (req: Request, res: Response) => {
@@ -218,18 +270,27 @@ vendors.put('/:id', async (req: Request, res: Response) => {
   if (!cur || cur.deletedAt) return res.status(404).json({ error: 'Vendor not found' });
   const { code, name, mobile, address, opening, next } = req.body ?? {};
   if (name !== undefined && !String(name).trim()) return res.status(400).json({ error: 'Name is required' });
-  const u = await db.vendor.update({
-    where: { id: cur.id },
-    data: {
-      code: code === undefined ? cur.code : (code ? String(code).trim() : null),
-      name: name === undefined ? cur.name : String(name).trim(),
-      mobile: mobile === undefined ? cur.mobile : String(mobile),
-      address: address === undefined ? cur.address : (address ?? null),
-      openingPayable: opening === undefined ? cur.openingPayable : num(opening),
-      nextDate: next === undefined ? cur.nextDate : (next ?? null),
-    },
-  });
-  res.json({ id: u.id });
+  try {
+    const u = await db.$transaction(async tx => {
+      const rawCode = code === undefined ? cur.code : String(code ?? '').trim();
+      const checked = rawCode ? await lockAndCheckCode(tx, rawCode, { entity: 'supplier', id: cur.id }) : { normalized: '' };
+      if (checked.invalid) throw Object.assign(new Error('Code must use English letters or numbers; hyphen, underscore, dot and slash are allowed'), { code: 'CODE_INVALID' });
+      if (checked.conflict) throw Object.assign(new Error('Code is already in use'), { code: 'CODE_EXISTS', conflict: checked.conflict });
+      return tx.vendor.update({ where: { id: cur.id }, data: {
+        code: code === undefined ? cur.code : (checked.normalized || null),
+        name: name === undefined ? cur.name : String(name).trim(),
+        mobile: mobile === undefined ? cur.mobile : String(mobile),
+        address: address === undefined ? cur.address : (address ?? null),
+        openingPayable: opening === undefined ? cur.openingPayable : num(opening),
+        nextDate: next === undefined ? cur.nextDate : (next ?? null),
+      } });
+    });
+    res.json({ id: u.id });
+  } catch (e) {
+    if ((e as { code?: string }).code === 'CODE_INVALID') return res.status(400).json({ error: (e as Error).message, code: 'CODE_INVALID' });
+    if ((e as { code?: string }).code === 'CODE_EXISTS') return res.status(409).json({ error: `Code is already in use${(e as { conflict?: string }).conflict ? ` by a ${(e as { conflict?: string }).conflict}` : ''}`, code: 'CODE_EXISTS' });
+    res.status(500).json({ error: 'Failed to update supplier' });
+  }
 });
 
 vendors.delete('/:id', async (req: Request, res: Response) => {

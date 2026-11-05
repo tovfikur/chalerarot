@@ -119,7 +119,14 @@ async function build(req: Request, responseBody: any, actor: any) {
   const b = responseBody && typeof responseBody === 'object' ? responseBody : {};
   const { entity, action } = classified;
 
-  const amount = number(b.total) ?? number(b.totalAmount) ?? number(b.amount)
+  const productOpeningAmount = entity === 'product' && action === 'bulk' && Array.isArray(b.created)
+    ? b.created.reduce((sum: number, product: any) => sum + (Number.isFinite(Number(product?.openingValue)) ? Number(product.openingValue) : 0), 0)
+    : entity === 'product' && action === 'create'
+      ? Number(b.product?.openingValue ?? b.openingValue ?? 0)
+      : undefined;
+  const amount = (entity === 'product' && (action === 'bulk' || action === 'create')
+    ? number(productOpeningAmount)
+    : undefined) ?? number(b.totalAmount) ?? number(b.amount)
     ?? number(body.amount) ?? number(body.paid) ?? number(body.openingBalance);
   const reference = text(
     b.invoiceNo ?? b.transferNo ?? b.returnNo ?? b.voucherNo ?? b.sourceId ?? b.code ?? b.email ?? b.name
@@ -190,6 +197,22 @@ async function build(req: Request, responseBody: any, actor: any) {
   } else if (entity === 'product') {
     put('name', text(body.name ?? b.product?.name));
     put('code', text(body.code ?? b.product?.code));
+    if (action === 'bulk' || action === 'create') {
+      put('openingStockValue', Number.isFinite(productOpeningAmount) ? productOpeningAmount : undefined);
+      put('journalPosting', 'Debit Inventory; credit Owner equity');
+      if (action === 'bulk' && Array.isArray(b.created)) {
+        put('products', b.created.slice(0, 100).map((product: any) => ({
+          code: text(product?.code),
+          name: text(product?.name),
+          openingQtyKg: Number.isFinite(Number(product?.opening)) ? Number(product.opening) : 0,
+          openingValue: Number.isFinite(Number(product?.openingValue)) ? Number(product.openingValue) : 0,
+        })));
+      } else {
+        const product = b.product ?? b;
+        put('openingQtyKg', Number.isFinite(Number(product.opening)) ? Number(product.opening) : undefined);
+        put('openingStockValue', Number.isFinite(Number(product.openingValue)) ? Number(product.openingValue) : undefined);
+      }
+    }
   } else if (entity === 'customer' || entity === 'vendor') {
     put('name', text(body.name));
     put('code', text(body.code));
@@ -222,6 +245,7 @@ async function build(req: Request, responseBody: any, actor: any) {
   if (action === 'bulk') {
     put('count', typeof b.successCount === 'number' ? b.successCount : Array.isArray(body.items) ? body.items.length : undefined);
     put('total', typeof b.total === 'number' ? b.total : undefined);
+    put('failedCount', Array.isArray(b.errors) ? b.errors.length : undefined);
   }
 
   const summary = [action, entity, reference, text(detail.partyName), text(detail.accountName), text(detail.note), amount != null ? String(amount) : ''].filter(Boolean).join(' · ');

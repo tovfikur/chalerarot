@@ -727,7 +727,7 @@ export function StockDashboard() {
                 </View>
 
                 <View style={[styles.td, { flex: 1.2 }]}>
-                  <Text style={styles.cellBold}>{digits(row.code)}</Text>
+                  <Text style={styles.cellBold}>{row.code}</Text>
                 </View>
 
                 <View style={[styles.td, { flex: 2.2 }]}>
@@ -869,7 +869,7 @@ export function StockDashboard() {
                     <View style={[styles.td, { flex: 2 }]}>
                       <Text style={styles.cellName} numberOfLines={1}>{row.name}</Text>
                       <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, marginTop: 2 }}>
-                        {row.code ? <Text style={styles.auditCodeBadge}>{toBnDigits(row.code)}</Text> : null}
+                        {row.code ? <Text style={styles.auditCodeBadge}>{row.code}</Text> : null}
                         <Text style={styles.auditBagWeightBadge}>{digits(row.bagKg)} {label('কেজি বস্তা', 'kg bag')}</Text>
                       </View>
                     </View>

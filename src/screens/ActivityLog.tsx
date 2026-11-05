@@ -177,6 +177,13 @@ export function ActivityLog() {
         if (detail.from || detail.to) push(subtitle, `${detail.from ?? '?'} → ${detail.to ?? '?'}`);
         push(subtitle, detail.accountName);
         push(subtitle, detail.category ?? detail.customName);
+        if (typeof detail.openingStockValue === 'number') {
+          push(subtitle, `${l('প্রারম্ভিক মজুদের মূল্য', 'Opening inventory')}: ${money(detail.openingStockValue)}`);
+        }
+        push(subtitle, detail.journalPosting);
+        if (typeof detail.failedCount === 'number' && detail.failedCount > 0) {
+          push(subtitle, `${detail.failedCount} ${l('টি সারি ব্যর্থ', 'rows skipped')}`);
+        }
         if (detail.direction) push(subtitle, detail.direction === 'in' ? l('জমা', 'In') : l('উত্তোলন', 'Out'));
         if (detail.kind) push(subtitle, detail.kind === 'sale' ? l('বিক্রয়', 'Sale') : detail.kind === 'purchase' ? l('ক্রয়', 'Purchase') : detail.kind);
         push(subtitle, detail.note);

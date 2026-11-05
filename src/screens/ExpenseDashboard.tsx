@@ -26,7 +26,7 @@ import { RGrid, useBreakpoint, useFs } from '../responsive';
 import { parseNum, toEnDigits } from '../bn';
 import { SearchField } from '../search';
 import { downloadCSV } from '../stockReport';
-import { DetailShell } from '../screens';
+import { DetailShell, DateField } from '../screens';
 
 type Cat = { id: string; name: string; kind: ExpenseCategoryKind; key?: string; custom?: boolean; customName?: string };
 
@@ -489,7 +489,7 @@ export function ExpenseDashboard(_props: ExpenseDashboardProps) {
           }
         >
           {voucher ? <Muted>{tx('ভাউচার', 'Voucher')}: #{voucher}</Muted> : null}
-          <Field label={tx('তারিখ', 'Date')} value={date} onChange={setDate} />
+          <DateField label={tx('তারিখ', 'Date')} value={date} onChange={setDate} allowPast />
           <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginTop: 2 }}>
             <Muted>{tx('ক্যাটাগরি', 'Category')} *</Muted>
           </View>

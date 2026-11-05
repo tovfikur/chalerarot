@@ -27,6 +27,7 @@ interface BulkUploadModalProps {
 export type ParsedRow = {
   rowNum: number;
   valid: boolean;
+  imported?: boolean;
   error?: string;
   data: Record<string, any>;
 };
@@ -87,7 +88,14 @@ export function parseCSV(text: string): string[][] {
 }
 
 const normalizeHeader = (h: string): string => {
-  return h.toLowerCase().replace(/[\s_\-\.\(\)]/g, '');
+  return h.replace(/^\uFEFF/, '').trim().toLowerCase().replace(/[\s_\-\.\(\)]/g, '');
+};
+
+const readUploadNumber = (value: unknown, fallback = 0) => {
+  const raw = String(value ?? '').trim();
+  if (!raw) return { value: fallback, valid: true };
+  const parsed = Number(toEnDigits(raw).replace(/,/g, ''));
+  return { value: parsed, valid: Number.isFinite(parsed) };
 };
 
 const mapHeaders = (rawHeaders: string[], kind: BulkKind): Record<number, string> => {
@@ -95,6 +103,14 @@ const mapHeaders = (rawHeaders: string[], kind: BulkKind): Record<number, string
 
   rawHeaders.forEach((h, index) => {
     const norm = normalizeHeader(h);
+    if (kind === 'product' && ['costperbag', 'bagcost', 'purchasecostperbag'].includes(norm)) {
+      indexToKey[index] = 'costPerBag';
+      return;
+    }
+    if (kind === 'product' && ['openingbags', 'openingbag', 'openingqtybags', 'openingqtyinbags', 'openingstockbags', 'openingquantitybags', 'qtybags', 'bags'].includes(norm)) {
+      indexToKey[index] = 'openingBags';
+      return;
+    }
     if (kind === 'product') {
       if (['code', 'productcode', 'itemcode', 'কোড', 'পণ্যকোড'].includes(norm)) indexToKey[index] = 'code';
       else if (['name', 'productname', 'itemname', 'পণ্যেরনাম', 'নাম', 'পণ্য'].includes(norm)) indexToKey[index] = 'name';
@@ -118,7 +134,7 @@ const mapHeaders = (rawHeaders: string[], kind: BulkKind): Record<number, string
 };
 
 export function BulkUploadModal({ kind, onClose, onSuccess }: BulkUploadModalProps) {
-  const { bulkUploadProducts, bulkUploadParties, lang } = useApp();
+  const { bulkUploadProducts, bulkUploadParties, products, customers, vendors, lang } = useApp();
   const m = useMoney();
   const n = useNum();
   const fileInputRef = useRef<any>(null);
@@ -128,6 +144,9 @@ export function BulkUploadModal({ kind, onClose, onSuccess }: BulkUploadModalPro
   const [hasParsed, setHasParsed] = useState(false);
   const [loading, setLoading] = useState(false);
   const [importReport, setImportReport] = useState<string | null>(null);
+  const [importReportSuccess, setImportReportSuccess] = useState(false);
+  const [showErrorsOnly, setShowErrorsOnly] = useState(false);
+  const [editRows, setEditRows] = useState(false);
 
   const isBn = lang === 'bn';
 
@@ -139,9 +158,9 @@ export function BulkUploadModal({ kind, onClose, onSuccess }: BulkUploadModalPro
 
   const templateCsv = useMemo(() => {
     if (kind === 'product') {
-      return 'code,name,price,cost,opening,bagKg,uom,description\n' +
-        'BR-28,বিআর-২৮ চাল,৬০,৫২,১০০,৫০,বস্তা,ভালো মানের চাল\n' +
-        'MIN-50,মিনিকেট চাল,৭২,৬৫,২০০,৫০,বস্তা,কুষ্টিয়ার প্রিমিয়াম মিনিকেট\n';
+      return 'code,name,costPerBag,openingBags,bagKg,uom,description\n' +
+        'BR-28,BR-28 Rice,2600,100,50,বস্তা,ভালো মানের চাল\n' +
+        'MIN-50,Miniket Rice,3250,200,50,বস্তা,কুষ্টিয়ার প্রিমিয়াম মিনিকেট\n';
     }
     if (kind === 'customer') {
       return 'code,name,mobile,address,opening\n' +
@@ -156,8 +175,8 @@ export function BulkUploadModal({ kind, onClose, onSuccess }: BulkUploadModalPro
   const placeholderText = useMemo(() => {
     if (kind === 'product') {
       return isBn
-        ? 'এখানে CSV বা Excel থেকে কপি করে পেস্ট করুন:\ncode,name,price,cost,opening,bagKg,uom,description\nBR-28,বিআর-২৮ চাল,৬০,৫২,১০০,৫০,বস্তা,ভালো মানের চাল'
-        : 'Paste CSV or copy from Excel here:\ncode,name,price,cost,opening,bagKg,uom,description\nBR-28,BR-28 Rice,60,52,100,50,বস্তা,Standard rice';
+        ? 'এখানে CSV বা Excel থেকে কপি করে পেস্ট করুন:\ncode,name,costPerBag,openingBags,bagKg,uom,description\nBR-28,BR-28 Rice,2600,100,50,বস্তা,ভালো মানের চাল'
+        : 'Paste CSV or copy from Excel here:\ncode,name,costPerBag,openingBags,bagKg,uom,description\nBR-28,BR-28 Rice,2600,100,50,বস্তা,Standard rice';
     }
     if (kind === 'customer') {
       return isBn
@@ -217,12 +236,14 @@ export function BulkUploadModal({ kind, onClose, onSuccess }: BulkUploadModalPro
     if (!hasHeaderName) {
       startIndex = 0;
       finalHeaderMap = kind === 'product'
-        ? { 0: 'code', 1: 'name', 2: 'price', 3: 'cost', 4: 'opening', 5: 'bagKg', 6: 'uom', 7: 'description' }
+        ? { 0: 'code', 1: 'name', 2: 'costPerBag', 3: 'openingBags', 4: 'bagKg', 5: 'uom', 6: 'description' }
         : { 0: 'code', 1: 'name', 2: 'mobile', 3: 'address', 4: 'opening' };
     }
 
     const rows: ParsedRow[] = [];
-    const usedCodes = new Set<string>();
+    const usedCodes = new Map<string, number>();
+    const existingCodes = new Set([...products, ...customers, ...vendors]
+      .map(row => String(row.code ?? '').trim().toUpperCase()).filter(Boolean));
 
     for (let i = startIndex; i < lines.length; i++) {
       const line = lines[i];
@@ -237,115 +258,202 @@ export function BulkUploadModal({ kind, onClose, onSuccess }: BulkUploadModalPro
       });
 
       const rowNum = i + 1;
-      let valid = true;
-      let error = '';
-
+      const rowErrors: string[] = [];
+      const addError = (message: string) => { if (!rowErrors.includes(message)) rowErrors.push(message); };
       const name = String(item.name ?? '').trim();
-      if (!name) {
-        valid = false;
-        error = isBn ? 'নাম আবশ্যক' : 'Name is required';
-      }
+      if (!name) addError('Name is required');
 
       if (kind === 'product') {
-        const priceNum = parseNum(toEnDigits(String(item.price ?? '')));
-        if (!Number.isFinite(priceNum) || priceNum <= 0) {
-          valid = false;
-          error = isBn ? 'বিক্রয় মূল্য ০-এর বেশি হতে হবে' : 'Sale price must be > 0';
+        const salePrice = readUploadNumber(item.price, 0);
+        if (!salePrice.valid || salePrice.value < 0) addError('Sale price must be a valid non-negative number');
+        item.price = salePrice.valid ? salePrice.value : 0;
+
+        const bagInput = readUploadNumber(item.bagKg, 50);
+        if (!bagInput.valid || bagInput.value <= 0) addError('Bag weight must be greater than 0 kg');
+        item.bagKg = bagInput.valid && bagInput.value > 0 ? bagInput.value : 50;
+
+        if (item.costPerBag !== undefined) {
+          const costInput = readUploadNumber(item.costPerBag, 0);
+          if (!costInput.valid || costInput.value < 0) addError('Cost per bag must be a non-negative number');
+          item.costPerBag = costInput.valid && costInput.value >= 0 ? costInput.value : 0;
+          item.cost = Math.round((item.costPerBag / item.bagKg) * 100) / 100;
         } else {
-          item.price = priceNum;
+          const costInput = readUploadNumber(item.cost, 0);
+          if (!costInput.valid || costInput.value < 0) addError('Cost per kg must be a non-negative number');
+          item.cost = costInput.valid && costInput.value >= 0 ? costInput.value : 0;
+          item.costPerBag = Math.round(item.cost * item.bagKg * 100) / 100;
         }
 
-        const costNum = parseNum(toEnDigits(String(item.cost ?? '0')));
-        item.cost = Number.isFinite(costNum) && costNum >= 0 ? costNum : 0;
-
-        const openingNum = parseNum(toEnDigits(String(item.opening ?? '0')));
-        item.opening = Number.isFinite(openingNum) && openingNum >= 0 ? openingNum : 0;
-
-        const bagKgNum = parseNum(toEnDigits(String(item.bagKg ?? '50')));
-        item.bagKg = Number.isFinite(bagKgNum) && bagKgNum > 0 ? bagKgNum : 50;
-        item.uom = String(item.uom ?? 'বস্তা').trim() || 'বস্তা';
+        if (item.openingBags !== undefined) {
+          const openingInput = readUploadNumber(item.openingBags, 0);
+          if (!openingInput.valid || openingInput.value < 0) addError('Opening bag quantity must be non-negative');
+          item.openingBags = openingInput.valid && openingInput.value >= 0 ? openingInput.value : 0;
+          item.opening = Math.round(item.openingBags * item.bagKg * 100) / 100;
+        } else {
+          const openingInput = readUploadNumber(item.opening, 0);
+          if (!openingInput.valid || openingInput.value < 0) addError('Opening stock kg must be non-negative');
+          item.opening = openingInput.valid && openingInput.value >= 0 ? openingInput.value : 0;
+          item.openingBags = Math.round((item.opening / item.bagKg) * 100) / 100;
+        }
+        item.uom = String(item.uom ?? '').trim() || 'bag';
       } else {
-        const openingNum = parseNum(toEnDigits(String(item.opening ?? '0')));
-        item.opening = Number.isFinite(openingNum) ? openingNum : 0;
+        const openingInput = readUploadNumber(item.opening, 0);
+        item.opening = openingInput.valid ? openingInput.value : 0;
+        if (!openingInput.valid) addError('Opening balance must be a valid number');
       }
 
       const code = String(item.code ?? '').trim();
       if (code) {
-        const codeLower = code.toLowerCase();
-        if (usedCodes.has(codeLower)) {
-          valid = false;
-          error = isBn ? `ডুপ্লিকেট কোড '${code}'` : `Duplicate code '${code}'`;
+        const codeKey = code.toUpperCase();
+        if (!/^[A-Z0-9][A-Z0-9._/-]{0,49}$/.test(codeKey)) {
+          addError('Code must use English letters or numbers; hyphen, underscore, dot and slash are allowed');
+        }
+        if (existingCodes.has(codeKey)) {
+          addError(`Code '${code}' already exists`);
+        } else if (usedCodes.has(codeKey)) {
+          const message = `Duplicate code '${code}' in this file`;
+          addError(message);
+          const prior = rows[usedCodes.get(codeKey)!];
+          if (prior) {
+            prior.valid = false;
+            prior.error = [prior.error, message].filter(Boolean).join('\n');
+          }
         } else {
-          usedCodes.add(codeLower);
+          usedCodes.set(codeKey, rows.length);
         }
       }
 
-      rows.push({
-        rowNum,
-        valid,
-        error: error || undefined,
-        data: item,
-      });
+      rows.push({ rowNum, valid: rowErrors.length === 0, error: rowErrors.length ? rowErrors.join('\n') : undefined, data: item });
     }
 
     setParsedRows(rows);
     setHasParsed(true);
     setImportReport(null);
+    setShowErrorsOnly(false);
   };
 
-  const validRows = useMemo(() => parsedRows.filter(r => r.valid), [parsedRows]);
+  const validRows = useMemo(() => parsedRows.filter(r => r.valid && !r.imported), [parsedRows]);
   const invalidRows = useMemo(() => parsedRows.filter(r => !r.valid), [parsedRows]);
+  const previewRows = useMemo(() => showErrorsOnly ? parsedRows.filter(r => !r.valid) : parsedRows, [parsedRows, showErrorsOnly]);
+
+  const revalidateEditedRows = (candidateRows: ParsedRow[]) => {
+    const knownCodes = new Set([...products, ...customers, ...vendors]
+      .map(row => String(row.code ?? '').trim().toUpperCase()).filter(Boolean));
+    const errors = candidateRows.map(() => [] as string[]);
+    const dataRows = candidateRows.map(row => ({ ...row.data }));
+    const seenCodes = new Map<string, number>();
+
+    candidateRows.forEach((row, index) => {
+      if (row.imported) return;
+      const data = dataRows[index];
+      if (!String(data.name ?? '').trim()) errors[index].push('Name is required');
+      const code = String(data.code ?? '').trim();
+      const key = code.toUpperCase();
+      if (code && !/^[A-Z0-9][A-Z0-9._/-]{0,49}$/.test(key)) errors[index].push('Code must use English letters or numbers; hyphen, underscore, dot and slash are allowed');
+      if (code && knownCodes.has(key)) errors[index].push(`Code '${code}' already exists`);
+      if (code && seenCodes.has(key)) {
+        errors[index].push(`Duplicate code '${code}' in this file`);
+        errors[seenCodes.get(key)!].push(`Duplicate code '${code}' in this file`);
+      } else if (code) seenCodes.set(key, index);
+
+      if (kind === 'product') {
+        const bag = readUploadNumber(data.bagKg, 50);
+        if (!bag.valid || bag.value <= 0) errors[index].push('Bag weight must be greater than 0 kg');
+        const bagKg = bag.valid && bag.value > 0 ? bag.value : 50;
+        const costPerBag = readUploadNumber(data.costPerBag, 0);
+        if (!costPerBag.valid || costPerBag.value < 0) errors[index].push('Cost per bag must be a non-negative number');
+        const openingBags = readUploadNumber(data.openingBags, 0);
+        if (!openingBags.valid || openingBags.value < 0) errors[index].push('Opening bag quantity must be non-negative');
+        data.bagKg = bag.valid ? bag.value : data.bagKg;
+        data.costPerBag = costPerBag.valid ? costPerBag.value : data.costPerBag;
+        data.openingBags = openingBags.valid ? openingBags.value : data.openingBags;
+        data.cost = Math.round(((costPerBag.valid ? costPerBag.value : 0) / bagKg) * 100) / 100;
+        data.opening = Math.round(((openingBags.valid ? openingBags.value : 0) * bagKg) * 100) / 100;
+      } else {
+        const opening = readUploadNumber(data.opening, 0);
+        if (!opening.valid) errors[index].push('Opening balance must be a valid number');
+        if (opening.valid) data.opening = opening.value;
+      }
+    });
+
+    return candidateRows.map((row, index) => row.imported ? row : {
+      ...row,
+      data: dataRows[index],
+      valid: errors[index].length === 0,
+      error: errors[index].length ? [...new Set(errors[index])].join('\n') : undefined,
+    });
+  };
+
+  const updatePreviewCell = (rowNum: number, key: string, value: string) => {
+    setParsedRows(current => revalidateEditedRows(current.map(row => row.rowNum === rowNum
+      ? { ...row, data: { ...row.data, [key]: value } }
+      : row)));
+  };
+
+  const previewCell = (row: ParsedRow, key: string, width: number, display: string, numeric = false, oneLine = false) => editRows && !row.imported
+    ? <TextInput
+        value={String(row.data[key] ?? '')}
+        onChangeText={value => updatePreviewCell(row.rowNum, key, value)}
+        keyboardType={numeric ? 'decimal-pad' : 'default'}
+        accessibilityLabel={`Row ${row.rowNum} ${key}`}
+        style={[styles.previewInput, { width }]}
+      />
+    : <Text style={[styles.td, { width }]} numberOfLines={oneLine ? 1 : undefined}>{display || '-'}</Text>;
 
   const handleSubmit = async () => {
     if (!validRows.length) {
-      Alert.alert(isBn ? 'সতর্কতা' : 'Warning', isBn ? 'আপলোড করার মতো কোনো বৈধ রেকর্ড পাওয়া যায়নি।' : 'No valid records to upload.');
+      setImportReport('There are no valid rows to upload. Review the highlighted errors.');
+      setImportReportSuccess(false);
       return;
     }
 
     setLoading(true);
     setImportReport(null);
+    setImportReportSuccess(false);
 
     try {
-      const payload = validRows.map(r => r.data);
-      let result: { total: number; successCount: number; errors: any[] };
-
-      if (kind === 'product') {
-        result = await bulkUploadProducts(payload);
-      } else {
-        result = await bulkUploadParties(kind === 'customer' ? 'c' : 'v', payload);
-      }
-
+      const payload = validRows.map(r => ({ ...r.data, rowNum: r.rowNum }));
+      const result = kind === 'product'
+        ? await bulkUploadProducts(payload)
+        : await bulkUploadParties(kind === 'customer' ? 'c' : 'v', payload);
       setLoading(false);
 
-      if (result.successCount > 0) {
-        const msg = isBn
-          ? `সফলভাবে ${result.successCount} টি রেকর্ড আপলোড করা হয়েছে!${result.errors?.length ? ` (${result.errors.length} টি ব্যর্থ)` : ''}`
-          : `Successfully imported ${result.successCount} records!${result.errors?.length ? ` (${result.errors.length} failed)` : ''}`;
+      if (result.errors?.length) {
+        const errorsByRow = new Map<number, string>(result.errors.map((entry: any) => [Number(entry.row), String(entry.error ?? 'Import failed')]));
+        const submittedRows = new Set(validRows.map(row => row.rowNum));
+        setParsedRows(current => current.map(row => {
+          const error = errorsByRow.get(row.rowNum);
+          if (error) return { ...row, valid: false, error };
+          if (submittedRows.has(row.rowNum)) return { ...row, imported: true };
+          return row;
+        }));
+        setImportReport(`${result.successCount} imported; ${result.errors.length} row(s) need correction.`);
+        setImportReportSuccess(false);
+        if (result.successCount > 0) onSuccess?.();
+        return;
+      }
 
-        Alert.alert(isBn ? 'সফল' : 'Success', msg, [
-          {
-            text: isBn ? 'ঠিক আছে' : 'OK',
-            onPress: () => {
-              onSuccess?.();
-              onClose();
-            },
-          },
-        ]);
+      if (result.successCount > 0) {
+        setParsedRows(current => current.map(row => validRows.some(submitted => submitted.rowNum === row.rowNum) ? { ...row, imported: true } : row));
+        setImportReport(`Successfully imported ${result.successCount} records.`);
+        setImportReportSuccess(true);
+        onSuccess?.();
       } else {
-        const errorMsg = result.errors?.[0]?.error || (isBn ? 'আপলোড ব্যর্থ হয়েছে।' : 'Upload failed.');
-        Alert.alert(isBn ? 'ব্যর্থ' : 'Failed', errorMsg);
+        setImportReport(result.errors?.[0]?.error || 'Upload failed: the server imported no rows.');
+        setImportReportSuccess(false);
       }
     } catch (e) {
       setLoading(false);
-      Alert.alert(isBn ? 'ত্রুটি' : 'Error', e instanceof Error ? e.message : (isBn ? 'সার্ভার যোগাযোগে ব্যর্থতা।' : 'Failed to reach server.'));
+      setImportReport(e instanceof Error ? e.message : 'Upload failed. Check the server connection and try again.');
+      setImportReportSuccess(false);
     }
   };
 
   return (
-    <DetailShell title={modalTitle} onClose={onClose} maxHeightPct="92%">
-      <ScrollView style={styles.container} contentContainerStyle={styles.content}>
+    <DetailShell title={hasParsed ? `${modalTitle} · ${isBn ? 'প্রিভিউ' : 'Preview'}` : modalTitle} onClose={onClose} maxHeightPct="92%" fullScreen={hasParsed} bodyScroll={false}>
+      <ScrollView style={styles.container} contentContainerStyle={styles.content} nestedScrollEnabled keyboardShouldPersistTaps="handled">
         {/* Top instruction banner */}
-        <View style={styles.topBanner}>
+        {!hasParsed ? <View style={styles.topBanner}>
           <View style={styles.topBannerLeft}>
             <AppIcon name={icons.excel} size={24} iconColor="#1c70b9" />
             <View style={{ flex: 1 }}>
@@ -368,10 +476,10 @@ export function BulkUploadModal({ kind, onClose, onSuccess }: BulkUploadModalPro
             <AppIcon name={icons.download} size={18} iconColor="#1c70b9" />
             <Text style={styles.templateBtnText}>{isBn ? 'টেমপ্লেট ডাউনলোড' : 'Template'}</Text>
           </TouchableOpacity>
-        </View>
+        </View> : null}
 
         {/* File chooser button (Web) */}
-        {Platform.OS === 'web' && (
+        {!hasParsed && Platform.OS === 'web' && (
           <View style={styles.filePickerRow}>
             <input
               ref={fileInputRef}
@@ -395,7 +503,7 @@ export function BulkUploadModal({ kind, onClose, onSuccess }: BulkUploadModalPro
         )}
 
         {/* Text Input area */}
-        <View style={styles.inputCard}>
+        {!hasParsed ? <View style={styles.inputCard}>
           <TextInput
             multiline
             numberOfLines={6}
@@ -435,7 +543,7 @@ export function BulkUploadModal({ kind, onClose, onSuccess }: BulkUploadModalPro
               </TouchableOpacity>
             )}
           </View>
-        </View>
+        </View> : null}
 
         {/* Preview section */}
         {hasParsed && (
@@ -458,17 +566,49 @@ export function BulkUploadModal({ kind, onClose, onSuccess }: BulkUploadModalPro
                   </Text>
                 </View>
               )}
+              {parsedRows.some(row => row.imported) ? (
+                <View style={styles.summaryBadgeValid}>
+                  <Text style={styles.summaryBadgeValidText}>{isBn ? `যোগ হয়েছে: ${toBnDigits(parsedRows.filter(row => row.imported).length)}` : `Imported: ${parsedRows.filter(row => row.imported).length}`}</Text>
+                </View>
+              ) : null}
+              <TouchableOpacity style={styles.clearBtn} onPress={() => setEditRows(value => !value)}>
+                <Text style={[styles.clearBtnText, editRows && { color: '#1D4ED8', fontWeight: '700' }]}>{editRows ? 'Done editing' : 'Edit rows'}</Text>
+              </TouchableOpacity>
+              <TouchableOpacity style={styles.clearBtn} onPress={() => setHasParsed(false)}>
+                <Text style={styles.clearBtnText}>{isBn ? 'ফাইলে ফিরে যান' : 'Back to file'}</Text>
+              </TouchableOpacity>
             </View>
 
-            {parsedRows.length === 0 ? (
+            {kind === 'product' ? (
+              <View style={styles.calculationHint}>
+                <Text style={styles.calculationTitle}>{isBn ? 'স্বয়ংক্রিয় হিসাব' : 'Automatic calculations'}</Text>
+                <Text style={styles.calculationText}>Cost/kg = cost per bag ÷ bag weight. Opening kg = opening bags × bag weight.</Text>
+              </View>
+            ) : null}
+
+            {invalidRows.length > 0 ? (
+              <View style={styles.errorBanner}>
+                <View style={styles.errorIcon}><Text style={styles.errorIconText}>!</Text></View>
+                <Text style={styles.errorBannerText}>
+                  {invalidRows.length} {isBn ? 'টি সারিতে সমস্যা আছে। এগুলো ঠিক না করা পর্যন্ত আপলোড হবে না।' : 'row(s) have errors. Invalid rows are highlighted and skipped; fix them to include them.'}
+                </Text>
+                <TouchableOpacity style={styles.errorFilterButton} onPress={() => setShowErrorsOnly(value => !value)}>
+                  <Text style={styles.errorFilterText}>{showErrorsOnly ? 'Show all rows' : 'Show errors only'}</Text>
+                </TouchableOpacity>
+              </View>
+            ) : null}
+
+            {importReport ? <View style={{ padding: 10, borderRadius: 8, backgroundColor: importReportSuccess ? '#F0FDF4' : '#FFF1F2', borderWidth: 1, borderColor: importReportSuccess ? '#86EFAC' : '#FECDD3' }}><Text style={{ color: importReportSuccess ? '#15803D' : '#B91C1C', fontWeight: '700' }}>{importReport}</Text></View> : null}
+
+            {previewRows.length === 0 ? (
               <View style={styles.emptyWrap}>
                 <Text style={styles.emptyText}>
-                  {isBn ? 'কোনো তথ্য পাওয়া যায়নি।' : 'No data found to preview.'}
+                  {isBn ? 'কোনো তথ্য পাওয়া যায়নি।' : (showErrorsOnly ? 'No error rows to show.' : 'No data found to preview.')}
                 </Text>
               </View>
             ) : (
-              <ScrollView horizontal style={styles.tableScroll} showsHorizontalScrollIndicator={true}>
-                <View style={styles.table}>
+              <ScrollView horizontal nestedScrollEnabled style={styles.tableScroll} showsHorizontalScrollIndicator={true}>
+                <View style={[styles.table, { minWidth: kind === 'product' ? 1150 : 1000 }]}>
                   {/* Table Header */}
                   <View style={styles.tableHeaderRow}>
                     <Text style={[styles.th, { width: 50 }]}>#</Text>
@@ -477,9 +617,10 @@ export function BulkUploadModal({ kind, onClose, onSuccess }: BulkUploadModalPro
                     <Text style={[styles.th, { width: 160 }]}>{isBn ? 'নাম' : 'Name'}</Text>
                     {kind === 'product' ? (
                       <>
-                        <Text style={[styles.th, { width: 90, textAlign: 'right' }]}>{isBn ? 'বিক্রয় দর' : 'Price'}</Text>
-                        <Text style={[styles.th, { width: 90, textAlign: 'right' }]}>{isBn ? 'ক্রয় দর' : 'Cost'}</Text>
-                        <Text style={[styles.th, { width: 90, textAlign: 'right' }]}>{isBn ? 'মজুদ (কেজি)' : 'Opening Kg'}</Text>
+                        <Text style={[styles.th, { width: 100, textAlign: 'right' }]}>Cost/Bag</Text>
+                        <Text style={[styles.th, { width: 110, textAlign: 'right' }]}>Cost/Kg (Auto)</Text>
+                        <Text style={[styles.th, { width: 100, textAlign: 'right' }]}>Opening Bags</Text>
+                        <Text style={[styles.th, { width: 120, textAlign: 'right' }]}>Opening Kg (Auto)</Text>
                         <Text style={[styles.th, { width: 80 }]}>{isBn ? 'বস্তা ওজন' : 'Bag Kg'}</Text>
                       </>
                     ) : (
@@ -491,63 +632,50 @@ export function BulkUploadModal({ kind, onClose, onSuccess }: BulkUploadModalPro
                         </Text>
                       </>
                     )}
-                    <Text style={[styles.th, { width: 150 }]}>{isBn ? 'মন্তব্য/ত্রুটি' : 'Remark/Error'}</Text>
+                    <Text style={[styles.th, { width: 260 }]}>Validation</Text>
                   </View>
 
                   {/* Table Rows */}
-                  {parsedRows.map((r, idx) => (
+                  {previewRows.map((r, idx) => (
                     <View
                       key={idx}
                       style={[
                         styles.tableRow,
-                        !r.valid ? styles.tableRowInvalid : idx % 2 === 1 ? styles.tableRowAlt : null,
+                        !r.valid ? styles.tableRowInvalid : r.imported ? styles.tableRowImported : idx % 2 === 1 ? styles.tableRowAlt : null,
                       ]}
                     >
                       <Text style={[styles.td, { width: 50 }]}>{r.rowNum}</Text>
                       <View style={{ width: 80, justifyContent: 'center' }}>
                         <View style={r.valid ? styles.pillValid : styles.pillInvalid}>
                           <Text style={r.valid ? styles.pillValidText : styles.pillInvalidText}>
-                            {r.valid ? (isBn ? 'বৈধ' : 'Valid') : (isBn ? 'ত্রুটি' : 'Error')}
+                            {r.imported ? (isBn ? 'যোগ হয়েছে' : 'Imported') : r.valid ? (isBn ? 'বৈধ' : 'Valid') : (isBn ? 'ত্রুটি' : 'Error')}
                           </Text>
                         </View>
                       </View>
-                      <Text style={[styles.td, { width: 90, fontWeight: '600' }]}>{r.data.code || '-'}</Text>
-                      <Text style={[styles.td, { width: 160 }]} numberOfLines={1}>{r.data.name || '-'}</Text>
+                      {previewCell(r, 'code', 90, r.data.code || '-')}
+                      {previewCell(r, 'name', 160, r.data.name || '-', false, true)}
 
                       {kind === 'product' ? (
                         <>
-                          <Text style={[styles.td, { width: 90, textAlign: 'right', fontWeight: '700' }]}>
-                            {r.data.price !== undefined ? m(r.data.price) : '-'}
-                          </Text>
-                          <Text style={[styles.td, { width: 90, textAlign: 'right' }]}>
+                          {previewCell(r, 'costPerBag', 100, r.data.costPerBag !== undefined ? m(Number(r.data.costPerBag) || 0) : '-', true)}
+                          <Text style={[styles.td, { width: 110, textAlign: 'right' }]}>
                             {r.data.cost !== undefined ? m(r.data.cost) : '-'}
                           </Text>
-                          <Text style={[styles.td, { width: 90, textAlign: 'right' }]}>
-                            {r.data.opening !== undefined ? `${n(r.data.opening)} কেজি` : '-'}
+                          {previewCell(r, 'openingBags', 100, r.data.openingBags !== undefined ? n(Number(r.data.openingBags) || 0) : '-', true)}
+                          <Text style={[styles.td, { width: 120, textAlign: 'right' }]}>
+                            {r.data.opening !== undefined ? `${n(r.data.opening)} kg` : '-'}
                           </Text>
-                          <Text style={[styles.td, { width: 80 }]}>
-                            {r.data.bagKg !== undefined ? `${n(r.data.bagKg)} কেজি` : '-'}
-                          </Text>
+                          {previewCell(r, 'bagKg', 80, r.data.bagKg !== undefined ? `${n(Number(r.data.bagKg) || 0)} kg` : '-', true)}
                         </>
                       ) : (
                         <>
-                          <Text style={[styles.td, { width: 120 }]}>{r.data.mobile || '-'}</Text>
-                          <Text style={[styles.td, { width: 140 }]} numberOfLines={1}>{r.data.address || '-'}</Text>
-                          <Text style={[styles.td, { width: 100, textAlign: 'right', fontWeight: '700' }]}>
-                            {r.data.opening !== undefined ? m(r.data.opening) : '-'}
-                          </Text>
+                          {previewCell(r, 'mobile', 120, r.data.mobile || '-')}
+                          {previewCell(r, 'address', 140, r.data.address || '-', false, true)}
+                          {previewCell(r, 'opening', 100, r.data.opening !== undefined ? m(Number(r.data.opening) || 0) : '-', true)}
                         </>
                       )}
 
-                      <Text
-                        style={[
-                          styles.td,
-                          { width: 150, color: r.valid ? '#16A34A' : '#DC2626', fontSize: 12 },
-                        ]}
-                        numberOfLines={1}
-                      >
-                        {r.error || (isBn ? 'ঠিক আছে' : 'OK')}
-                      </Text>
+                      <View style={[styles.validationCell, { width: 260 }]}><Text style={r.valid ? styles.validationReady : styles.validationError} numberOfLines={3}>{r.error || (r.imported ? 'Imported successfully' : 'Ready to import')}</Text></View>
                     </View>
                   ))}
                 </View>
@@ -560,10 +688,10 @@ export function BulkUploadModal({ kind, onClose, onSuccess }: BulkUploadModalPro
         <View style={styles.footerRow}>
           <TouchableOpacity
             style={styles.cancelActionBtn}
-            onPress={onClose}
+            onPress={hasParsed ? () => setHasParsed(false) : onClose}
             disabled={loading}
           >
-            <Text style={styles.cancelActionText}>{isBn ? 'বাতিল' : 'Cancel'}</Text>
+            <Text style={styles.cancelActionText}>{hasParsed ? (isBn ? 'ফাইলে ফিরে যান' : 'Back to file') : (isBn ? 'বাতিল' : 'Cancel')}</Text>
           </TouchableOpacity>
 
           <TouchableOpacity
@@ -601,6 +729,7 @@ const styles = StyleSheet.create({
   content: {
     padding: 14,
     gap: 12,
+    flexGrow: 1,
   },
   topBanner: {
     backgroundColor: '#EFF6FF',
@@ -731,8 +860,18 @@ const styles = StyleSheet.create({
   summaryBar: {
     flexDirection: 'row',
     alignItems: 'center',
+    flexWrap: 'wrap',
     gap: 8,
   },
+  calculationHint: { backgroundColor: '#EFF6FF', borderColor: '#BFDBFE', borderWidth: 1, borderRadius: 8, paddingHorizontal: 12, paddingVertical: 9, gap: 3 },
+  calculationTitle: { color: '#1D4ED8', fontSize: 12, fontWeight: '700' },
+  calculationText: { color: '#334155', fontSize: 12 },
+  errorBanner: { flexDirection: 'row', alignItems: 'center', flexWrap: 'wrap', gap: 8, backgroundColor: '#FFF1F2', borderColor: '#FECDD3', borderWidth: 1, borderRadius: 8, padding: 10 },
+  errorIcon: { width: 22, height: 22, borderRadius: 11, backgroundColor: '#DC2626', alignItems: 'center', justifyContent: 'center' },
+  errorIconText: { color: '#FFFFFF', fontWeight: '800', fontSize: 14 },
+  errorBannerText: { color: '#9F1239', fontSize: 12, fontWeight: '600', flex: 1, minWidth: 200 },
+  errorFilterButton: { backgroundColor: '#FFFFFF', borderColor: '#FDA4AF', borderWidth: 1, borderRadius: 6, paddingHorizontal: 10, paddingVertical: 6 },
+  errorFilterText: { color: '#BE123C', fontSize: 12, fontWeight: '700' },
   summaryBadgeTotal: {
     backgroundColor: '#F1F5F9',
     paddingHorizontal: 10,
@@ -774,12 +913,8 @@ const styles = StyleSheet.create({
     color: '#94A3B8',
     fontSize: 14,
   },
-  tableScroll: {
-    maxHeight: 240,
-  },
-  table: {
-    minWidth: 500,
-  },
+  tableScroll: { flexGrow: 0 },
+  table: { alignSelf: 'flex-start' },
   tableHeaderRow: {
     flexDirection: 'row',
     backgroundColor: '#F1F5F9',
@@ -809,10 +944,25 @@ const styles = StyleSheet.create({
   tableRowInvalid: {
     backgroundColor: '#FFF1F2',
   },
+  tableRowImported: { backgroundColor: '#F0FDF4' },
+  validationCell: { paddingHorizontal: 4, justifyContent: 'center' },
+  validationReady: { color: '#15803D', fontSize: 11 },
+  validationError: { color: '#B91C1C', fontSize: 11, fontWeight: '600' },
   td: {
     fontSize: 12,
     color: '#0F172A',
     paddingHorizontal: 4,
+  },
+  previewInput: {
+    minHeight: 30,
+    borderWidth: 1,
+    borderColor: '#CBD5E1',
+    borderRadius: 5,
+    backgroundColor: '#FFFFFF',
+    color: '#0F172A',
+    fontSize: 12,
+    paddingHorizontal: 6,
+    paddingVertical: 3,
   },
   pillValid: {
     backgroundColor: '#DCFCE7',
