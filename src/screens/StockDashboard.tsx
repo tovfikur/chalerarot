@@ -804,6 +804,7 @@ export function StockDashboard() {
                 <View style={[styles.td, { flex: 1.5 }]}>
                   <Text style={styles.cellBold}>{movementTypeLabel(mv.type, lang)}</Text>
                   {mv.transactionNo ? <Text style={styles.cellMuted}>#{digits(mv.transactionNo)}</Text> : null}
+                  {mv.note ? <Text style={styles.cellMuted}>{mv.note}</Text> : null}
                 </View>
                 <View style={[styles.td, { flex: 1.5, alignItems: 'flex-end' }]}>
                   <Text style={[styles.cellBold, { color: mv.qty >= 0 ? '#16A34A' : '#DC2626' }]}>

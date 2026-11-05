@@ -340,19 +340,25 @@ export function AccountsDashboard({ go, focus, onFocusDone }: AccountsDashboardP
     setReportViewDoc({ shop: business.name, title: lang === 'bn' ? 'উদ্বৃত্তপত্র' : 'Balance sheet', period: `${lang === 'bn' ? 'তারিখ' : 'As of'} ${b.asOf}`,
       sections: [
         { title: lang === 'bn' ? 'সম্পদ' : 'Assets', rows: [
-          ...(b.assets.cash !== null ? [{ label: lang === 'bn' ? 'নগদ' : 'Cash', right: m(b.assets.cash) }] : []),
-          ...(b.assets.bank !== null ? [{ label: lang === 'bn' ? 'ব্যাংক' : 'Bank', right: m(b.assets.bank) }] : []),
-          ...(b.assets.wallets !== null ? [{ label: lang === 'bn' ? 'মোবাইল ওয়ালেট' : 'Digital wallets', right: m(b.assets.wallets) }] : []),
-          { label: lang === 'bn' ? 'গ্রাহকের পাওনা' : 'Receivables', right: m(b.assets.receivables) },
-          { label: lang === 'bn' ? 'মজুদ' : 'Inventory', right: m(b.assets.inventory) },
-          ...(b.assets.other ? [{ label: lang === 'bn' ? 'অন্যান্য সম্পদ' : 'Other assets', right: m(b.assets.other) }] : []),
+          ...(b.accounts ? b.accounts.assets.map(account => ({ label: `${account.code} · ${account.name}`, right: m(account.balance) })) : [
+            ...(b.assets.cash !== null ? [{ label: lang === 'bn' ? 'নগদ' : 'Cash', right: m(b.assets.cash) }] : []),
+            ...(b.assets.bank !== null ? [{ label: lang === 'bn' ? 'ব্যাংক' : 'Bank', right: m(b.assets.bank) }] : []),
+            ...(b.assets.wallets !== null ? [{ label: lang === 'bn' ? 'মোবাইল ওয়ালেট' : 'Digital wallets', right: m(b.assets.wallets) }] : []),
+            { label: lang === 'bn' ? 'গ্রাহকের পাওনা' : 'Receivables', right: m(b.assets.receivables) },
+            { label: lang === 'bn' ? 'মজুদ' : 'Inventory', right: m(b.assets.inventory) },
+            ...(b.assets.other ? [{ label: lang === 'bn' ? 'অন্যান্য সম্পদ' : 'Other assets', right: m(b.assets.other) }] : []),
+          ]),
           { label: lang === 'bn' ? 'মোট সম্পদ' : 'Total assets', right: m(b.assets.total), bold: true },
         ] },
         { title: lang === 'bn' ? 'দায় ও মালিকানা' : 'Liabilities and equity', rows: [
-          { label: lang === 'bn' ? 'সরবরাহকারীর দেনা' : 'Payables', right: m(b.liabilities.payables) },
-          ...(b.liabilities.other ? [{ label: lang === 'bn' ? 'অন্যান্য দায়' : 'Other liabilities', right: m(b.liabilities.other) }] : []),
-          { label: lang === 'bn' ? 'জার্নালে নথিভুক্ত মালিকানা' : 'Owner equity from journal entries', right: m(b.journalEquity) },
-          { label: lang === 'bn' ? 'অবশিষ্ট লাভ ও অন্যান্য মালিকানা' : 'Retained earnings and other equity', right: m(b.otherEquity) },
+          ...(b.accounts ? b.accounts.liabilities.map(account => ({ label: `${account.code} · ${account.name}`, right: m(account.balance) })) : [
+            { label: lang === 'bn' ? 'সরবরাহকারীর দেনা' : 'Payables', right: m(b.liabilities.payables) },
+            ...(b.liabilities.other ? [{ label: lang === 'bn' ? 'অন্যান্য দায়' : 'Other liabilities', right: m(b.liabilities.other) }] : []),
+          ]),
+          ...(b.accounts ? b.accounts.equity.map(account => ({ label: account.code ? `${account.code} · ${account.name}` : account.name, right: m(account.balance) })) : [
+            { label: lang === 'bn' ? 'জার্নালে নথিভুক্ত মালিকানা' : 'Owner equity from journal entries', right: m(b.journalEquity) },
+            { label: lang === 'bn' ? 'অবশিষ্ট লাভ ও অন্যান্য মালিকানা' : 'Retained earnings and other equity', right: m(b.otherEquity) },
+          ]),
           { label: lang === 'bn' ? 'মোট মালিকানা' : 'Total equity', right: m(b.equity), bold: true },
           { label: lang === 'bn' ? 'মোট দায় ও মালিকানা' : 'Total liabilities and equity', right: m(b.totalLiabilitiesAndEquity), bold: true },
         ] },

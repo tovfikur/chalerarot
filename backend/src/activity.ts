@@ -1,5 +1,6 @@
 import { NextFunction, Request, Response } from 'express';
 import { db } from './db';
+import { reconcileAutomaticJournalEntries } from './routes/reports';
 
 const WRITE_METHODS = new Set(['POST', 'PUT', 'PATCH', 'DELETE']);
 
@@ -276,6 +277,10 @@ export function activityLogger(req: Request, res: Response, next: NextFunction) 
   res.on('finish', () => {
     if (res.statusCode < 200 || res.statusCode >= 300) return;
     const path = req.originalUrl.split('?')[0].replace(/\/+$/, '') || '/';
+    const postingSource = /^\/api\/(sales(?:\/[^/]+)?|purchases(?:\/[^/]+)?|customer-payments|vendor-payments|returns|expenses(?:\/[^/]+)?|products(?:\/(?:bulk|adjust|[^/]+))?|customers(?:\/(?:bulk|[^/]+))?|vendors(?:\/(?:bulk|[^/]+))?|money\/(?:entries(?:\/[^/]+)?|accounts(?:\/[^/]+(?:\/opening)?)?|transfers)|trash\/[^/]+\/[^/]+\/(?:restore|purge)|trash\/purge-expired|chart-of-accounts(?:\/[^/]+)?)$/;
+    if (res.locals.user && postingSource.test(path)) {
+      void reconcileAutomaticJournalEntries().catch(error => console.error('Automatic journal reconciliation failed:', error));
+    }
     if (/^\/api\/reminders\/[^/]+\/read$/.test(path)) return;
     const actor = res.locals.user
       ?? ((path === '/api/auth/login' || path === '/api/auth/setup') ? responseBody : null);

@@ -140,7 +140,7 @@ money.get('/accounts/:id', async (req: Request, res: Response) => {
   const acc = list.find(a => a.id === req.params.id);
   if (!acc) return res.status(404).json({ error: 'Money account not found' });
   const chartAccount = await db.chartAccount.findUnique({ where: { moneyAccountId: acc.id } });
-  const journalLines = chartAccount ? await db.journalLine.findMany({ where: { accountId: chartAccount.id, entry: { active: true } }, include: { entry: { select: { id: true, entryNo: true, date: true, memo: true, sourceType: true, sourceRef: true } } } }) : [];
+  const journalLines = chartAccount ? await db.journalLine.findMany({ where: { accountId: chartAccount.id, entry: { active: true, sourceType: 'manual' } }, include: { entry: { select: { id: true, entryNo: true, date: true, memo: true, sourceType: true, sourceRef: true } } } }) : [];
   const merged = [
     ...rows.map(m => ({ id: m.id, date: m.date, direction: m.direction as 'in' | 'out', amount: m.amount, sourceType: m.sourceType, sourceId: m.sourceId, note: m.note ?? undefined, transferNo: m.transfer?.transferNo, counterpartyAccountId: m.transfer ? (m.transfer.fromAccountId === acc.id ? m.transfer.toAccountId : m.transfer.fromAccountId) ?? undefined : undefined, active: m.active, createdAt: m.createdAt })),
     ...journalLines.filter(line => line.debit > 0 || line.credit > 0).map(line => ({ id: `journal-${line.id}`, date: line.entry.date, direction: line.debit > 0 ? 'in' as const : 'out' as const, amount: line.debit > 0 ? line.debit : line.credit, sourceType: 'journal', sourceId: line.entry.id, note: `${line.entry.entryNo} · ${line.entry.memo}`, transferNo: undefined, counterpartyAccountId: undefined, active: true, createdAt: line.createdAt })),

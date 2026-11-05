@@ -102,7 +102,7 @@ export async function periodFinance(mode: PeriodMode, ref?: string, end?: string
     // is not a Purchase, so without this a period that begins before the shop
     // existed would show a negative COGS.
     db.stockMovement.findMany({ where: { type: 'OPENING', bucket: 'sellable', date: inRange }, select: { value: true } }),
-    db.journalLine.findMany({ where: { entry: { active: true, date: inRange } }, select: { debit: true, credit: true, account: { select: { type: true } } } }),
+    db.journalLine.findMany({ where: { entry: { active: true, sourceType: 'manual', date: inRange } }, select: { debit: true, credit: true, account: { select: { type: true } } } }),
     db.stockMovement.findMany({ where: { type: { in: ['ADJUSTMENT', 'REVALUE'] }, bucket: 'sellable', date: inRange }, select: { value: true } }),
   ]);
 
@@ -135,7 +135,11 @@ export async function periodFinance(mode: PeriodMode, ref?: string, end?: string
   // not also inside COGS.
   const cogs = round2(openingStockValue + netPurchase + capitalizedLandedCost - closingStockValue + stockAdjustmentValue);
   const grossProfit = round2(netSales - cogs);
-  const otherIncomeExpense = round2(journalLines.reduce((total, line) => total + (line.account.type === 'income' ? line.credit - line.debit : line.account.type === 'expense' ? line.debit - line.credit : 0) * -1, 0));
+  // Signed presentation convention: income is negative (subtracted below to
+  // increase profit); expense is positive (subtracted below to reduce profit).
+  const otherIncomeExpense = round2(journalLines.reduce((total, line) => total + (
+    line.account.type === 'income' || line.account.type === 'expense' ? line.debit - line.credit : 0
+  ), 0));
   const netProfit = round2(grossProfit - expense - otherIncomeExpense);
 
   return {

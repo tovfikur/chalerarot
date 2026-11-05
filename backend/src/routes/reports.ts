@@ -1,19 +1,12 @@
+import { randomUUID } from 'node:crypto';
 import { Router, Request, Response } from 'express';
 import { db } from '../db';
 import { todayStr } from '../units';
 import { lifetimeFinance, periodFinance } from '../finance';
 import { buildSettlement } from '../settlement';
+import { seedChart } from './accounting';
 
 const sum = (a: { amount: number }[]) => a.reduce((s, x) => s + x.amount, 0);
-
-const LEDGER_ACCOUNTS = [
-  { code: '1100', account: 'Accounts receivable' },
-  { code: '1200', account: 'Inventory' }, { code: '2000', account: 'Accounts payable' },
-  { code: '3000', account: 'Owner equity' }, { code: '3200', account: 'Owner drawings / other expense' },
-  { code: '4000', account: 'Sales revenue' }, { code: '4100', account: 'Sales returns' },
-  { code: '5000', account: 'Cost of goods sold' }, { code: '6000', account: 'Operating expenses' },
-  { code: '6100', account: 'Inventory adjustments' }, { code: '9000', account: 'Other' },
-];
 
 const moneyAccountLedgerName = (account?: { name: string; type: string } | null) => {
   if (!account) return 'Cash: Unassigned';
@@ -28,8 +21,10 @@ const ledgerAccountCode = (name: string) => {
   if (name.startsWith('Nagad:')) return '1040';
   if (name.startsWith('Rocket:')) return '1050';
   if (name === 'Accounts receivable') return '1100';
+  if (name === 'Supplier advances') return '1110';
   if (name === 'Inventory') return '1200';
   if (name === 'Accounts payable') return '2000';
+  if (name === 'Customer credits') return '2010';
   if (name.startsWith('Owner equity')) return '3000';
   if (name === 'Sales revenue') return '4000';
   if (name === 'Sales returns') return '4100';
@@ -45,6 +40,7 @@ export const reports = Router();
 // Operating entries are built from source documents; saved manual journals are
 // layered into the same ledger below.
 reports.get('/balance-sheet', async (req: Request, res: Response) => {
+  await reconcileAutomaticJournalEntries();
   const asOf = typeof req.query.asOf === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(req.query.asOf) ? req.query.asOf : todayStr();
   const [accounts, movements, stock, customers, sales, cPays, sReturns, vendors, purchases, vPays, pReturns] = await Promise.all([
     db.moneyAccount.findMany({ select: { id: true, openingBalance: true, openingDate: true, type: true } }),
@@ -65,33 +61,91 @@ reports.get('/balance-sheet', async (req: Request, res: Response) => {
       + movements.filter(m => m.moneyAccountId === a.id).reduce((sum, m) => sum + (m.direction === 'in' ? m.amount : -m.amount), 0), 0)
       + legacyMovements.reduce((sum, m) => sum + (m.direction === 'in' ? m.amount : -m.amount), 0);
   };
-  const savedJournalLines = await db.journalLine.findMany({ where: { entry: { active: true, date: { lte: asOf } } }, include: { account: { select: { name: true, type: true, moneyAccount: { select: { type: true } } } } } });
-  const delta = (fn: (name: string, type: string, moneyType?: string) => boolean) => savedJournalLines.filter(line => fn(line.account.name, line.account.type, line.account.moneyAccount?.type)).reduce((total, line) => total + line.debit - line.credit, 0);
-  const cash = (accountBalance('cash') ?? 0) + delta((_name, _type, moneyType) => moneyType === 'cash');
-  const bank = (accountBalance('bank') ?? 0) + delta((_name, _type, moneyType) => moneyType === 'bank');
-  const walletBalances = ['bkash', 'nagad', 'rocket'].map(type => (accountBalance(type) ?? 0) + delta((_name, _accountType, moneyType) => moneyType === type));
+  const savedJournalLines = await db.journalLine.findMany({ where: { entry: { active: true, sourceType: 'manual', date: { lte: asOf } } }, include: { account: { select: { code: true, name: true, type: true, moneyAccount: { select: { type: true } } } } } });
+  const delta = (fn: (code: string, name: string, type: string, moneyType?: string) => boolean) => savedJournalLines.filter(line => fn(line.account.code, line.account.name, line.account.type, line.account.moneyAccount?.type)).reduce((total, line) => total + line.debit - line.credit, 0);
+  const cash = (accountBalance('cash') ?? 0) + delta((code, _name, _type, moneyType) => moneyType === 'cash' || (!moneyType && code === '1010'));
+  const bank = (accountBalance('bank') ?? 0) + delta((code, _name, _type, moneyType) => moneyType === 'bank' || (!moneyType && code === '1020'));
+  const walletBalances = ['bkash', 'nagad', 'rocket'].map((type, index) => (accountBalance(type) ?? 0) + delta((code, _name, _accountType, moneyType) => moneyType === type || (!moneyType && code === String(1030 + index * 10))));
   const wallets = walletBalances.length ? walletBalances.reduce((total, balance) => total + balance, 0) : null;
-  const receivables = customers.reduce((t, c) => t + Math.max(0, c.openingDue
+  const customerBalances = customers.map(c => c.openingDue
     + sales.filter(x => x.customerId === c.id).reduce((s, x) => s + x.total, 0)
     - cPays.filter(x => x.customerId === c.id && !x.returnId).reduce((s, x) => s + x.amount, 0)
-    - sReturns.filter(x => x.customerId === c.id).reduce((s, x) => s + x.totalAmount, 0)), 0) + delta(name => name === 'Accounts receivable');
-  const payables = vendors.reduce((t, v) => t + Math.max(0, v.openingPayable
+    - sReturns.filter(x => x.customerId === c.id).reduce((s, x) => s + x.totalAmount, 0)
+    + sReturns.filter(x => x.customerId === c.id).reduce((s, x) => s + x.refundAmount, 0));
+  const customerReceivableBase = customerBalances.reduce((sum, balance) => sum + Math.max(0, balance), 0);
+  const customerCreditBase = customerBalances.reduce((sum, balance) => sum + Math.max(0, -balance), 0);
+  const receivableAdjustment = delta(code => code === '1100');
+  const receivables = customerReceivableBase + Math.max(0, receivableAdjustment);
+  const customerCredits = customerCreditBase + Math.max(0, -receivableAdjustment);
+  const vendorBalances = vendors.map(v => v.openingPayable
     + purchases.filter(x => x.vendorId === v.id).reduce((s, x) => s + x.total, 0)
     - vPays.filter(x => x.vendorId === v.id && !x.returnId).reduce((s, x) => s + x.amount, 0)
-    - pReturns.filter(x => x.vendorId === v.id).reduce((s, x) => s + x.totalAmount, 0)), 0);
-  const inventory = stock.reduce((t, x) => t + x.value, 0) + delta(name => name === 'Inventory');
-  const payablesFinal = payables - delta((name, type) => type === 'liability' && name === 'Accounts payable');
-  const otherAssets = delta((name, type, moneyType) => type === 'asset' && !moneyType && name !== 'Accounts receivable' && name !== 'Inventory');
-  const otherLiabilities = -delta((name, type) => type === 'liability' && name !== 'Accounts payable');
-  const assets = (cash ?? 0) + (bank ?? 0) + (wallets ?? 0) + receivables + inventory + otherAssets;
-  const equity = assets - payablesFinal - otherLiabilities;
+    - pReturns.filter(x => x.vendorId === v.id).reduce((s, x) => s + x.totalAmount, 0)
+    + pReturns.filter(x => x.vendorId === v.id).reduce((s, x) => s + x.refundAmount, 0));
+  const vendorPayableBase = vendorBalances.reduce((sum, balance) => sum + Math.max(0, balance), 0);
+  const vendorAdvanceBase = vendorBalances.reduce((sum, balance) => sum + Math.max(0, -balance), 0);
+  const payableAdjustment = delta(code => code === '2000');
+  const supplierAdvances = vendorAdvanceBase + Math.max(0, payableAdjustment);
+  const payables = vendorPayableBase + Math.max(0, -payableAdjustment);
+  const inventory = stock.reduce((t, x) => t + x.value, 0) + delta(code => code === '1200');
+  const payablesFinal = payables;
+  const otherAssets = delta((code, _name, type, moneyType) => type === 'asset' && !moneyType && !['1010', '1020', '1030', '1040', '1050', '1100', '1110', '1200'].includes(code));
+  const otherLiabilities = -delta((code, _name, type) => type === 'liability' && code !== '2000');
+  const assets = (cash ?? 0) + (bank ?? 0) + (wallets ?? 0) + receivables + supplierAdvances + inventory + otherAssets;
+  const totalLiabilities = payablesFinal + customerCredits + otherLiabilities;
+  const equity = assets - totalLiabilities;
   const journalRows = await buildJournalRows('0001-01-01', asOf);
-  const journalEquity = +journalRows.filter(row => row.account === 'Owner equity').reduce((total, row) => total + row.credit - row.debit, 0).toFixed(2);
+  const chart = await db.chartAccount.findMany();
+  const equityAccountIds = new Set(chart.filter(account => account.type === 'equity').map(account => account.id));
+  const journalEquity = +journalRows.filter(row => equityAccountIds.has(row.accountId ?? '')).reduce((total, row) => total + row.credit - row.debit, 0).toFixed(2);
   const otherEquity = +(equity - journalEquity).toFixed(2);
-  res.json({ asOf, assets: { cash, bank, wallets, receivables, inventory, other: otherAssets, total: assets }, liabilities: { payables: payablesFinal, other: otherLiabilities, total: payablesFinal + otherLiabilities }, equity, journalEquity, otherEquity, totalLiabilitiesAndEquity: payablesFinal + otherLiabilities + equity, balanced: Math.abs(assets - payablesFinal - otherLiabilities - equity) < 0.01 });
+  const byId = new Map(chart.map(account => [account.id, account]));
+  const byName = new Map(chart.map(account => [account.name, account]));
+  const byCode = new Map(chart.map(account => [account.code, account]));
+  const accountTotals = new Map<string, { code: string; name: string; type: string; balance: number }>();
+  for (const row of journalRows.filter(item => item.sourceType === 'manual')) {
+    const account = byId.get(row.accountId ?? '') ?? byName.get(row.account) ?? byCode.get(ledgerAccountCode(row.account));
+    if (!account || !['asset', 'liability', 'equity'].includes(account.type)) continue;
+    const key = account.id;
+    const entry = accountTotals.get(key) ?? { code: account.code, name: account.name, type: account.type, balance: 0 };
+    entry.balance += account.type === 'asset' ? row.debit - row.credit : row.credit - row.debit;
+    accountTotals.set(key, entry);
+  }
+  const rowsOfType = (type: string) => [...accountTotals.values()].filter(row => row.type === type && Math.abs(row.balance) >= 0.01).map(row => ({ ...row, balance: +row.balance.toFixed(2) })).sort((a, b) => a.code.localeCompare(b.code));
+  const managedMoneyCodes = new Set(chart.filter(account => account.moneyAccountId).map(account => account.code));
+  const dynamicBalance = (code: string, name: string, type: string, balance: number) => ({ code, name: byCode.get(code)?.name ?? name, type, balance: +balance.toFixed(2) });
+  const accountBreakdown = {
+    assets: [
+      ...rowsOfType('asset').filter(row => !['1010', '1020', '1030', '1040', '1050', '1100', '1110', '1200'].includes(row.code) && !managedMoneyCodes.has(row.code)),
+      ...(cash !== null ? [dynamicBalance('1010', 'Cash', 'asset', cash)] : []),
+      ...(bank !== null ? [dynamicBalance('1020', 'Bank', 'asset', bank)] : []),
+      ...(walletBalances[0] ? [dynamicBalance('1030', 'bKash', 'asset', walletBalances[0])] : []),
+      ...(walletBalances[1] ? [dynamicBalance('1040', 'Nagad', 'asset', walletBalances[1])] : []),
+      ...(walletBalances[2] ? [dynamicBalance('1050', 'Rocket', 'asset', walletBalances[2])] : []),
+      ...(receivables ? [dynamicBalance('1100', 'Accounts receivable', 'asset', receivables)] : []),
+      ...(supplierAdvances ? [dynamicBalance('1110', 'Supplier advances', 'asset', supplierAdvances)] : []),
+      ...(inventory ? [dynamicBalance('1200', 'Inventory', 'asset', inventory)] : []),
+    ].sort((a, b) => a.code.localeCompare(b.code)),
+    liabilities: [
+      ...rowsOfType('liability').filter(row => !['2000', '2010'].includes(row.code)),
+      ...(payablesFinal ? [dynamicBalance('2000', 'Accounts payable', 'liability', payablesFinal)] : []),
+      ...(customerCredits ? [dynamicBalance('2010', 'Customer credits', 'liability', customerCredits)] : []),
+    ].sort((a, b) => a.code.localeCompare(b.code)),
+    equity: [...rowsOfType('equity'), ...(Math.abs(otherEquity) >= 0.01 ? [{ code: '', name: 'Retained earnings and other equity', type: 'equity', balance: otherEquity }] : [])],
+  };
+  const debits = journalRows.reduce((total, row) => total + row.debit, 0);
+  const credits = journalRows.reduce((total, row) => total + row.credit, 0);
+  const detailAssets = accountBreakdown.assets.reduce((total, row) => total + row.balance, 0);
+  const detailLiabilities = accountBreakdown.liabilities.reduce((total, row) => total + row.balance, 0);
+  const totalLiabilitiesAndEquity = totalLiabilities + equity;
+  const balanced = Math.abs(debits - credits) < 0.01
+    && Math.abs(detailAssets - assets) < 0.01
+    && Math.abs(detailLiabilities - totalLiabilities) < 0.01
+    && Math.abs(assets - totalLiabilitiesAndEquity) < 0.01;
+  res.json({ asOf, assets: { cash, bank, wallets, receivables, supplierAdvances, inventory, other: otherAssets, total: assets }, liabilities: { payables: payablesFinal, customerCredits, other: otherLiabilities, total: totalLiabilities }, equity, journalEquity, otherEquity, accounts: accountBreakdown, totalLiabilitiesAndEquity, balanced });
 });
 
-async function buildJournalRows(from: string, to: string) {
+async function deriveJournalRows(from: string, to: string) {
   const [sales, purchases, expenses, returns, payments, accounts, customers, vendors, stockAdjustments, savedEntries, linkedCashAccounts] = await Promise.all([
     db.sale.findMany({ where: { date: { gte: from, lte: to } }, include: { items: true } }),
     db.purchase.findMany({ where: { date: { gte: from, lte: to } }, include: { items: true } }),
@@ -102,7 +156,7 @@ async function buildJournalRows(from: string, to: string) {
     db.customer.findMany({ where: { deletedAt: null, openingDue: { not: 0 } } }),
     db.vendor.findMany({ where: { deletedAt: null, openingPayable: { not: 0 } } }),
     db.stockMovement.findMany({ where: { date: { gte: from, lte: to }, type: { in: ['OPENING', 'ADJUSTMENT', 'REVALUE'] }, bucket: 'sellable' } }),
-    db.journalEntry.findMany({ where: { active: true, date: { gte: from, lte: to } }, include: { lines: { include: { account: true } } } }),
+    db.journalEntry.findMany({ where: { active: true, sourceType: 'manual', date: { gte: from, lte: to } }, include: { lines: { include: { account: true } } } }),
     db.chartAccount.findMany({ where: { moneyAccountId: { not: null } }, select: { moneyAccountId: true, name: true } }),
   ]);
   const linkedName = new Map(linkedCashAccounts.map(a => [a.moneyAccountId!, a.name]));
@@ -137,17 +191,19 @@ async function buildJournalRows(from: string, to: string) {
   }
   for (const r of returns) {
     const ref = r.returnNo ?? r.id;
+    const refundMovement = payments.find(m => m.sourceId === r.id && m.sourceType === (r.kind === 'sale' ? 'saleReturn' : 'purchaseReturn'));
+    const refundAccount = cashLedgerName(refundMovement?.moneyAccount ?? (refundMovement ? { name: refundMovement.method, type: refundMovement.method } : null));
     if (r.kind === 'sale') {
       const refund = Math.min(r.totalAmount, r.refundAmount);
       add(r.date, ref, 'Sales returns', 'Sales return / credit', r.totalAmount, 0);
-      if (refund) add(r.date, ref, 'Cash: Unassigned', 'Customer refund', 0, refund);
+      if (refund) add(r.date, ref, refundAccount, 'Customer refund', 0, refund);
       if (r.totalAmount > refund) add(r.date, ref, 'Accounts receivable', 'Customer credit', 0, r.totalAmount - refund);
       const stockCost = r.items.reduce((n, i) => n + i.cogs, 0);
       if (stockCost) { add(r.date, ref, 'Inventory', 'Returned goods at original AVCO', stockCost, 0); add(r.date, ref, 'Cost of goods sold', 'Reverse returned goods cost', 0, stockCost); }
     } else {
       const refund = Math.min(r.totalAmount, r.refundAmount);
       if (r.totalAmount > refund) add(r.date, ref, 'Accounts payable', 'Purchase return credit', r.totalAmount - refund, 0);
-      if (refund) add(r.date, ref, 'Cash: Unassigned', 'Supplier refund', refund, 0);
+      if (refund) add(r.date, ref, refundAccount, 'Supplier refund', refund, 0);
       add(r.date, ref, 'Inventory', 'Purchase return', 0, r.totalAmount);
     }
   }
@@ -160,8 +216,8 @@ async function buildJournalRows(from: string, to: string) {
     else if (m.sourceType === 'vendorPayment') { add(m.date, ref, 'Accounts payable', 'Vendor payment', m.amount, 0); add(m.date, ref, cashAccount, 'Vendor payment', 0, m.amount); }
     else if (m.sourceType === 'expense') continue; // expense document posts the matching cash line below
     else if (m.sourceType === 'saleReturn' || m.sourceType === 'purchaseReturn') continue; // return document owns the posting
-    else if (m.sourceType === 'transferOut') { add(m.date, ref, 'Transfer clearing', 'Account transfer out', m.amount, 0); add(m.date, ref, cashAccount, 'Account transfer out', 0, m.amount); }
-    else if (m.sourceType === 'transferIn') { add(m.date, ref, cashAccount, 'Account transfer in', m.amount, 0); add(m.date, ref, 'Transfer clearing', 'Account transfer in', 0, m.amount); }
+    else if (m.sourceType === 'transferOut') add(m.date, ref, cashAccount, 'Account transfer out', 0, m.amount);
+    else if (m.sourceType === 'transferIn') add(m.date, ref, cashAccount, 'Account transfer in', m.amount, 0);
     else if (m.sourceType === 'openingAdjust') {
       if (m.direction === 'in') { add(m.date, ref, cashAccount, 'Opening balance adjustment', m.amount, 0); add(m.date, ref, 'Owner equity', 'Opening balance adjustment', 0, m.amount); }
       else { add(m.date, ref, 'Owner equity', 'Opening balance adjustment', m.amount, 0); add(m.date, ref, cashAccount, 'Opening balance adjustment', 0, m.amount); }
@@ -171,6 +227,14 @@ async function buildJournalRows(from: string, to: string) {
   for (const entry of savedEntries) for (const line of entry.lines) {
     const row = { date: entry.date, reference: entry.entryNo, account: line.account.name, accountId: line.accountId, description: `${entry.memo}${line.description ? ` · ${line.description}` : ''}`, debit: +line.debit.toFixed(2), credit: +line.credit.toFixed(2), journalNo: '', sequence: 0, entryId: entry.id, editable: entry.sourceType === 'manual', sourceType: entry.sourceType, sourceId: entry.sourceId, sourceRef: entry.sourceRef };
     if (entry.date >= from && entry.date <= to) rows.push(row);
+  }
+  const chartRows = await db.chartAccount.findMany();
+  const chartById = new Map(chartRows.map(account => [account.id, account]));
+  const chartByName = new Map(chartRows.map(account => [account.name, account]));
+  const chartByCode = new Map(chartRows.map(account => [account.code, account]));
+  for (const row of rows) {
+    const account = chartById.get(row.accountId ?? '') ?? chartByName.get(row.account) ?? chartByCode.get(ledgerAccountCode(row.account));
+    if (account) { row.accountId = account.id; row.account = account.name; }
   }
   rows.sort((a, b) => a.date.localeCompare(b.date) || a.reference.localeCompare(b.reference));
   let currentDate = ''; let sequence = 0; let previousJournal = '';
@@ -184,10 +248,86 @@ async function buildJournalRows(from: string, to: string) {
   return rows;
 }
 
+/** Materialize transaction-generated entries beside manual journals. Source
+ * records remain authoritative; stable source keys make refreshes idempotent.
+ */
+export async function reconcileAutomaticJournalEntries() {
+  await seedChart();
+  const rows = await deriveJournalRows('0001-01-01', '9999-12-31');
+  const grouped = new Map<string, typeof rows>();
+  for (const row of rows) {
+    if (row.entryId) continue;
+    const key = `${row.date}|${row.reference}`;
+    grouped.set(key, [...(grouped.get(key) ?? []), row]);
+  }
+  const chart = await db.chartAccount.findMany();
+  const byName = new Map(chart.map(account => [account.name, account]));
+  const byCode = new Map(chart.map(account => [account.code, account]));
+  const entries = [...grouped.entries()];
+  const activeKeys = entries.map(([key]) => key);
+  await db.$transaction(async t => {
+    await t.$executeRaw`SELECT pg_advisory_xact_lock(hashtext('chalarot-auto-journal-reconcile'))`;
+    const existingEntries = await t.journalEntry.findMany({ where: { sourceType: 'automatic' }, select: { id: true, entryNo: true, sourceId: true } });
+    const existingBySource = new Map(existingEntries.map(entry => [entry.sourceId, entry]));
+    for (const [sourceId, lines] of entries) {
+      const debit = lines.reduce((sum, line) => sum + Math.round(line.debit * 100), 0);
+      const credit = lines.reduce((sum, line) => sum + Math.round(line.credit * 100), 0);
+      if (debit <= 0 || debit !== credit) throw new Error(`Automatic journal is unbalanced: ${sourceId}`);
+      const journalLines = lines.map(line => {
+        const account = byName.get(line.account) ?? byCode.get(ledgerAccountCode(line.account));
+        if (!account) throw new Error(`No chart account is mapped for ${line.account}`);
+        return { accountId: account.id, description: line.description, debit: line.debit, credit: line.credit };
+      });
+      const first = lines[0];
+      const data = { date: first.date, memo: `Automatic posting · ${first.reference}`, sourceType: 'automatic', sourceId, sourceRef: first.reference, active: true };
+      const current = existingBySource.get(sourceId);
+      if (current) {
+        await t.journalLine.deleteMany({ where: { entryId: current.id } });
+        await t.journalEntry.update({ where: { id: current.id }, data: { ...data, lines: { create: journalLines } } });
+      } else {
+        const entryNo = `AUTO-${first.date.replace(/-/g, '')}-${randomUUID().slice(0, 8).toUpperCase()}`;
+        await t.journalEntry.create({ data: { ...data, entryNo, lines: { create: journalLines } } });
+      }
+    }
+    await t.journalEntry.updateMany({
+      where: { sourceType: 'automatic', active: true, ...(activeKeys.length ? { sourceId: { notIn: activeKeys } } : {}) },
+      data: { active: false },
+    });
+  }, { maxWait: 10_000, timeout: 120_000 });
+}
+
+/** Reports read the saved journal records, so automatic and manual postings
+ * share the same ledger source after reconciliation.
+ */
+async function buildJournalRows(from: string, to: string) {
+  const entries = await db.journalEntry.findMany({
+    where: { active: true, date: { gte: from, lte: to } },
+    include: { lines: { include: { account: true } } },
+    orderBy: [{ date: 'asc' }, { entryNo: 'asc' }],
+  });
+  return entries.flatMap(entry => entry.lines.map((line, index) => ({
+    date: entry.date,
+    reference: entry.sourceRef ?? entry.entryNo,
+    account: line.account.name,
+    accountId: line.accountId,
+    description: `${entry.memo}${line.description ? ` · ${line.description}` : ''}`,
+    debit: +line.debit.toFixed(2),
+    credit: +line.credit.toFixed(2),
+    journalNo: entry.entryNo,
+    sequence: index + 1,
+    entryId: entry.id,
+    editable: entry.sourceType === 'manual',
+    sourceType: entry.sourceType,
+    sourceId: entry.sourceId,
+    sourceRef: entry.sourceRef,
+  })));
+}
+
 reports.get('/journal-entries', async (req: Request, res: Response) => {
   const from = typeof req.query.from === 'string' ? req.query.from : '0001-01-01';
   const to = typeof req.query.to === 'string' ? req.query.to : todayStr();
   if (!/^\d{4}-\d{2}-\d{2}$/.test(from) || !/^\d{4}-\d{2}-\d{2}$/.test(to) || from > to) return res.status(400).json({ error: 'Valid from and to dates are required' });
+  await reconcileAutomaticJournalEntries();
   const rows = await buildJournalRows(from, to);
   const groups = new Map<string, typeof rows>();
   for (const row of rows) { const key = `${row.date}|${row.reference}`; groups.set(key, [...(groups.get(key) ?? []), row]); }
@@ -202,29 +342,29 @@ reports.get('/general-ledger', async (req: Request, res: Response) => {
   const from = typeof req.query.from === 'string' ? req.query.from : '0001-01-01';
   const to = typeof req.query.to === 'string' ? req.query.to : todayStr();
   if (!/^\d{4}-\d{2}-\d{2}$/.test(from) || !/^\d{4}-\d{2}-\d{2}$/.test(to) || from > to) return res.status(400).json({ error: 'Valid from and to dates are required' });
-  const [allRows, moneyAccounts, chartAccounts] = await Promise.all([
+  await reconcileAutomaticJournalEntries();
+  const [allRows, chartAccounts] = await Promise.all([
     buildJournalRows('0001-01-01', to),
-    db.moneyAccount.findMany({ orderBy: [{ type: 'asc' }, { name: 'asc' }] }),
-    db.chartAccount.findMany({ where: { active: true }, orderBy: [{ code: 'asc' }] }),
+    db.chartAccount.findMany({ orderBy: [{ code: 'asc' }] }),
   ]);
   const accounts = new Map<string, { account: string; code: string; openingBalance: number; periodDebit: number; periodCredit: number; closingBalance: number; netBalance: number; balanceSide: 'Dr' | 'Cr'; rows: (typeof allRows[number] & { runningBalance: number })[] }>();
-  for (const chartAccount of LEDGER_ACCOUNTS) accounts.set(chartAccount.account, { ...chartAccount, openingBalance: 0, periodDebit: 0, periodCredit: 0, closingBalance: 0, netBalance: 0, balanceSide: 'Dr', rows: [] });
-  for (const chartAccount of chartAccounts) accounts.set(chartAccount.name, { account: chartAccount.name, code: chartAccount.code, openingBalance: 0, periodDebit: 0, periodCredit: 0, closingBalance: 0, netBalance: 0, balanceSide: 'Dr', rows: [] });
-  for (const moneyAccount of moneyAccounts) {
-    const linkedChart = chartAccounts.find(row => row.moneyAccountId === moneyAccount.id);
-    const account = linkedChart?.name ?? moneyAccountLedgerName(moneyAccount);
-    const chartCode = linkedChart?.code;
-    accounts.set(account, { account, code: chartCode ?? ledgerAccountCode(account), openingBalance: 0, periodDebit: 0, periodCredit: 0, closingBalance: 0, netBalance: 0, balanceSide: 'Dr', rows: [] });
-  }
   for (const row of allRows) {
-    let account = accounts.get(row.account);
-    if (!account) { account = { account: row.account, code: ledgerAccountCode(row.account), openingBalance: 0, periodDebit: 0, periodCredit: 0, closingBalance: 0, netBalance: 0, balanceSide: 'Dr', rows: [] }; accounts.set(row.account, account); }
+    const chart = chartAccounts.find(candidate => candidate.id === row.accountId || candidate.name === row.account)
+      ?? chartAccounts.find(candidate => candidate.code === ledgerAccountCode(row.account));
+    const accountName = chart?.name ?? row.account;
+    let account = accounts.get(accountName);
+    if (!account) {
+      account = { account: accountName, code: chart?.code ?? ledgerAccountCode(row.account), openingBalance: 0, periodDebit: 0, periodCredit: 0, closingBalance: 0, netBalance: 0, balanceSide: 'Dr', rows: [] };
+      accounts.set(accountName, account);
+    }
     account.closingBalance += row.debit - row.credit;
     if (row.date < from) account.openingBalance += row.debit - row.credit;
-    else { account.rows.push({ ...row, runningBalance: +account.closingBalance.toFixed(2) }); account.periodDebit += row.debit; account.periodCredit += row.credit; }
+    else { account.rows.push({ ...row, account: accountName, accountId: chart?.id ?? row.accountId, runningBalance: +account.closingBalance.toFixed(2) }); account.periodDebit += row.debit; account.periodCredit += row.credit; }
   }
   for (const account of accounts.values()) { account.netBalance = +Math.abs(account.closingBalance).toFixed(2); account.balanceSide = account.closingBalance < 0 ? 'Cr' : 'Dr'; }
-  const list = [...accounts.values()].sort((a, b) => a.code.localeCompare(b.code) || a.account.localeCompare(b.account));
+  const list = [...accounts.values()]
+    .filter(account => Math.abs(account.openingBalance) >= 0.01 || account.periodDebit >= 0.01 || account.periodCredit >= 0.01)
+    .sort((a, b) => a.code.localeCompare(b.code) || a.account.localeCompare(b.account));
   const debitTotal = +list.reduce((n, a) => n + a.periodDebit, 0).toFixed(2);
   const creditTotal = +list.reduce((n, a) => n + a.periodCredit, 0).toFixed(2);
   res.json({ from, to, accounts: list, debitTotal, creditTotal, balanced: Math.abs(debitTotal - creditTotal) < 0.01 });
@@ -284,7 +424,7 @@ reports.get('/cashflow', async (req: Request, res: Response) => {
     db.moneyAccount.findMany({ select: { openingBalance: true, openingDate: true } }),
     db.moneyMovement.findMany({ where: { active: true, date: { lte: to } } }),
     db.expense.findMany({ where: { capitalized: true, deletedAt: null, date: { gte: from, lte: to } }, select: { id: true } }),
-    db.journalLine.findMany({ where: { entry: { active: true, date: { lte: to } }, account: { moneyAccountId: { not: null } } }, include: { entry: { select: { date: true } }, account: { select: { moneyAccountId: true } } } }),
+    db.journalLine.findMany({ where: { entry: { active: true, sourceType: 'manual', date: { lte: to } }, account: { moneyAccountId: { not: null } } }, include: { entry: { select: { date: true } }, account: { select: { moneyAccountId: true } } } }),
   ]);
   const journalCashDeltaBefore = cashJournalLines.filter(line => line.entry.date < from).reduce((total, line) => total + line.debit - line.credit, 0);
   const journalCashDeltaPeriod = cashJournalLines.filter(line => line.entry.date >= from).reduce((total, line) => total + line.debit - line.credit, 0);
@@ -318,22 +458,28 @@ reports.get('/cashflow', async (req: Request, res: Response) => {
 
 async function dueTotal(kind: 'c' | 'v') {
   if (kind === 'c') {
-    const [cs, sales, pays] = await Promise.all([
+    const [cs, sales, pays, returns] = await Promise.all([
       db.customer.findMany({ where: { deletedAt: null } }), db.sale.findMany(), db.customerPayment.findMany({ where: { active: true } }),
+      db.productReturn.findMany({ where: { kind: 'sale' } }),
     ]);
     const byCust = (id: string) =>
       Math.max(0, (cs.find(c => c.id === id)?.openingDue ?? 0) +
       sales.filter(s => s.customerId === id).reduce((s, x) => s + x.total, 0) -
-      pays.filter(p => p.customerId === id).reduce((s, x) => s + x.amount, 0));
+      pays.filter(p => p.customerId === id && !p.returnId).reduce((s, x) => s + x.amount, 0) -
+      returns.filter(r => r.customerId === id).reduce((s, x) => s + x.totalAmount, 0) +
+      returns.filter(r => r.customerId === id).reduce((s, x) => s + x.refundAmount, 0));
     return cs.reduce((s, c) => s + byCust(c.id), 0);
   }
-  const [vs, purs, pays] = await Promise.all([
+  const [vs, purs, pays, returns] = await Promise.all([
       db.vendor.findMany({ where: { deletedAt: null } }), db.purchase.findMany(), db.vendorPayment.findMany({ where: { active: true } }),
+      db.productReturn.findMany({ where: { kind: 'purchase' } }),
   ]);
   const byVend = (id: string) =>
     Math.max(0, (vs.find(v => v.id === id)?.openingPayable ?? 0) +
     purs.filter(p => p.vendorId === id).reduce((s, x) => s + x.total, 0) -
-    pays.filter(p => p.vendorId === id).reduce((s, x) => s + x.amount, 0));
+    pays.filter(p => p.vendorId === id && !p.returnId).reduce((s, x) => s + x.amount, 0) -
+    returns.filter(r => r.vendorId === id).reduce((s, x) => s + x.totalAmount, 0) +
+    returns.filter(r => r.vendorId === id).reduce((s, x) => s + x.refundAmount, 0));
   return vs.reduce((s, v) => s + byVend(v.id), 0);
 }
 
@@ -351,18 +497,18 @@ reports.get('/accounts/receivables/:id', async (req: Request, res: Response) => 
   ]);
   const ids = sales.map(s => s.id);
   const saleRets = ids.length
-    ? await db.productReturn.findMany({ where: { saleId: { in: ids } }, select: { saleId: true, totalAmount: true } })
+    ? await db.productReturn.findMany({ where: { saleId: { in: ids } }, select: { saleId: true, totalAmount: true, settlement: true, refundAmount: true } })
     : [];
   // Per-invoice paid/due/status derived from the canonical settlement. The sum
   // of derived paid already covers every collection (dedicated + FIFO +
   // return credits), so it is used directly — never added to collections.
   const st = buildSettlement(
     sales.map(s => ({ id: s.id, partyId: c.id, date: s.date, total: s.total, createdAt: s.createdAt })),
-    saleRets.map(r => ({ invoiceId: r.saleId, amount: r.totalAmount })),
+    saleRets.map(r => ({ invoiceId: r.saleId, amount: r.totalAmount, settlement: r.settlement as 'credit' | 'refund', refundAmount: r.refundAmount })),
     allPays.map(p => ({ partyId: c.id, invoiceId: p.saleId, returnId: p.returnId, date: p.date, amount: p.amount, createdAt: p.createdAt })),
   );
   const pays = allPays.filter(p => !p.saleId);
-  const saleTotal = sales.reduce((s, x) => s + x.total, 0);
+  const saleTotal = sales.reduce((s, x) => s + x.total - saleRets.filter(r => r.saleId === x.id).reduce((total, r) => total + r.totalAmount, 0), 0);
   const salePaid = [...st.values()].reduce((s, x) => s + x.paid, 0);
   res.json({
     party: { id: c.id, name: c.name, mobile: c.mobile, opening: c.openingDue, next: c.nextDate ?? undefined },
@@ -370,7 +516,7 @@ reports.get('/accounts/receivables/:id', async (req: Request, res: Response) => 
     sales: sales.map(s => {
       const sst = st.get(s.id);
       return {
-        id: s.id, invoiceNo: s.invoiceNo ?? undefined, date: s.date, total: s.total,
+        id: s.id, invoiceNo: s.invoiceNo ?? undefined, date: s.date, total: Math.max(0, s.total - saleRets.filter(r => r.saleId === s.id).reduce((total, r) => total + r.totalAmount, 0)),
         paid: sst?.paid ?? s.paid, due: sst?.due ?? s.due, status: sst?.status,
         items: s.items.map(it => ({
           productName: it.product.name, unit: it.unit,
@@ -381,7 +527,7 @@ reports.get('/accounts/receivables/:id', async (req: Request, res: Response) => 
     payments: pays.map(p => ({ id: p.id, amount: p.amount, date: p.date, note: p.note ?? undefined })),
     totalSales: saleTotal,
     totalPaid: Math.round(salePaid * 100) / 100,
-    balance: Math.round((c.openingDue + saleTotal - salePaid) * 100) / 100,
+      balance: Math.round((c.openingDue + saleTotal - salePaid) * 100) / 100,
   });
 });
 
@@ -399,17 +545,17 @@ reports.get('/accounts/payables/:id', async (req: Request, res: Response) => {
   ]);
   const pids = purs.map(p => p.id);
   const purRets = pids.length
-    ? await db.productReturn.findMany({ where: { purchaseId: { in: pids } }, select: { purchaseId: true, totalAmount: true } })
+    ? await db.productReturn.findMany({ where: { purchaseId: { in: pids } }, select: { purchaseId: true, totalAmount: true, settlement: true, refundAmount: true } })
     : [];
   // Canonical per-invoice settlement; its paid sum already covers every
   // payment (dedicated + FIFO + return credits).
   const st = buildSettlement(
     purs.map(p => ({ id: p.id, partyId: v.id, date: p.date, total: p.total, createdAt: p.createdAt })),
-    purRets.map(r => ({ invoiceId: r.purchaseId, amount: r.totalAmount })),
+    purRets.map(r => ({ invoiceId: r.purchaseId, amount: r.totalAmount, settlement: r.settlement as 'credit' | 'refund', refundAmount: r.refundAmount })),
     allPays.map(p => ({ partyId: v.id, invoiceId: p.purchaseId, returnId: p.returnId, date: p.date, amount: p.amount, createdAt: p.createdAt })),
   );
   const pays = allPays.filter(p => !p.purchaseId);
-  const purTotal = purs.reduce((s, x) => s + x.total, 0);
+  const purTotal = purs.reduce((s, x) => s + x.total - purRets.filter(r => r.purchaseId === x.id).reduce((total, r) => total + r.totalAmount, 0), 0);
   const purPaid = [...st.values()].reduce((s, x) => s + x.paid, 0);
   res.json({
     party: { id: v.id, name: v.name, mobile: v.mobile, opening: v.openingPayable, next: v.nextDate ?? undefined },
@@ -417,7 +563,7 @@ reports.get('/accounts/payables/:id', async (req: Request, res: Response) => {
     purchases: purs.map(p => {
       const pst = st.get(p.id);
       return {
-        id: p.id, invoiceNo: p.invoiceNo ?? undefined, date: p.date, total: p.total,
+        id: p.id, invoiceNo: p.invoiceNo ?? undefined, date: p.date, total: Math.max(0, p.total - purRets.filter(r => r.purchaseId === p.id).reduce((total, r) => total + r.totalAmount, 0)),
         paid: pst?.paid ?? p.paid, due: pst?.due ?? p.due, status: pst?.status,
         items: p.items.map(it => ({
           productName: it.product.name, unit: it.unit,
@@ -433,15 +579,17 @@ reports.get('/accounts/payables/:id', async (req: Request, res: Response) => {
 });
 // GET /api/accounts/receivables — customers with balance > 0
 reports.get('/accounts/receivables', async (_req: Request, res: Response) => {
-  const [cs, sales, pays] = await Promise.all([
+  const [cs, sales, pays, returns] = await Promise.all([
     db.customer.findMany({ where: { deletedAt: null }, orderBy: { name: 'asc' } }),
-    db.sale.findMany(), db.customerPayment.findMany({ where: { active: true } }),
+    db.sale.findMany(), db.customerPayment.findMany({ where: { active: true } }), db.productReturn.findMany({ where: { kind: 'sale' } }),
   ]);
   res.json(cs
     .map(c => ({
       id: c.id, name: c.name, mobile: c.mobile,
       balance: c.openingDue + sales.filter(s => s.customerId === c.id).reduce((s, x) => s + x.total, 0)
-        - pays.filter(p => p.customerId === c.id).reduce((s, x) => s + x.amount, 0),
+        - pays.filter(p => p.customerId === c.id && !p.returnId).reduce((s, x) => s + x.amount, 0)
+        - returns.filter(r => r.customerId === c.id).reduce((s, x) => s + x.totalAmount, 0)
+        + returns.filter(r => r.customerId === c.id).reduce((s, x) => s + x.refundAmount, 0),
       next: c.nextDate ?? undefined,
     }))
     .filter(x => x.balance > 0));
@@ -449,15 +597,17 @@ reports.get('/accounts/receivables', async (_req: Request, res: Response) => {
 
 // GET /api/accounts/payables — vendors with balance > 0
 reports.get('/accounts/payables', async (_req: Request, res: Response) => {
-  const [vs, purs, pays] = await Promise.all([
+  const [vs, purs, pays, returns] = await Promise.all([
     db.vendor.findMany({ where: { deletedAt: null }, orderBy: { name: 'asc' } }),
-    db.purchase.findMany(), db.vendorPayment.findMany({ where: { active: true } }),
+    db.purchase.findMany(), db.vendorPayment.findMany({ where: { active: true } }), db.productReturn.findMany({ where: { kind: 'purchase' } }),
   ]);
   res.json(vs
     .map(v => ({
       id: v.id, name: v.name, mobile: v.mobile,
       balance: v.openingPayable + purs.filter(p => p.vendorId === v.id).reduce((s, x) => s + x.total, 0)
-        - pays.filter(p => p.vendorId === v.id).reduce((s, x) => s + x.amount, 0),
+        - pays.filter(p => p.vendorId === v.id && !p.returnId).reduce((s, x) => s + x.amount, 0)
+        - returns.filter(r => r.vendorId === v.id).reduce((s, x) => s + x.totalAmount, 0)
+        + returns.filter(r => r.vendorId === v.id).reduce((s, x) => s + x.refundAmount, 0),
       next: v.nextDate ?? undefined,
     }))
     .filter(x => x.balance > 0));

@@ -269,14 +269,11 @@ returns.post('/', async (req: Request, res: Response) => {
           await t.customerPayment.create({
             data: { customerId: s.customerId ?? null, saleId: null, returnId: created.id, amount: totalAmount, date: day, note: returnNo },
           });
-          // The credit reduces that invoice's remaining: re-attribute in-tx.
-          await syncPartyInvoices('sale', s.customerId ?? null, t);
         } else {
           const v = parent as { vendorId: string };
           await t.vendorPayment.create({
             data: { vendorId: v.vendorId, purchaseId: null, returnId: created.id, amount: totalAmount, date: day, note: returnNo },
           });
-          await syncPartyInvoices('purchase', v.vendorId, t);
         }
       }
       // Only an actual refund moves money: sales return pays the customer back
@@ -295,6 +292,10 @@ returns.post('/', async (req: Request, res: Response) => {
           note: returnNo,
         });
       }
+      // Re-materialize invoice paid/due for either a credit memo or a refund;
+      // refunds reduce net paid while credit memos reduce net invoice value.
+      if (kind === 'sale') await syncPartyInvoices('sale', (parent as { customerId?: string | null }).customerId ?? null, t);
+      else await syncPartyInvoices('purchase', (parent as { vendorId: string }).vendorId, t);
       return { id: created.id, returnNo, totalAmount };
     });
     res.status(201).json(result);

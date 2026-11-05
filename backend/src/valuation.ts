@@ -95,7 +95,7 @@ export function applyMovement(
 export async function writeMovement(
   t: TxClient,
   productId: string,
-  m: { type: string; bucket: Bucket; qtyKg: number; unitCost: number; date: string; refId?: string | null; forceUnitCost?: boolean },
+  m: { type: string; bucket: Bucket; qtyKg: number; unitCost: number; date: string; refId?: string | null; forceUnitCost?: boolean; note?: string | null },
 ): Promise<{ unitCost: number; value: number; qtyAfter: number; valueAfter: number; avgAfter: number }> {
   const p = await t.product.findUnique({ where: { id: productId } });
   if (!p) throw Object.assign(new Error('Product not found'), { status: 400 });
@@ -123,6 +123,7 @@ export async function writeMovement(
       value: movement.value,
       date: movement.date,
       refId: m.refId ?? null,
+      note: m.note ?? null,
     },
   });
   return {

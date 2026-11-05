@@ -238,6 +238,7 @@ model StockMovement {
   value     Float  @default(0) // signed inventory value impact
   date      String // YYYY-MM-DD
   refId     String?
+  note      String?
   createdAt DateTime @default(now())
 
   @@index([productId])
@@ -412,6 +413,7 @@ model JournalEntry {
 
   @@index([date])
   @@index([sourceType, sourceId])
+  @@unique([sourceType, sourceId])
   @@index([active])
 }
 

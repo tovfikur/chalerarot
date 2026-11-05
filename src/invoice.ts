@@ -15,7 +15,7 @@ export type InvData = {
   partyName: string; partyMobile: string;
   lines: InvLine[]; total: string; paid: string; due: string; next?: string;
   labels: InvLabels;
-  extra?: { label: string; value: string }[];
+  extra?: { label: string; value: string; tone?: 'loss' }[];
   hidePay?: boolean;
 };
 
@@ -73,6 +73,7 @@ export function buildInvoiceHTML(d: InvData): string {
   h2 { font-size: 17px; text-align: center; margin: 0 0 12px; }
   hr { border: none; border-top: 1px dashed #888; margin: 10px 0; }
   .row { display: flex; justify-content: space-between; padding: 2px 0; font-size: 15px; }
+  .row.loss { color: #DC2626; font-weight: 700; }
   .item { padding: 6px 0; }
   .iname { font-size: 16px; font-weight: 700; }
   .idetail { font-size: 14px; color: #444; }
@@ -91,7 +92,7 @@ ${d.partyMobile ? `<div class="row"><span>${esc(L.mobile)}</span><span>${esc(d.p
 <div class="row big"><span>${esc(L.total)}</span><span>${esc(d.total)}</span></div>
 ${d.hidePay ? '' : `<div class="row"><span>${esc(L.paid)}</span><span>${esc(d.paid)}</span></div>
 <div class="row"><span>${esc(L.due)}</span><span>${esc(d.due)}</span></div>`}
-${(d.extra ?? []).map(e => `<div class="row"><span>${esc(e.label)}</span><span>${esc(e.value)}</span></div>`).join('')}
+${(d.extra ?? []).map(e => `<div class="row${e.tone === 'loss' ? ' loss' : ''}"><span>${esc(e.label)}</span><span>${esc(e.value)}</span></div>`).join('')}
 ${d.next ? `<div class="row"><span>${esc(L.payDate)}</span><span>${esc(d.next)}</span></div>` : ''}
 <hr /><div class="center">${esc(L.thanks)}</div>
 </div></body></html>`;

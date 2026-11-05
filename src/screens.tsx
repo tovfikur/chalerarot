@@ -2590,6 +2590,9 @@ function useInvoice() {
     const isSale = kind === 'sale';
     const sd = d as SaleDetail, pd = d as PurchaseDetail;
     const party = isSale ? sd.customer : pd.vendor;
+    const belowCostLoss = isSale
+      ? sd.items.reduce((sum, item) => sum + Math.max(0, (item.unitCost ?? 0) - item.rate) * Math.max(0, item.qtyKg), 0)
+      : 0;
     return {
       no: (d.invoiceNo ?? '').toString(),
       date: fd(d.date),
@@ -2605,6 +2608,11 @@ function useInvoice() {
       paid: m(d.paid),
       due: m(d.due),
       next: d.nextDate ? fd(d.nextDate) : undefined,
+      extra: belowCostLoss > 0 ? [{
+        label: lang === 'bn' ? 'ক্রয়দরের নিচে বিক্রির লোকসান' : 'Loss on below-cost items',
+        value: `-${m(belowCostLoss)}`,
+        tone: 'loss',
+      }] : undefined,
       labels: {
         shop: business.name,
         docTitle: isSale ? t('saleInvoice') : t('purchaseInvoice'),

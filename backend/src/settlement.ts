@@ -34,7 +34,7 @@ export type InvoiceLike = {
   id: string; partyId: string; date: string; total: number;
   createdAt?: Date | string | null;
 };
-export type ReturnLike = { invoiceId: string | null; amount: number };
+export type ReturnLike = { invoiceId: string | null; amount: number; settlement?: 'credit' | 'refund'; refundAmount?: number };
 export type PayLike = {
   partyId: string; invoiceId: string | null; returnId: string | null;
   date: string; amount: number; createdAt?: Date | string | null;
@@ -49,6 +49,7 @@ export function allocateParty(
   invoices: InvoiceLike[],
   dedicated: { invoiceId: string; amount: number }[],
   floating: { date: string; createdAt?: Date | string | null; amount: number }[],
+  refundOffsets: Map<string, number> = new Map(),
 ): Map<string, InvoiceSettlement> {
   const byDate = (a: { date: string; createdAt?: Date | string | null; id?: string }, b: { date: string; createdAt?: Date | string | null; id?: string }) =>
     a.date < b.date ? -1 : a.date > b.date ? 1
@@ -62,16 +63,16 @@ export function allocateParty(
   let left = pool.length ? Math.max(0, pool[0].amount) : 0;
   const out = new Map<string, InvoiceSettlement>();
   for (const inv of invs) {
-    let need = round2(inv.total - (ded.get(inv.id) ?? 0));
+    let need = round2(inv.total - (ded.get(inv.id) ?? 0) + (refundOffsets.get(inv.id) ?? 0));
     while (need > 0 && pi < pool.length) {
       const take = Math.min(need, left);
       need = round2(need - take);
       left = round2(left - take);
       if (left <= 0) { pi++; left = pi < pool.length ? Math.max(0, pool[pi].amount) : 0; }
     }
-    const paid = round2(Math.min(inv.total, inv.total - Math.max(0, need)));
-    const due = round2(inv.total - paid);
-    out.set(inv.id, { paid, due, status: statusOf(inv.total, paid) });
+    const paid = round2(Math.max(0, Math.min(inv.total, inv.total - Math.max(0, need))));
+    const due = round2(Math.max(0, need));
+    out.set(inv.id, { paid, due, status: due <= 0 ? 'paid' : paid > 0 ? 'partial' : 'due' });
   }
   return out;
 }
@@ -84,6 +85,14 @@ export function buildSettlement(
   returns: ReturnLike[],
   pays: PayLike[],
 ): Map<string, InvoiceSettlement> {
+  const returnTotals = new Map<string, number>();
+  const refundOffsets = new Map<string, number>();
+  for (const r of returns) {
+    if (!r.invoiceId) continue;
+    returnTotals.set(r.invoiceId, round2((returnTotals.get(r.invoiceId) ?? 0) + r.amount));
+    if (r.settlement === 'refund') refundOffsets.set(r.invoiceId, round2((refundOffsets.get(r.invoiceId) ?? 0) + (r.refundAmount ?? r.amount)));
+  }
+  const adjustedInvoices = invoices.map(invoice => ({ ...invoice, total: Math.max(0, round2(invoice.total - (returnTotals.get(invoice.id) ?? 0))) }));
   const byId = new Map(invoices.map(i => [i.id, i]));
   const slots = new Map<string, {
     invs: InvoiceLike[];
@@ -97,11 +106,6 @@ export function buildSettlement(
   };
   for (const inv of invoices) slot(inv.partyId).invs.push(inv);
   // Return credit memos are linked to their own invoice: attributed first.
-  for (const r of returns) {
-    if (!r.invoiceId) continue;
-    const inv = byId.get(r.invoiceId);
-    slot(inv ? inv.partyId : '').dedicated.push({ invoiceId: r.invoiceId, amount: r.amount });
-  }
   for (const p of pays) {
     // A return credit memo row and its ProductReturn credit describe the same
     // single credit; only the return row is attributed, so memo rows must
@@ -116,7 +120,8 @@ export function buildSettlement(
   }
   const out = new Map<string, InvoiceSettlement>();
   for (const s of slots.values()) {
-    for (const [id, st] of allocateParty(s.invs, s.dedicated, s.floating)) out.set(id, st);
+    const partyInvoices = adjustedInvoices.filter(invoice => s.invs.some(original => original.id === invoice.id));
+    for (const [id, st] of allocateParty(partyInvoices, s.dedicated, s.floating, refundOffsets)) out.set(id, st);
   }
   return out;
 }
@@ -134,7 +139,7 @@ export async function settleAll(
       : client.purchase.findMany({ select: { id: true, vendorId: true, date: true, total: true, createdAt: true } }),
     client.productReturn.findMany({
       where: kind === 'sale' ? { saleId: { not: null } } : { purchaseId: { not: null } },
-      select: { saleId: true, purchaseId: true, totalAmount: true },
+      select: { saleId: true, purchaseId: true, totalAmount: true, settlement: true, refundAmount: true },
     }),
     kind === 'sale'
       ? client.customerPayment.findMany({ where: { active: true }, select: { customerId: true, saleId: true, returnId: true, date: true, amount: true, createdAt: true } })
@@ -150,7 +155,7 @@ export async function settleAll(
     })),
     returns.map(r => ({
       invoiceId: (r as { saleId?: string | null }).saleId ?? (r as { purchaseId?: string | null }).purchaseId ?? null,
-      amount: r.totalAmount,
+      amount: r.totalAmount, settlement: r.settlement as 'credit' | 'refund', refundAmount: r.refundAmount,
     })),
     pays.map(p => ({
       partyId: kind === 'sale'
@@ -182,7 +187,7 @@ export async function settleParty(
   const returns = ids.length
     ? await client.productReturn.findMany({
         where: kind === 'sale' ? { saleId: { in: ids } } : { purchaseId: { in: ids } },
-        select: { saleId: true, purchaseId: true, totalAmount: true },
+        select: { saleId: true, purchaseId: true, totalAmount: true, settlement: true, refundAmount: true },
       })
     : [];
   const pays = kind === 'sale'
@@ -198,7 +203,7 @@ export async function settleParty(
     invoices.map(inv => ({ id: inv.id, partyId, date: inv.date, total: inv.total, createdAt: inv.createdAt })),
     returns.map(r => ({
       invoiceId: (r as { saleId?: string | null }).saleId ?? (r as { purchaseId?: string | null }).purchaseId ?? null,
-      amount: r.totalAmount,
+      amount: r.totalAmount, settlement: r.settlement as 'credit' | 'refund', refundAmount: r.refundAmount,
     })),
     pays.map(p => ({
       partyId,

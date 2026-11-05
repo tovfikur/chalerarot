@@ -397,6 +397,19 @@ export function TradeDashboardForm({ mode, onDone, onOpenHistory, editId }: Trad
     }, 0);
   }, [items, products]);
 
+  const belowCostLoss = useMemo(() => {
+    if (!isSale) return 0;
+    return items.reduce((sum, item) => {
+      const qty = Math.max(0, parseNum(item.qty));
+      if (!qty) return sum;
+      const product = products.find(p => p.id === item.productId || p.name === item.name);
+      const per = kgPerUnit(product, item.unit || 'medium');
+      const costPerUnit = parseNum(item.purchaseRate) || Math.round((product?.cost || 0) * per);
+      const salePerUnit = parseNum(item.rate);
+      return sum + Math.max(0, costPerUnit - salePerUnit) * qty;
+    }, 0);
+  }, [isSale, items, products]);
+
   const totalOtherCost = useMemo(() => {
     if (isSale) return 0;
     return items.reduce((sum, item) => {
@@ -407,8 +420,8 @@ export function TradeDashboardForm({ mode, onDone, onOpenHistory, editId }: Trad
   }, [items, isSale]);
 
   const estimatedProfit = useMemo(() => {
-    return isSale ? (totalProductValue - totalEstimatedCost) : 0;
-  }, [isSale, totalProductValue, totalEstimatedCost]);
+    return isSale ? (totalProductValue - parseNum(discount) - totalEstimatedCost) : 0;
+  }, [isSale, totalProductValue, totalEstimatedCost, discount]);
 
   const numTransport = parseNum(transportCost);
 
@@ -745,6 +758,9 @@ export function TradeDashboardForm({ mode, onDone, onOpenHistory, editId }: Trad
         const isSaleKind = kind === 'sale';
         const sd = d as any, pd = d as any;
         const party = isSaleKind ? sd.customer : pd.vendor;
+        const belowCostLoss = isSaleKind
+          ? sd.items.reduce((sum: number, item: any) => sum + Math.max(0, (item.unitCost ?? 0) - item.rate) * Math.max(0, item.qtyKg), 0)
+          : 0;
         const un: UnitNames = lang === 'bn'
           ? { kg: 'কেজি', small: 'ছোট বস্তা', medium: 'বস্তা', large: 'বড় বস্তা', ton: 'টন' }
           : { kg: 'kg', small: 'Small bag', medium: 'Bag', large: 'Large bag', ton: 'ton' };
@@ -763,6 +779,11 @@ export function TradeDashboardForm({ mode, onDone, onOpenHistory, editId }: Trad
           paid: `৳${d.paid}`,
           due: `৳${d.due}`,
           next: d.nextDate,
+          extra: belowCostLoss > 0 ? [{
+            label: tx('ক্রয়দরের নিচে বিক্রির লোকসান', 'Loss on below-cost items'),
+            value: `-৳${Math.round(belowCostLoss)}`,
+            tone: 'loss',
+          }] : undefined,
           labels: {
             shop: tx('চালের আড়ৎ', 'Chaler Arot'),
             docTitle: isSaleKind ? tx('বিক্রয় ইনভয়েস', 'Sales invoice') : tx('ক্রয় ইনভয়েস', 'Purchase invoice'),
@@ -1771,11 +1792,9 @@ export function TradeDashboardForm({ mode, onDone, onOpenHistory, editId }: Trad
             const rowRate = parseNum(row.rate);
             const rowProduct = products.find(p => p.id === row.productId || p.name === row.name);
             const bagKg = rowProduct?.mediumBagKg || 50;
-            const isBag = (row.unit || 'medium') === 'medium';
-            const per = isBag ? bagKg : 1;
+            const per = kgPerUnit(rowProduct, row.unit || 'medium');
             const rowTotal = Math.round(rowQty * rowRate);
             const basePurchaseRate = rowProduct ? Math.round((rowProduct.cost || 0) * per) : 0;
-            const rowPurchaseRate = parseNum(row.purchaseRate);
             const rowKg = rowQty !== 0 ? Math.round(rowQty * per * 100) / 100 : 0;
             const isReturnLine = rowQty < 0;
 
@@ -2210,6 +2229,12 @@ export function TradeDashboardForm({ mode, onDone, onOpenHistory, editId }: Trad
               </Text>
             </View>
           </View>
+          {isSale && belowCostLoss > 0 ? (
+            <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', backgroundColor: '#FEF2F2', borderWidth: 1, borderColor: '#FECACA', borderRadius: 8, paddingVertical: 9, paddingHorizontal: 14, marginTop: 8 }}>
+              <Text style={{ fontSize: 13, color: '#B91C1C', fontWeight: '800' }}>{tx('ক্রয়দরের নিচে বিক্রির লোকসান:', 'Loss on below-cost items:')}</Text>
+              <Text style={{ fontSize: 15, color: '#DC2626', fontWeight: '900' }}>-৳{toBnDigits(String(Math.round(belowCostLoss)))}</Text>
+            </View>
+          ) : null}
 
         </View>
 
@@ -2396,12 +2421,15 @@ export function TradeDashboardForm({ mode, onDone, onOpenHistory, editId }: Trad
 
                   {isSale ? (
                     <View style={{ marginTop: 4, flexDirection: 'row', justifyContent: 'space-between' }}>
-                      <Text style={{ fontSize: 14, color: '#475569' }}>প্রত্যাশিত লাভ:</Text>
-                      <Text style={{ fontSize: 15, fontWeight: '700', color: estimatedProfit >= 0 ? '#15803D' : '#DC2626' }}>
-                        {estimatedProfit >= 0 ? '+' : ''}৳{toBnDigits(String(Math.round(estimatedProfit)))}
+                      <Text style={{ fontSize: 14, color: estimatedProfit >= 0 ? '#475569' : '#DC2626', fontWeight: estimatedProfit < 0 ? '800' : '400' }}>
+                        {estimatedProfit >= 0 ? tx('প্রত্যাশিত লাভ:', 'Expected profit:') : tx('প্রত্যাশিত লোকসান:', 'Expected loss:')}
+                      </Text>
+                      <Text style={{ fontSize: 15, fontWeight: '800', color: estimatedProfit >= 0 ? '#15803D' : '#DC2626' }}>
+                        {estimatedProfit >= 0 ? '+' : '-'}৳{toBnDigits(String(Math.abs(Math.round(estimatedProfit))))}
                       </Text>
                     </View>
                   ) : null}
+
                 </View>
 
                 {/* RIGHT SIDE: Total Invoice Value, Cash, Bank, Discount, Invoice Due, Previous Due, Line, Total Due */}

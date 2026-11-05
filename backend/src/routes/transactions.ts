@@ -92,12 +92,22 @@ async function editSale(req: Request, res: Response) {
         const qtyKg = Math.round(toKg(product, line.unit, enteredQty) * 100) / 100;
         const rate = num(line.rate, product.price);
         if (!(rate > 0)) throw Object.assign(new Error('Invalid sale rate'), { status: 400 });
-        const unitCost = await currentAvgCost(t, product.id);
+        const currentAvg = await currentAvgCost(t, product.id);
+        const unitCost = line.unitCost === undefined ? currentAvg : num(line.unitCost, currentAvg);
+        if (unitCost < 0) throw Object.assign(new Error('Purchase cost cannot be negative.'), { status: 400 });
         if (qtyKg > product.qtyKg) throw Object.assign(new Error(`Not enough stock: ${product.name}`), { status: 400 });
+        if (round2(product.stockValue - qtyKg * unitCost) < -0.01) throw Object.assign(new Error(`Purchase cost exceeds the available inventory value for ${product.name}.`), { status: 400 });
+        if (qtyKg >= product.qtyKg && Math.abs(product.stockValue - qtyKg * unitCost) > 0.01) throw Object.assign(new Error(`When selling all remaining ${product.name} stock, use its current average cost.`), { status: 400 });
         const lineCogs = round2(qtyKg * unitCost);
         subtotal = round2(subtotal + qtyKg * rate); cogs = round2(cogs + lineCogs);
         savedItems.push({ productId: product.id, unit: line.unit, enteredQty, qtyKg, rate, unitCost, cogs: lineCogs });
-        await writeMovement(t, product.id, { type: 'SALE', bucket: 'sellable', qtyKg: -qtyKg, unitCost, date: day, refId: old.id });
+        const customCostNote = Math.abs(unitCost - currentAvg) >= 0.01;
+        const nextAverage = product.qtyKg - qtyKg > 0 ? round2((product.stockValue - qtyKg * unitCost) / (product.qtyKg - qtyKg)) : unitCost;
+        await writeMovement(t, product.id, {
+          type: 'SALE', bucket: 'sellable', qtyKg: -qtyKg, unitCost, date: day, refId: old.id,
+          forceUnitCost: true,
+          note: customCostNote ? `Invoice purchase cost override: average ${currentAvg.toFixed(2)} -> ${nextAverage.toFixed(2)} per kg.` : null,
+        });
       }
       const total = Math.max(0, round2(subtotal - disc));
       const cappedPay = Math.min(pay, total); const due = round2(total - cappedPay);
@@ -252,8 +262,8 @@ tx.get('/sales/:id', async (req: Request, res: Response) => {
     }))
   );
 
-  const displayPaid = Math.min(netTotal, Math.max(0, round2((st?.paid ?? s.paid) - returnTotal)));
-  const displayDue = Math.max(0, round2(netTotal - displayPaid));
+  const displayPaid = Math.min(netTotal, Math.max(0, round2(st?.paid ?? s.paid)));
+  const displayDue = Math.max(0, round2(st?.due ?? (netTotal - displayPaid)));
   const savedPayments = await db.customerPayment.findMany({ where: { saleId: s.id, returnId: null, active: true }, orderBy: { createdAt: 'asc' } });
   const paymentRows = await db.moneyMovement.findMany({ where: { sourceType: 'customerPayment', active: true, sourceId: { in: savedPayments.map(p => p.id) } }, orderBy: { createdAt: 'asc' }, select: { sourceId: true, moneyAccountId: true } });
   const paymentAccount = new Map(paymentRows.map(p => [p.sourceId, p.moneyAccountId]));
@@ -340,21 +350,28 @@ tx.post('/sales', async (req: Request, res: Response) => {
         const rate = l?.rate === undefined ? p.price : num(l.rate);
         if (!(rate > 0)) throw Object.assign(new Error('Invalid sale rate'), { status: 400, code: 'RATE_INVALID' });
         const currentAvg = await currentAvgCost(t, p.id);
-        // COGS always uses the live AVCO immediately before this sale line.
-        // Client-supplied product.cost can be stale after purchases/landed cost.
-        const unitCost = currentAvg;
+        // The invoice purchase-price field is the chosen COGS/inventory issue
+        // cost. When omitted, use the current moving average.
+        const unitCost = entered > 0 && l.unitCost !== undefined ? num(l.unitCost, currentAvg) : currentAvg;
+        if (unitCost < 0) throw Object.assign(new Error('Purchase cost cannot be negative.'), { status: 400 });
 
         if (entered > 0) {
           // Standard sale line
           const qtyKg = Math.round(toKg(p, l.unit, entered) * 100) / 100;
           if (qtyKg > p.qtyKg) throw Object.assign(new Error(`Not enough stock: ${p.name}`), { status: 400 });
+          if (round2(p.stockValue - qtyKg * unitCost) < -0.01) throw Object.assign(new Error(`Purchase cost exceeds the available inventory value for ${p.name}.`), { status: 400 });
+          if (qtyKg >= p.qtyKg && Math.abs(p.stockValue - qtyKg * unitCost) > 0.01) throw Object.assign(new Error(`When selling all remaining ${p.name} stock, use its current average cost.`), { status: 400 });
           const lineCogs = round2(qtyKg * unitCost);
           cogs += lineCogs;
           sub += round2(qtyKg * rate);
           items.push({ productId: p.id, unit: l.unit, enteredQty: entered, qtyKg, rate, unitCost, cogs: lineCogs });
           // Selling leaves quantity AND inventory value (AVCO out).
+          const customCostNote = Math.abs(unitCost - currentAvg) >= 0.01;
+          const nextAverage = p.qtyKg - qtyKg > 0 ? round2((p.stockValue - qtyKg * unitCost) / (p.qtyKg - qtyKg)) : unitCost;
           await writeMovement(t, p.id, {
             type: 'SALE', bucket: 'sellable', qtyKg: -qtyKg, unitCost, date: day,
+            forceUnitCost: true,
+            note: customCostNote ? `Invoice purchase cost override: ${currentAvg.toFixed(2)} -> ${nextAverage.toFixed(2)} per kg.` : null,
           });
         } else {
           // Negative quantity => SALES RETURN line
@@ -552,8 +569,8 @@ tx.get('/purchases/:id', async (req: Request, res: Response) => {
     }))
   );
 
-  const displayPaid = Math.min(netTotal, Math.max(0, round2((st?.paid ?? p.paid) - returnTotal)));
-  const displayDue = Math.max(0, round2(netTotal - displayPaid));
+  const displayPaid = Math.min(netTotal, Math.max(0, round2(st?.paid ?? p.paid)));
+  const displayDue = Math.max(0, round2(st?.due ?? (netTotal - displayPaid)));
   const savedPayments = await db.vendorPayment.findMany({ where: { purchaseId: p.id, returnId: null, active: true }, orderBy: { createdAt: 'asc' } });
   const paymentRows = await db.moneyMovement.findMany({ where: { sourceType: 'purchase', active: true, OR: [{ sourceId: { startsWith: p.id } }, { sourceId: { in: savedPayments.map(payment => payment.id) } }] }, orderBy: { createdAt: 'asc' }, select: { sourceId: true, moneyAccountId: true } });
   const paymentAccount = new Map(paymentRows.map(m => [m.sourceId, m.moneyAccountId]));
@@ -930,12 +947,12 @@ tx.get('/bootstrap', async (_req: Request, res: Response) => {
   // no extra queries. paid/due/status below are derived, never stored columns.
   const saleSet = buildSettlement(
     sales.map(s => ({ id: s.id, partyId: s.customerId ?? '', date: s.date, total: s.total, createdAt: s.createdAt })),
-    rets.filter(r => r.saleId).map(r => ({ invoiceId: r.saleId, amount: r.totalAmount })),
+    rets.filter(r => r.saleId).map(r => ({ invoiceId: r.saleId, amount: r.totalAmount, settlement: r.settlement as 'credit' | 'refund', refundAmount: r.refundAmount })),
     customerPayments.map(p => ({ partyId: p.customerId ?? '', invoiceId: p.saleId, returnId: p.returnId, date: p.date, amount: p.amount, createdAt: p.createdAt })),
   );
   const purSet = buildSettlement(
     purchases.map(p => ({ id: p.id, partyId: p.vendorId, date: p.date, total: p.total, createdAt: p.createdAt })),
-    rets.filter(r => r.purchaseId).map(r => ({ invoiceId: r.purchaseId, amount: r.totalAmount })),
+    rets.filter(r => r.purchaseId).map(r => ({ invoiceId: r.purchaseId, amount: r.totalAmount, settlement: r.settlement as 'credit' | 'refund', refundAmount: r.refundAmount })),
     vendorPayments.map(p => ({ partyId: p.vendorId, invoiceId: p.purchaseId, returnId: p.returnId, date: p.date, amount: p.amount, createdAt: p.createdAt })),
   );
   res.json({
@@ -957,7 +974,8 @@ tx.get('/bootstrap', async (_req: Request, res: Response) => {
       const purchase = mv.refId ? purchases.find(row => row.id === mv.refId) : undefined;
       const transactionNo = sale?.invoiceNo ?? purchase?.invoiceNo ?? undefined;
       const isEditReversal = mv.type === 'SALE_EDIT_REVERSAL' || mv.type === 'PURCHASE_EDIT_REVERSAL';
-      return { id: mv.id, productId: mv.productId, productName: mv.product.name, type: mv.type, qty: mv.qtyKg, bags: mv.product.mediumBagKg > 0 ? round2(mv.qtyKg / mv.product.mediumBagKg) : 0, unitCost: mv.unitCost, bagUnitPrice: round2(mv.unitCost * (mv.product.mediumBagKg || 0)), amount: mv.value, date: mv.date, transactionNo, note: transactionNo ? `${isEditReversal ? 'Correction reversal for' : 'Posted against'} ${transactionNo}` : undefined };
+      const transactionNote = transactionNo ? `${isEditReversal ? 'Correction reversal for' : 'Posted against'} ${transactionNo}` : undefined;
+      return { id: mv.id, productId: mv.productId, productName: mv.product.name, type: mv.type, qty: mv.qtyKg, bags: mv.product.mediumBagKg > 0 ? round2(mv.qtyKg / mv.product.mediumBagKg) : 0, unitCost: mv.unitCost, bagUnitPrice: round2(mv.unitCost * (mv.product.mediumBagKg || 0)), amount: mv.value, date: mv.date, transactionNo, note: [mv.note, transactionNote].filter(Boolean).join(' · ') || undefined };
     }),
     expenses: [
       ...expenses.map(e => ({ id: e.id, voucherNo: e.voucherNo ?? undefined, category: e.category, customName: e.customName ?? undefined, amount: e.amount, date: e.date, note: e.note ?? undefined, capitalized: e.capitalized, method: expMethod.get(e.id)?.method, accountId: expMethod.get(e.id)?.moneyAccountId ?? undefined })),
