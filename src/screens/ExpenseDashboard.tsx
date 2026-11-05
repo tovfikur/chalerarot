@@ -25,6 +25,7 @@ import { AppIcon, icons, type IconName } from '../icons';
 import { RGrid, useBreakpoint, useFs } from '../responsive';
 import { parseNum, toEnDigits } from '../bn';
 import { SearchField } from '../search';
+import { downloadCSV } from '../stockReport';
 import { DetailShell } from '../screens';
 
 type Cat = { id: string; name: string; kind: ExpenseCategoryKind; key?: string; custom?: boolean; customName?: string };
@@ -177,7 +178,7 @@ export function ExpenseDashboard(_props: ExpenseDashboardProps) {
   }, [lang]);
 
   const total = useMemo(() => expenses.reduce((s, e) => s + e.amount, 0), [expenses]);
-  const operating = useMemo(() => expenses.filter(e => kindOf(e) === 'operating').reduce((s, e) => s + e.amount, 0), [expenses, kindOf]);
+  const operating = useMemo(() => expenses.filter(e => !e.capitalized && kindOf(e) === 'operating').reduce((s, e) => s + e.amount, 0), [expenses, kindOf]);
   const landing = useMemo(() => expenses.filter(e => kindOf(e) === 'landing').reduce((s, e) => s + e.amount, 0), [expenses, kindOf]);
   const todayTotal = useMemo(() => {
     const d = today();
@@ -359,6 +360,7 @@ export function ExpenseDashboard(_props: ExpenseDashboardProps) {
         render: (r, size) => (
           <View>
             <Text style={{ fontSize: size, color: color.text, fontWeight: '600' }}>{catLabel(r)}</Text>
+            {r.capitalized ? <Text style={{ fontSize: size - 2, color: color.purple }}>{tx('মজুদের মূল্যে যোগ; পরিচালন খরচ নয়', 'Added to inventory cost; not an operating expense')}</Text> : null}
             {r.note ? <Text numberOfLines={1} style={{ fontSize: size - 2, color: color.muted }}>{r.note}</Text> : null}
             {isMobile && accountName(r.accountId) ? <Text style={{ fontSize: size - 2, color: color.muted }}>{accountName(r.accountId)}</Text> : null}
           </View>
@@ -388,17 +390,29 @@ export function ExpenseDashboard(_props: ExpenseDashboardProps) {
     return cols;
   }, [accountName, catLabel, fd, isMobile, m, tx]);
 
+  const exportFilteredExpenses = () => {
+    const cell = (value: unknown) => `"${String(value ?? '').replace(/"/g, '""')}"`;
+    const csv = [
+      [tx('তারিখ', 'Date'), tx('খাত', 'Category'), tx('হিসাবের ধরন', 'Treatment'), tx('অ্যাকাউন্ট', 'Account'), tx('বিবরণ', 'Note'), tx('পরিমাণ', 'Amount')].map(cell).join(','),
+      ...filtered.map(e => [e.date, catLabel(e), e.capitalized ? tx('মজুদের মূল্যে যোগ', 'Capitalized into inventory') : tx('পরিচালন খরচ', 'Operating expense'), accountName(e.accountId), e.note ?? '', e.amount].map(cell).join(',')),
+    ].join('\r\n');
+    downloadCSV(`expense_report_${today()}.csv`, csv);
+  };
+
   return (
     <Screen maxWidth={1400}>
       <PageHeader
         title={tx('খরচ ড্যাশবোর্ড', 'Expense Dashboard')}
         subtitle={tx('সব খরচ, ক্যাটাগরি ও ল্যান্ডিং খরচ এক জায়গায়', 'All expenses, categories and landing costs in one place')}
         icon={icons.expense}
-        actions={<Btn label={tx('নতুন খরচ', 'New Expense')} icon={icons.plus} onPress={() => openNew(catFilter)} testID="expense-new" />}
+        actions={<View style={{ flexDirection: 'row', gap: 8, flexWrap: 'wrap' }}>
+          <Btn kind="ghost" label={tx('রিপোর্ট ডাউনলোড', 'Download report')} icon={icons.excel} onPress={exportFilteredExpenses} />
+          <Btn label={tx('নতুন খরচ', 'New Expense')} icon={icons.plus} onPress={() => openNew(catFilter)} testID="expense-new" />
+        </View>}
       />
 
       <RGrid mobile={2} tablet={2} desktop={4}>
-        <SummaryCard label={tx('সর্বমোট খরচ', 'Total Expenses')} value={m(total)} sub={`${n(expenses.length)} ${tx('এন্ট্রি', 'entries')}`} icon={icons.expense} tone={color.primary} />
+        <SummaryCard label={tx('মোট পরিশোধ', 'Total Cash Paid')} value={m(total)} sub={tx('মজুদে যোগ করা ল্যান্ডিং খরচসহ', 'Includes costs capitalized into stock')} icon={icons.expense} tone={color.primary} />
         <SummaryCard label={tx('পরিচালন খরচ', 'Operating')} value={m(operating)} sub={tx('দৈনন্দিন খরচ', 'Running costs')} icon={icons.office} tone={color.amber} />
         <SummaryCard label={tx('ল্যান্ডিং খরচ', 'Landing Cost')} value={m(landing)} sub={tx('লোডিং ও শ্রমিক', 'Loading and labour')} icon={icons.ship} tone={color.purple} />
         <SummaryCard label={tx('আজকের খরচ', 'Today')} value={m(todayTotal)} sub={fd(today())} icon={icons.history} tone={color.green} />

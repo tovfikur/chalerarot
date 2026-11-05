@@ -1,0 +1,2 @@
+ALTER TABLE "CustomerPayment" ADD COLUMN "active" BOOLEAN NOT NULL DEFAULT true;
+ALTER TABLE "VendorPayment" ADD COLUMN "active" BOOLEAN NOT NULL DEFAULT true;

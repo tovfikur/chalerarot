@@ -33,11 +33,13 @@ export type PeriodFinance = {
   purchase: number;
   purchaseReturn: number;
   netPurchase: number;
+  capitalizedLandedCost: number;
   closingStockValue: number;
   damagedStockValue: number;
   cogs: number;
   grossProfit: number;
   expense: number;
+  otherIncomeExpense: number;
   netProfit: number;
 };
 
@@ -88,24 +90,35 @@ export async function periodFinance(mode: PeriodMode, ref?: string, end?: string
   const inRange = { gte: start, lte: endDate };
   const before = { lt: start };
 
-  const [sales, rets, purchases, expenses, openV, closeV, openingAdded] = await Promise.all([
+  const [sales, rets, purchases, expenses, purchaseItems, openV, closeV, openingAdded, journalLines] = await Promise.all([
     db.sale.findMany({ where: { date: inRange }, select: { total: true } }),
     db.productReturn.findMany({ where: { date: inRange }, select: { kind: true, totalAmount: true } }),
     db.purchase.findMany({ where: { date: inRange }, select: { total: true } }),
-    db.expense.findMany({ where: { date: inRange, deletedAt: null }, select: { amount: true } }),
+    db.expense.findMany({ where: { date: inRange, deletedAt: null }, select: { amount: true, capitalized: true } }),
+    db.purchaseItem.findMany({ where: { otherCost: { gt: 0 } }, select: { id: true, otherCost: true, qtyKg: true, purchase: { select: { date: true } }, product: { select: { mediumBagKg: true } } } }),
     inventoryValueAt(start, false),
     inventoryValueAt(endDate, true),
     // Opening stock set up inside the period is an inflow of inventory value. It
     // is not a Purchase, so without this a period that begins before the shop
     // existed would show a negative COGS.
     db.stockMovement.findMany({ where: { type: 'OPENING', bucket: 'sellable', date: inRange }, select: { value: true } }),
+    db.journalLine.findMany({ where: { entry: { active: true, date: inRange } }, select: { debit: true, credit: true, account: { select: { type: true } } } }),
   ]);
 
   const salesTotal = sum(sales.map(s => s.total));
   const salesReturn = sum(rets.filter(r => r.kind === 'sale').map(r => r.totalAmount));
   const purchase = sum(purchases.map(p => p.total));
   const purchaseReturn = sum(rets.filter(r => r.kind === 'purchase').map(r => r.totalAmount));
-  const expense = sum(expenses.map(e => e.amount));
+  const expense = sum(expenses.filter(e => !e.capitalized).map(e => e.amount));
+
+  // Other cost per bag is capitalized into PurchaseItem.unitCost and already
+  // lives in the stock movement value. Include it with purchases in the
+  // inventory/COGS bridge. Purchase returns credit the supplier at the invoice
+  // rate, so any non-refundable landed cost stays allocated to remaining stock.
+  const landedPurchase = sum(purchaseItems
+    .filter(i => i.purchase.date >= start && i.purchase.date <= endDate)
+    .map(i => i.otherCost * i.qtyKg / (i.product.mediumBagKg || 50)));
+  const capitalizedLandedCost = landedPurchase;
 
   const netSales = round2(salesTotal - salesReturn);
   const netPurchase = round2(purchase - purchaseReturn);
@@ -113,17 +126,18 @@ export async function periodFinance(mode: PeriodMode, ref?: string, end?: string
   const openingStockAdded = round2(openingAdded.reduce((acc, x) => acc + x.value, 0));
   const openingStockValue = round2(openingStockCarryIn + openingStockAdded);
   const closingStockValue = closeV.sellable;
-  const cogs = round2(openingStockValue + netPurchase - closingStockValue);
+  const cogs = round2(openingStockValue + netPurchase + capitalizedLandedCost - closingStockValue);
   const grossProfit = round2(netSales - cogs);
-  const netProfit = round2(grossProfit - expense);
+  const otherIncomeExpense = round2(journalLines.reduce((total, line) => total + (line.account.type === 'income' ? line.credit - line.debit : line.account.type === 'expense' ? line.debit - line.credit : 0) * -1, 0));
+  const netProfit = round2(grossProfit - expense - otherIncomeExpense);
 
   return {
     mode, start, end: endDate,
     sales: salesTotal, salesReturn, netSales,
     openingStockValue, openingStockCarryIn, openingStockAdded,
-    purchase, purchaseReturn, netPurchase,
+    purchase, purchaseReturn, netPurchase, capitalizedLandedCost,
     closingStockValue, damagedStockValue: closeV.damaged,
-    cogs, grossProfit, expense, netProfit,
+    cogs, grossProfit, expense, otherIncomeExpense, netProfit,
   };
 }
 

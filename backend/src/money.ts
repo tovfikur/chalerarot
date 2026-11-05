@@ -73,7 +73,7 @@ const round2 = (n: number) => Math.round(n * 100) / 100;
 
 export type AccountRow = {
   id: string; name: string; type: string; openingBalance: number;
-  openingDate: string | null; bankName: string | null; accountNumber: string | null;
+  openingDate: string; bankName: string | null; accountNumber: string | null;
   branch: string | null; mobileNumber: string | null; note: string | null; active: boolean;
 };
 
@@ -188,7 +188,8 @@ export async function setMovementActive(
 
 export type AccountBalance = {
   id: string; name: string; type: string;
-  openingBalance: number; openingDate: string | null;
+  openingBalance: number; openingDate: string;
+  openingAdjustments: number; adjustedOpeningBalance: number;
   bankName?: string; accountNumber?: string; branch?: string; mobileNumber?: string; note?: string;
   active: boolean;
   /** Financial history that must never be destroyed by a delete. */
@@ -207,6 +208,15 @@ export async function accountBalances(client: typeof db | TxClient = db, today?:
     where: { active: true },
     _sum: { amount: true },
   });
+  const openingAdjustments = await client.moneyMovement.groupBy({
+    by: ['moneyAccountId', 'direction'],
+    where: { active: true, sourceType: 'openingAdjust' },
+    _sum: { amount: true },
+  });
+  const savedJournalLines = await client.journalLine.findMany({ where: { entry: { active: true }, account: { moneyAccountId: { not: null } } }, select: { debit: true, credit: true, account: { select: { moneyAccountId: true } } } });
+  const journalByAccount = new Map<string, { debit: number; credit: number }>();
+  const journalHistory = new Set<string>();
+  for (const line of savedJournalLines) { const id = line.account.moneyAccountId; if (!id) continue; journalHistory.add(id); const sums = journalByAccount.get(id) ?? { debit: 0, credit: 0 }; sums.debit += line.debit; sums.credit += line.credit; journalByAccount.set(id, sums); }
   // Two grouped counts (not per-account queries) tell the UI whether permanent
   // deletion is allowed: any movement or transfer side is financial history.
   const mvCounts = await client.moneyMovement.groupBy({ by: ['moneyAccountId'], _count: { _all: true } });
@@ -225,9 +235,15 @@ export async function accountBalances(client: typeof db | TxClient = db, today?:
   return accounts.map(a => {
     const inflow = sumFor(grouped, a.id, 'in');
     const outflow = sumFor(grouped, a.id, 'out');
+    const journal = journalByAccount.get(a.id) ?? { debit: 0, credit: 0 };
+    const adjustmentIn = round2(openingAdjustments.find(r => r.moneyAccountId === a.id && r.direction === 'in')?._sum.amount ?? 0);
+    const adjustmentOut = round2(openingAdjustments.find(r => r.moneyAccountId === a.id && r.direction === 'out')?._sum.amount ?? 0);
+    const netOpeningAdjustments = round2(adjustmentIn - adjustmentOut);
     return {
       id: a.id, name: a.name, type: a.type,
       openingBalance: round2(a.openingBalance), openingDate: a.openingDate,
+      openingAdjustments: netOpeningAdjustments,
+      adjustedOpeningBalance: round2(a.openingBalance + netOpeningAdjustments),
       bankName: a.bankName ?? undefined, accountNumber: a.accountNumber ?? undefined,
       branch: a.branch ?? undefined, mobileNumber: a.mobileNumber ?? undefined, note: a.note ?? undefined,
       active: a.active,
@@ -235,8 +251,9 @@ export async function accountBalances(client: typeof db | TxClient = db, today?:
       transferCount: countOf(outCounts, 'fromAccountId', a.id) + countOf(inCounts, 'toAccountId', a.id),
       hasHistory: countOf(mvCounts, 'moneyAccountId', a.id) > 0
         || countOf(outCounts, 'fromAccountId', a.id) > 0
-        || countOf(inCounts, 'toAccountId', a.id) > 0,
-      balance: round2(a.openingBalance + inflow - outflow),
+        || countOf(inCounts, 'toAccountId', a.id) > 0
+        || journalHistory.has(a.id),
+      balance: round2(a.openingBalance + inflow - outflow + journal.debit - journal.credit),
       todayIn: sumFor(todayRows, a.id, 'in'),
       todayOut: sumFor(todayRows, a.id, 'out'),
     };
@@ -245,13 +262,14 @@ export async function accountBalances(client: typeof db | TxClient = db, today?:
 
 /** Current balance of ONE account (canonical maths). */
 export async function accountBalance(client: typeof db | TxClient, accountId: string): Promise<number> {
-  const [a, grouped] = await Promise.all([
+  const [a, grouped, journal] = await Promise.all([
     client.moneyAccount.findUnique({ where: { id: accountId } }),
     client.moneyMovement.groupBy({ by: ['direction'], where: { moneyAccountId: accountId, active: true }, _sum: { amount: true } }),
+    client.journalLine.findMany({ where: { entry: { active: true }, account: { moneyAccountId: accountId } }, select: { debit: true, credit: true } }),
   ]);
   if (!a) return 0;
   const sumOf = (d: MoneyDirection) => grouped.find(g => g.direction === d)?._sum.amount ?? 0;
-  return round2(a.openingBalance + sumOf('in') - sumOf('out'));
+  return round2(a.openingBalance + sumOf('in') - sumOf('out') + journal.reduce((n, l) => n + l.debit - l.credit, 0));
 }
 
 export type MoneyBalance = {
@@ -272,7 +290,7 @@ export async function moneyBalances(client: typeof db | TxClient = db, today?: s
     const rows = perAccount.filter(a => a.type === method);
     return {
       method,
-      opening: round2(rows.reduce((s, a) => s + a.openingBalance, 0)),
+      opening: round2(rows.reduce((s, a) => s + a.adjustedOpeningBalance, 0)),
       balance: round2(rows.reduce((s, a) => s + a.balance, 0)),
       todayIn: round2(rows.reduce((s, a) => s + a.todayIn, 0)),
       todayOut: round2(rows.reduce((s, a) => s + a.todayOut, 0)),

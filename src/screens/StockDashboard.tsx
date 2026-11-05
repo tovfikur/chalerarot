@@ -11,10 +11,13 @@ import {
   exportAuditExcel,
   exportAuditPDF,
   AuditRow,
+  movementTypeLabel,
 } from '../stockReport';
 
 export function StockDashboard() {
-  const { t, products, stockTx, saveProduct, adjustStock, deleteProduct } = useApp();
+  const { t, lang, products, stockTx, saveProduct, adjustStock, deleteProduct } = useApp();
+  const label = (bn: string, en: string) => lang === 'bn' ? bn : en;
+  const digits = (value: string | number) => lang === 'bn' ? toBnDigits(String(value)) : String(value);
   const n = useNum();
 
   // Active view tab: 'products' | 'movements' | 'audit'
@@ -316,7 +319,7 @@ export function StockDashboard() {
       note: auditNote,
     });
     if (!ok && Platform.OS !== 'web') {
-      Alert.alert('অডিট রিপোর্ট', 'পিডিএফ রিপোর্ট তৈরি করা হয়েছে।');
+      Alert.alert(label('অডিট রিপোর্ট', 'Audit report'), label('পিডিএফ রিপোর্ট তৈরি করা হয়েছে।', 'PDF report created.'));
     }
   };
 
@@ -326,13 +329,13 @@ export function StockDashboard() {
       summary: auditSummary,
     });
     if (!ok && Platform.OS !== 'web') {
-      Alert.alert('অডিট শিট', 'এক্সেল ফাইল ডাউনলোড সম্পন্ন হয়েছে।');
+      Alert.alert(label('অডিট শিট', 'Audit sheet'), label('এক্সেল ফাইল ডাউনলোড সম্পন্ন হয়েছে।', 'Excel file downloaded.'));
     }
   };
 
   const handleApplyStockAdjustment = async () => {
     if (itemsToAdjust.length === 0) {
-      Alert.alert('সতর্কতা', 'সমন্বয় করার মতো কোনো গরমিল বা পরিবর্তন পাওয়া যায়নি। বাস্তব গণনায় পরিবর্তন আনুন।');
+      Alert.alert(label('সতর্কতা', 'Notice'), label('সমন্বয় করার মতো কোনো গরমিল বা পরিবর্তন পাওয়া যায়নি। বাস্তব গণনায় পরিবর্তন আনুন।', 'No stock differences to adjust. Update the physical counts first.'));
       return;
     }
     setIsAdjusting(true);
@@ -349,9 +352,9 @@ export function StockDashboard() {
       });
       setAuditConfirmModalOpen(false);
       handleClearAudit();
-      Alert.alert('সফল', `${itemsToAdjust.length} টি পণ্যের স্টক সমন্বয় সফলভাবে সম্পন্ন হয়েছে।`);
+      Alert.alert(label('সফল', 'Success'), label(`${toBnDigits(String(itemsToAdjust.length))} টি পণ্যের স্টক সমন্বয় সফলভাবে সম্পন্ন হয়েছে।`, `Stock adjusted for ${itemsToAdjust.length} products.`));
     } catch (err) {
-      Alert.alert('ত্রুটি', err instanceof Error ? err.message : 'স্টক সমন্বয় ব্যর্থ হয়েছে।');
+      Alert.alert(label('ত্রুটি', 'Error'), err instanceof Error ? err.message : label('স্টক সমন্বয় ব্যর্থ হয়েছে।', 'Stock adjustment failed.'));
     } finally {
       setIsAdjusting(false);
     }
@@ -361,20 +364,20 @@ export function StockDashboard() {
   const handleSaveProduct = async () => {
     const trimmedName = newName.trim();
     if (!trimmedName) {
-      Alert.alert(t('invalid'), 'পণ্যের নাম আবশ্যক।');
+      Alert.alert(t('invalid'), label('পণ্যের নাম আবশ্যক।', 'Product name is required.'));
       return;
     }
 
     const bagKg = parseNum(newBagKg) || 50;
     if (bagKg <= 0) {
-      Alert.alert(t('invalidBag'), 'প্রতি বস্তায় কেজির পরিমাণ ০ এর বেশি হতে হবে।');
+      Alert.alert(t('invalidBag'), label('প্রতি বস্তায় কেজির পরিমাণ ০ এর বেশি হতে হবে।', 'Bag weight must be greater than zero.'));
       return;
     }
     const openingBags = parseNum(newOpeningBags) || 0;
     const cost = parseNum(newCostRate) || 0;
     const price = parseNum(newSalePrice);
     if (!Number.isFinite(price) || price <= 0) {
-      Alert.alert(t('invalidSalePrice'), 'সঠিক বিক্রয়দর দিন (০ এর বেশি)।');
+      Alert.alert(t('invalidSalePrice'), label('সঠিক বিক্রয়দর দিন (০ এর বেশি)।', 'Enter a sale price greater than zero.'));
       return;
     }
     const openingKg = Math.round(openingBags * bagKg * 100) / 100;
@@ -408,9 +411,9 @@ export function StockDashboard() {
       setNewCostRate('');
       setNewSalePrice('');
       setNewDescription('');
-      Alert.alert(t('done'), isEdit ? 'পণ্য সফলভাবে আপডেট করা হয়েছে।' : 'নতুন পণ্য সফলভাবে যোগ করা হয়েছে।');
+      Alert.alert(t('done'), isEdit ? label('পণ্য সফলভাবে আপডেট করা হয়েছে।', 'Product updated.') : label('নতুন পণ্য সফলভাবে যোগ করা হয়েছে।', 'Product added.'));
     } catch (err) {
-      Alert.alert(t('invalid'), err instanceof Error ? err.message : 'সংরক্ষণ ব্যর্থ হয়েছে।');
+      Alert.alert(t('invalid'), err instanceof Error ? err.message : label('সংরক্ষণ ব্যর্থ হয়েছে।', 'Save failed.'));
     }
   };
 
@@ -426,9 +429,10 @@ export function StockDashboard() {
       totalBags,
       totalKg,
       totalValuation,
+      lang,
     });
     if (!ok && Platform.OS !== 'web') {
-      Alert.alert('এক্সেল', 'ফাইল ডাউনলোড সম্পন্ন হয়েছে।');
+      Alert.alert(label('এক্সেল', 'Excel'), label('ফাইল ডাউনলোড সম্পন্ন হয়েছে।', 'File downloaded.'));
     }
   };
 
@@ -445,9 +449,10 @@ export function StockDashboard() {
       totalKg,
       totalValuation,
       searchQuery: searchQuery.trim(),
+      lang,
     });
     if (!ok && Platform.OS !== 'web') {
-      Alert.alert('পিডিএফ', 'পিডিএফ রিপোর্ট তৈরি করা হয়েছে।');
+      Alert.alert('PDF', label('পিডিএফ রিপোর্ট তৈরি করা হয়েছে।', 'PDF report created.'));
     }
   };
 
@@ -462,7 +467,7 @@ export function StockDashboard() {
           </View>
           <View>
             <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
-              <Text style={styles.headerTitle}>মজুদ চাল ও স্টক বিবরণ</Text>
+      <Text style={styles.headerTitle}>{label('মজুদ চাল ও স্টক বিবরণ', 'Rice inventory')}</Text>
               
             </View>
             
@@ -476,7 +481,7 @@ export function StockDashboard() {
             activeOpacity={0.85}
           >
             <AppIcon name={icons.upload} size={18} iconColor="#FFFFFF" />
-            <Text style={styles.headerAddBtnText}>বাল্ক পণ্য আপলোড</Text>
+            <Text style={styles.headerAddBtnText}>{label('বাল্ক পণ্য আপলোড', 'Bulk upload')}</Text>
           </TouchableOpacity>
 
           <TouchableOpacity
@@ -486,7 +491,7 @@ export function StockDashboard() {
             activeOpacity={0.85}
           >
             <AppIcon name={icons.plus} size={18} iconColor="#FFFFFF" />
-            <Text style={styles.headerAddBtnText}>নতুন পণ্য</Text>
+            <Text style={styles.headerAddBtnText}>{label('নতুন পণ্য', 'New product')}</Text>
           </TouchableOpacity>
         </View>
       </View>
@@ -499,8 +504,8 @@ export function StockDashboard() {
             <AppIcon name={icons.stock} size={26} iconColor="#1c70b9" />
           </View>
           <View style={styles.kpiInfo}>
-            <Text style={styles.kpiLabel}>মোট মজুদ (বস্তা)</Text>
-            <Text style={styles.kpiValue}>{toBnDigits(totalBags.toLocaleString('en-IN'))} বস্তা</Text>
+            <Text style={styles.kpiLabel}>{label('মোট মজুদ (বস্তা)', 'Total stock (bags)')}</Text>
+            <Text style={styles.kpiValue}>{digits(totalBags.toLocaleString(lang === 'bn' ? 'en-IN' : 'en-US'))} {label('বস্তা', 'bags')}</Text>
           </View>
         </View>
 
@@ -510,8 +515,8 @@ export function StockDashboard() {
             <AppIcon name={icons.products} size={26} iconColor="#1976D2" />
           </View>
           <View style={styles.kpiInfo}>
-            <Text style={styles.kpiLabel}>মোট মজুদ (কেজি)</Text>
-            <Text style={styles.kpiValue}>{toBnDigits(Math.round(totalKg).toLocaleString('en-IN'))} কেজি</Text>
+            <Text style={styles.kpiLabel}>{label('মোট মজুদ (কেজি)', 'Total stock (kg)')}</Text>
+            <Text style={styles.kpiValue}>{digits(Math.round(totalKg).toLocaleString(lang === 'bn' ? 'en-IN' : 'en-US'))} {label('কেজি', 'kg')}</Text>
           </View>
         </View>
 
@@ -521,8 +526,8 @@ export function StockDashboard() {
             <AppIcon name={icons.profit} size={26} iconColor="#D97706" />
           </View>
           <View style={styles.kpiInfo}>
-            <Text style={styles.kpiLabel}>মোট মজুদ মূল্যায়ন</Text>
-            <Text style={styles.kpiValue}>৳{toBnDigits(Math.round(totalValuation).toLocaleString('en-IN'))}</Text>
+            <Text style={styles.kpiLabel}>{label('মোট মজুদ মূল্যায়ন', 'Total inventory value')}</Text>
+            <Text style={styles.kpiValue}>৳{digits(Math.round(totalValuation).toLocaleString(lang === 'bn' ? 'en-IN' : 'en-US'))}</Text>
           </View>
         </View>
       </View>
@@ -545,7 +550,7 @@ export function StockDashboard() {
             <Text
               style={[styles.tabBtnText, activeTab === 'products' ? styles.tabBtnTextActive : styles.tabBtnTextInactive]}
             >
-              পণ্য তালিকা
+              {label('পণ্য তালিকা', 'Products')}
             </Text>
           </TouchableOpacity>
 
@@ -564,7 +569,7 @@ export function StockDashboard() {
             <Text
               style={[styles.tabBtnText, activeTab === 'movements' ? styles.tabBtnTextActive : styles.tabBtnTextInactive]}
             >
-              স্টক মুভমেন্ট
+              {label('স্টক মুভমেন্ট', 'Stock movements')}
             </Text>
           </TouchableOpacity>
 
@@ -583,7 +588,7 @@ export function StockDashboard() {
             <Text
               style={[styles.tabBtnText, activeTab === 'audit' ? styles.tabBtnTextActive : styles.tabBtnTextInactive]}
             >
-              স্টক অডিট ও সমন্বয়
+              {label('স্টক অডিট ও সমন্বয়', 'Stock audit and adjustment')}
             </Text>
           </TouchableOpacity>
         </View>
@@ -594,66 +599,66 @@ export function StockDashboard() {
               <TouchableOpacity
                 onPress={handlePreFillWithSystem}
                 style={[styles.outlineActionBtn, { borderColor: '#1c70b9', backgroundColor: '#F0F7FF' }]}
-                accessibilityLabel="সিস্টেম মজুদ দিয়ে অটো পূরণ"
+                accessibilityLabel={label('সিস্টেম মজুদ দিয়ে অটো পূরণ', 'Fill using system stock')}
               >
                 <AppIcon name={icons.transfer} size={16} iconColor="#1c70b9" />
-                <Text style={[styles.outlineActionBtnText, { color: '#1c70b9', fontWeight: '700' }]}>অটো-পূরণ</Text>
+                <Text style={[styles.outlineActionBtnText, { color: '#1c70b9', fontWeight: '700' }]}>{label('অটো-পূরণ', 'Auto-fill')}</Text>
               </TouchableOpacity>
 
               <TouchableOpacity
                 onPress={handleClearAudit}
                 style={[styles.outlineActionBtn, { borderColor: '#94A3B8' }]}
-                accessibilityLabel="অডিট গণনা খালি করুন"
+                accessibilityLabel={label('অডিট গণনা খালি করুন', 'Clear audit counts')}
               >
                 <AppIcon name={icons.cancel} size={16} iconColor="#64748B" />
-                <Text style={[styles.outlineActionBtnText, { color: '#64748B', fontWeight: '600' }]}>মুছুন</Text>
+                <Text style={[styles.outlineActionBtnText, { color: '#64748B', fontWeight: '600' }]}>{label('মুছুন', 'Clear')}</Text>
               </TouchableOpacity>
 
               <TouchableOpacity
                 onPress={handleExportAuditPDF}
                 style={[styles.outlineActionBtn, { borderColor: '#DC2626' }]}
                 testID="stock-audit-pdf"
-                accessibilityLabel="অডিট রিপোর্ট ডাউনলোড (PDF)"
+                accessibilityLabel={label('অডিট রিপোর্ট ডাউনলোড (PDF)', 'Download audit report (PDF)')}
               >
                 <AppIcon name={icons.print} size={18} iconColor="#DC2626" />
-                <Text style={[styles.outlineActionBtnText, { color: '#DC2626', fontWeight: '700' }]}>অডিট রিপোর্ট (PDF)</Text>
+                <Text style={[styles.outlineActionBtnText, { color: '#DC2626', fontWeight: '700' }]}>{label('অডিট রিপোর্ট (PDF)', 'Audit report (PDF)')}</Text>
               </TouchableOpacity>
 
               <TouchableOpacity
                 onPress={handleExportAuditExcel}
                 style={[styles.outlineActionBtn, { borderColor: '#16A34A' }]}
                 testID="stock-audit-excel"
-                accessibilityLabel="অডিট শিট ডাউনলোড (Excel)"
+                accessibilityLabel={label('অডিট শিট ডাউনলোড (Excel)', 'Download audit sheet (Excel)')}
               >
                 <AppIcon name={icons.excel} size={18} iconColor="#16A34A" />
-                <Text style={[styles.outlineActionBtnText, { color: '#16A34A', fontWeight: '700' }]}>অডিট শিট (Excel)</Text>
+                <Text style={[styles.outlineActionBtnText, { color: '#16A34A', fontWeight: '700' }]}>{label('অডিট শিট (Excel)', 'Audit sheet (Excel)')}</Text>
               </TouchableOpacity>
             </>
           ) : (
             <>
               <TouchableOpacity onPress={() => setModalOpen(true)} style={styles.addProductGreenBtn}>
                 <AppIcon name={icons.add} size={18} iconColor="#fff" />
-                <Text style={styles.addProductGreenBtnText}>পণ্য যোগ করুন</Text>
+                <Text style={styles.addProductGreenBtnText}>{label('পণ্য যোগ করুন', 'Add product')}</Text>
               </TouchableOpacity>
 
               <TouchableOpacity
                 onPress={handleExportPDF}
                 style={[styles.outlineActionBtn, { borderColor: '#DC2626' }]}
                 testID="stock-pdf-download"
-                accessibilityLabel="পিডিএফ রিপোর্ট ডাউনলোড"
+                accessibilityLabel={label('পিডিএফ রিপোর্ট ডাউনলোড', 'Download PDF report')}
               >
                 <AppIcon name={icons.print} size={18} iconColor="#DC2626" />
-                <Text style={[styles.outlineActionBtnText, { color: '#DC2626', fontWeight: '700' }]}>পিডিএফ রিপোর্ট</Text>
+                <Text style={[styles.outlineActionBtnText, { color: '#DC2626', fontWeight: '700' }]}>{label('পিডিএফ রিপোর্ট', 'PDF report')}</Text>
               </TouchableOpacity>
 
               <TouchableOpacity
                 onPress={handleExportExcel}
                 style={[styles.outlineActionBtn, { borderColor: '#16A34A' }]}
                 testID="stock-excel-download"
-                accessibilityLabel="এক্সেল ডাউনলোড"
+                accessibilityLabel={label('এক্সেল ডাউনলোড', 'Download Excel')}
               >
                 <AppIcon name={icons.excel} size={18} iconColor="#16A34A" />
-                <Text style={[styles.outlineActionBtnText, { color: '#16A34A', fontWeight: '700' }]}>এক্সেল ডাউনলোড</Text>
+                <Text style={[styles.outlineActionBtnText, { color: '#16A34A', fontWeight: '700' }]}>{label('এক্সেল ডাউনলোড', 'Download Excel')}</Text>
               </TouchableOpacity>
             </>
           )}
@@ -671,7 +676,7 @@ export function StockDashboard() {
               setPage(1);
             }}
             style={styles.filterTextInput}
-            placeholder={activeTab === 'audit' ? 'অডিট তালিকায় পণ্য কোড বা নাম দিয়ে খুঁজুন...' : 'পণ্য কোড বা পণ্যের নাম দিয়ে খুঁজুন...'}
+            placeholder={activeTab === 'audit' ? label('অডিট তালিকায় পণ্য কোড বা নাম দিয়ে খুঁজুন...', 'Search audit by product code or name...') : label('পণ্য কোড বা পণ্যের নাম দিয়ে খুঁজুন...', 'Search by product code or name...')}
           />
         </View>
 
@@ -685,12 +690,12 @@ export function StockDashboard() {
           >
             <View style={[styles.discrepancyDot, showOnlyDiscrepancies && { backgroundColor: '#DC2626' }]} />
             <Text style={[styles.discrepancyToggleText, showOnlyDiscrepancies && styles.discrepancyToggleTextActive]}>
-              শুধু অমিলগুলো দেখান ({toBnDigits(String(auditSummary.discrepancyCount))})
+              {label('শুধু অমিলগুলো দেখান', 'Show discrepancies only')} ({digits(auditSummary.discrepancyCount)})
             </Text>
           </TouchableOpacity>
         ) : (
           <View style={styles.categoryDropdownWrap}>
-            <Text style={styles.categoryDropdownText}>সব পণ্য</Text>
+            <Text style={styles.categoryDropdownText}>{label('সব পণ্য', 'All products')}</Text>
             <AppIcon name={icons.chevR} size={18} iconColor="#64748B" />
           </View>
         )}
@@ -703,15 +708,15 @@ export function StockDashboard() {
             {/* Table Header */}
             <View style={styles.tableHeaderRow}>
               <Text style={[styles.th, { width: 50, textAlign: 'center' }]}>#</Text>
-              <Text style={[styles.th, { flex: 1.2 }]}>পণ্য কোড</Text>
-              <Text style={[styles.th, { flex: 2.2 }]}>পণ্যের নাম</Text>
+              <Text style={[styles.th, { flex: 1.2 }]}>{label('পণ্য কোড', 'Product code')}</Text>
+              <Text style={[styles.th, { flex: 2.2 }]}>{label('পণ্যের নাম', 'Product name')}</Text>
               
-              <Text style={[styles.th, { flex: 1.5, textAlign: 'right' }]}>মজুদ (বস্তা)</Text>
-              <Text style={[styles.th, { flex: 1.5, textAlign: 'right' }]}>মজুদ (কেজি)</Text>
+              <Text style={[styles.th, { flex: 1.5, textAlign: 'right' }]}>{label('মজুদ (বস্তা)', 'Stock (bags)')}</Text>
+              <Text style={[styles.th, { flex: 1.5, textAlign: 'right' }]}>{label('মজুদ (কেজি)', 'Stock (kg)')}</Text>
               <Text style={[styles.th, { flex: 1.5, textAlign: 'right' }]}>{t('avgUnitCost')}</Text>
               <Text style={[styles.th, { flex: 1.5, textAlign: 'right' }]}>{t('avgBagCost')}</Text>
-              <Text style={[styles.th, { flex: 1.5, textAlign: 'right' }]}>স্টক মূল্য (৳)</Text>
-              <Text style={[styles.th, { width: 112, textAlign: 'center' }]}>অ্যাকশন</Text>
+              <Text style={[styles.th, { flex: 1.5, textAlign: 'right' }]}>{label('স্টক মূল্য (৳)', 'Stock value (৳)')}</Text>
+              <Text style={[styles.th, { width: 112, textAlign: 'center' }]}>{label('অ্যাকশন', 'Actions')}</Text>
             </View>
 
             {/* Table Rows */}
@@ -722,7 +727,7 @@ export function StockDashboard() {
                 </View>
 
                 <View style={[styles.td, { flex: 1.2 }]}>
-                  <Text style={styles.cellBold}>{toBnDigits(row.code)}</Text>
+                  <Text style={styles.cellBold}>{digits(row.code)}</Text>
                 </View>
 
                 <View style={[styles.td, { flex: 2.2 }]}>
@@ -730,24 +735,24 @@ export function StockDashboard() {
                 </View>
 
                 <View style={[styles.td, { flex: 1.5, alignItems: 'flex-end' }]}>
-                  <Text style={[styles.cellBold, { color: '#0F172A' }]}>{toBnDigits(row.bags.toLocaleString('en-IN'))}</Text>
+                  <Text style={[styles.cellBold, { color: '#0F172A' }]}>{digits(row.bags.toLocaleString(lang === 'bn' ? 'en-IN' : 'en-US'))}</Text>
                 </View>
 
                 <View style={[styles.td, { flex: 1.5, alignItems: 'flex-end' }]}>
-                  <Text style={styles.cellText}>{toBnDigits(Math.round(row.totalKg).toLocaleString('en-IN'))}</Text>
+                  <Text style={styles.cellText}>{digits(Math.round(row.totalKg).toLocaleString(lang === 'bn' ? 'en-IN' : 'en-US'))}</Text>
                 </View>
 
                 <View style={[styles.td, { flex: 1.5, alignItems: 'flex-end' }]}>
-                  <Text style={styles.cellBold}>{toBnDigits(row.avgUnitCost.toFixed(2))}</Text>
+                  <Text style={styles.cellBold}>{digits(row.avgUnitCost.toFixed(2))}</Text>
                 </View>
 
                 <View style={[styles.td, { flex: 1.5, alignItems: 'flex-end' }]}>
-                  <Text style={styles.cellBold}>{toBnDigits(row.avgBagCost.toFixed(2))}</Text>
+                  <Text style={styles.cellBold}>{digits(row.avgBagCost.toFixed(2))}</Text>
                 </View>
 
                 <View style={[styles.td, { flex: 1.5, alignItems: 'flex-end' }]}>
                   <Text style={[styles.cellBold, { color: '#1c70b9' }]}>
-                    ৳{toBnDigits(Math.round(row.stockVal).toLocaleString('en-IN'))}
+                    ৳{digits(Math.round(row.stockVal).toLocaleString(lang === 'bn' ? 'en-IN' : 'en-US'))}
                   </Text>
                 </View>
 
@@ -776,10 +781,10 @@ export function StockDashboard() {
           <View>
             <View style={styles.tableHeaderRow}>
               <Text style={[styles.th, { width: 50, textAlign: 'center' }]}>#</Text>
-              <Text style={[styles.th, { flex: 1.2 }]}>তারিখ</Text>
-              <Text style={[styles.th, { flex: 2 }]}>পণ্যের নাম</Text>
-              <Text style={[styles.th, { flex: 1.5 }]}>ধরন</Text>
-              <Text style={[styles.th, { flex: 1.5, textAlign: 'right' }]}>পরিমাণ (কেজি)</Text>
+              <Text style={[styles.th, { flex: 1.2 }]}>{label('তারিখ', 'Date')}</Text>
+              <Text style={[styles.th, { flex: 2 }]}>{label('পণ্যের নাম', 'Product name')}</Text>
+              <Text style={[styles.th, { flex: 1.5 }]}>{label('ধরন', 'Type')}</Text>
+              <Text style={[styles.th, { flex: 1.5, textAlign: 'right' }]}>{label('পরিমাণ (কেজি)', 'Quantity (kg)')}</Text>
               <Text style={[styles.th, { flex: 1.2, textAlign: 'right' }]}>{t('bagQty')}</Text>
               <Text style={[styles.th, { flex: 1.5, textAlign: 'right' }]}>{t('avgUnitCost')}</Text>
               <Text style={[styles.th, { flex: 1.5, textAlign: 'right' }]}>{t('unitPricePerBag')}</Text>
@@ -791,17 +796,18 @@ export function StockDashboard() {
                   <Text style={styles.cellMuted}>{idx + 1}</Text>
                 </View>
                 <View style={[styles.td, { flex: 1.2 }]}>
-                  <Text style={styles.cellText}>{toBnDigits(mv.date)}</Text>
+                  <Text style={styles.cellText}>{digits(mv.date)}</Text>
                 </View>
                 <View style={[styles.td, { flex: 2 }]}>
-                  <Text style={styles.cellName}>{mv.productName || 'পণ্য'}</Text>
+                  <Text style={styles.cellName}>{mv.productName || label('পণ্য', 'Product')}</Text>
                 </View>
                 <View style={[styles.td, { flex: 1.5 }]}>
-                  <Text style={styles.cellBold}>{mv.type}</Text>
+                  <Text style={styles.cellBold}>{movementTypeLabel(mv.type, lang)}</Text>
+                  {mv.transactionNo ? <Text style={styles.cellMuted}>#{digits(mv.transactionNo)}</Text> : null}
                 </View>
                 <View style={[styles.td, { flex: 1.5, alignItems: 'flex-end' }]}>
                   <Text style={[styles.cellBold, { color: mv.qty >= 0 ? '#16A34A' : '#DC2626' }]}>
-                    {toBnDigits(String(mv.qty))}
+                    {digits(mv.qty)}
                   </Text>
                 </View>
                 <View style={[styles.td, { flex: 1.2, alignItems: 'flex-end' }]}>
@@ -826,19 +832,19 @@ export function StockDashboard() {
           <View>
             <View style={styles.tableHeaderRow}>
               <Text style={[styles.th, { width: 40, textAlign: 'center' }]}>#</Text>
-              <Text style={[styles.th, { flex: 2 }]}>পণ্য ও সাইজ</Text>
-              <Text style={[styles.th, { width: 125, textAlign: 'right' }]}>সিস্টেম মজুদ</Text>
-              <Text style={[styles.th, { width: 110, textAlign: 'center' }]}>বাস্তব বস্তা</Text>
-              <Text style={[styles.th, { width: 120, textAlign: 'center' }]}>বাস্তব কেজি</Text>
-              <Text style={[styles.th, { width: 120, textAlign: 'right' }]}>পার্থক্য</Text>
-              <Text style={[styles.th, { width: 110, textAlign: 'right' }]}>আর্থিক প্রভাব</Text>
-              <Text style={[styles.th, { flex: 1.6 }]}>কারণ / মন্তব্য</Text>
+              <Text style={[styles.th, { flex: 2 }]}>{label('পণ্য ও সাইজ', 'Product and size')}</Text>
+              <Text style={[styles.th, { width: 125, textAlign: 'right' }]}>{label('সিস্টেম মজুদ', 'System stock')}</Text>
+              <Text style={[styles.th, { width: 110, textAlign: 'center' }]}>{label('বাস্তব বস্তা', 'Counted bags')}</Text>
+              <Text style={[styles.th, { width: 120, textAlign: 'center' }]}>{label('বাস্তব কেজি', 'Counted kg')}</Text>
+              <Text style={[styles.th, { width: 120, textAlign: 'right' }]}>{label('পার্থক্য', 'Difference')}</Text>
+              <Text style={[styles.th, { width: 110, textAlign: 'right' }]}>{label('আর্থিক প্রভাব', 'Financial impact')}</Text>
+              <Text style={[styles.th, { flex: 1.6 }]}>{label('কারণ / মন্তব্য', 'Reason / note')}</Text>
             </View>
 
             {pagedAuditRows.length === 0 ? (
               <View style={{ padding: 36, alignItems: 'center', justifyContent: 'center' }}>
                 <Text style={{ fontSize: 14, color: '#64748B', fontWeight: '500' }}>
-                  {showOnlyDiscrepancies ? 'কোনো অমিলযুক্ত পণ্য পাওয়া যায়নি।' : 'কোনো পণ্য পাওয়া যায়নি।'}
+                  {showOnlyDiscrepancies ? label('কোনো অমিলযুক্ত পণ্য পাওয়া যায়নি।', 'No products with discrepancies.') : label('কোনো পণ্য পাওয়া যায়নি।', 'No products found.')}
                 </Text>
               </View>
             ) : (
@@ -864,16 +870,16 @@ export function StockDashboard() {
                       <Text style={styles.cellName} numberOfLines={1}>{row.name}</Text>
                       <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, marginTop: 2 }}>
                         {row.code ? <Text style={styles.auditCodeBadge}>{toBnDigits(row.code)}</Text> : null}
-                        <Text style={styles.auditBagWeightBadge}>{toBnDigits(String(row.bagKg))} কেজি বস্তা</Text>
+                        <Text style={styles.auditBagWeightBadge}>{digits(row.bagKg)} {label('কেজি বস্তা', 'kg bag')}</Text>
                       </View>
                     </View>
 
                     <View style={[styles.td, { width: 125, alignItems: 'flex-end' }]}>
                       <Text style={[styles.cellBold, { color: '#0F172A' }]}>
-                        {toBnDigits(row.systemBags.toLocaleString('en-IN'))} বস্তা
+                        {digits(row.systemBags.toLocaleString(lang === 'bn' ? 'en-IN' : 'en-US'))} {label('বস্তা', 'bags')}
                       </Text>
                       <Text style={{ fontSize: 11.5, color: '#64748B', marginTop: 1 }}>
-                        {toBnDigits(Math.round(row.systemKg).toLocaleString('en-IN'))} কেজি
+                        {digits(Math.round(row.systemKg).toLocaleString(lang === 'bn' ? 'en-IN' : 'en-US'))} {label('কেজি', 'kg')}
                       </Text>
                     </View>
 
@@ -881,7 +887,7 @@ export function StockDashboard() {
                       <TextInput
                         value={physicalBagsMap[row.id] !== undefined ? physicalBagsMap[row.id] : String(row.systemBags)}
                         onChangeText={val => handleBagsChange(row.id, val, row.bagKg)}
-                        placeholder={toBnDigits(String(row.systemBags))}
+                        placeholder={digits(row.systemBags)}
                         placeholderTextColor="#94A3B8"
                         keyboardType="numeric"
                         selectTextOnFocus
@@ -896,7 +902,7 @@ export function StockDashboard() {
                       <TextInput
                         value={physicalKgMap[row.id] !== undefined ? physicalKgMap[row.id] : String(Math.round(row.systemKg))}
                         onChangeText={val => handleKgChange(row.id, val, row.bagKg)}
-                        placeholder={toBnDigits(String(Math.round(row.systemKg)))}
+                        placeholder={digits(Math.round(row.systemKg))}
                         placeholderTextColor="#94A3B8"
                         keyboardType="numeric"
                         selectTextOnFocus
@@ -912,24 +918,24 @@ export function StockDashboard() {
                         <Text style={{ fontSize: 13, color: '#94A3B8' }}>-</Text>
                       ) : isMatched ? (
                         <View style={styles.matchBadge}>
-                          <Text style={styles.matchBadgeText}>✓ মিলেছে</Text>
+                          <Text style={styles.matchBadgeText}>✓ {label('মিলেছে', 'Matched')}</Text>
                         </View>
                       ) : isSurplus ? (
                         <View style={styles.surplusBadge}>
                           <Text style={styles.surplusBadgeText}>
-                            +{toBnDigits(String(row.deltaBags))} বস্তা
+                            +{digits(row.deltaBags)} {label('বস্তা', 'bags')}
                           </Text>
                           <Text style={styles.surplusSubText}>
-                            (+{toBnDigits(Math.round(row.deltaKg).toLocaleString('en-IN'))} কেজি)
+                            (+{digits(Math.round(row.deltaKg).toLocaleString(lang === 'bn' ? 'en-IN' : 'en-US'))} {label('কেজি', 'kg')})
                           </Text>
                         </View>
                       ) : (
                         <View style={styles.shortageBadge}>
                           <Text style={styles.shortageBadgeText}>
-                            {toBnDigits(String(row.deltaBags))} বস্তা
+                            {digits(row.deltaBags)} {label('বস্তা', 'bags')}
                           </Text>
                           <Text style={styles.shortageSubText}>
-                            ({toBnDigits(Math.round(row.deltaKg).toLocaleString('en-IN'))} কেজি)
+                            ({digits(Math.round(row.deltaKg).toLocaleString(lang === 'bn' ? 'en-IN' : 'en-US'))} {label('কেজি', 'kg')})
                           </Text>
                         </View>
                       )}
@@ -937,7 +943,7 @@ export function StockDashboard() {
 
                     <View style={[styles.td, { width: 110, alignItems: 'flex-end' }]}>
                       {!hasCount || isMatched ? (
-                        <Text style={{ fontSize: 13, color: '#94A3B8' }}>৳০</Text>
+                        <Text style={{ fontSize: 13, color: '#94A3B8' }}>{lang === 'bn' ? '৳০' : '৳0'}</Text>
                       ) : (
                         <Text style={[styles.cellBold, { color: isSurplus ? '#16A34A' : '#DC2626' }]}>
                           {row.deltaValue > 0 ? '+' : ''}৳{toBnDigits(Math.round(Math.abs(row.deltaValue)).toLocaleString('en-IN'))}
@@ -949,7 +955,7 @@ export function StockDashboard() {
                       <TextInput
                         value={auditReasons[row.id] ?? ''}
                         onChangeText={val => handleReasonChange(row.id, val)}
-                        placeholder="মন্তব্য / কারণ..."
+                        placeholder={label('মন্তব্য / কারণ...', 'Note / reason...')}
                         placeholderTextColor="#94A3B8"
                         style={styles.auditReasonInput}
                       />
@@ -964,12 +970,12 @@ export function StockDashboard() {
         {/* Pagination Footer */}
         <View style={styles.paginationFooter}>
           <Text style={styles.footerCountText}>
-            মোট {toBnDigits(String(currentTotalRows))} টি পণ্য দেখানো হচ্ছে
+            {label(`মোট ${toBnDigits(String(currentTotalRows))} টি পণ্য দেখানো হচ্ছে`, `Showing ${currentTotalRows} products`)}
           </Text>
 
           <View style={styles.paginationControls}>
             <View style={styles.pageSizeSelector}>
-              <Text style={styles.pageSizeText}>প্রতি পেজে ১০</Text>
+              <Text style={styles.pageSizeText}>{label('প্রতি পেজে ১০', '10 per page')}</Text>
               <AppIcon name={icons.chevR} size={16} iconColor="#64748B" />
             </View>
 
@@ -989,7 +995,7 @@ export function StockDashboard() {
                   style={[styles.pageNumberBtn, page === pNum && styles.pageNumberBtnActive]}
                 >
                   <Text style={[styles.pageNumberText, page === pNum && styles.pageNumberTextActive]}>
-                    {toBnDigits(String(pNum))}
+                    {digits(pNum)}
                   </Text>
                 </TouchableOpacity>
               ))}
@@ -1011,28 +1017,28 @@ export function StockDashboard() {
         <View style={styles.auditBottomActionBar}>
           <View style={styles.auditBottomSummary}>
             <View style={styles.auditBottomItem}>
-              <Text style={styles.auditBottomLabel}>অডিটকৃত পণ্য:</Text>
-              <Text style={styles.auditBottomValue}>{toBnDigits(String(auditSummary.totalItems))} টি</Text>
+              <Text style={styles.auditBottomLabel}>{label('অডিটকৃত পণ্য:', 'Products counted:')}</Text>
+              <Text style={styles.auditBottomValue}>{digits(auditSummary.totalItems)} {label('টি', '')}</Text>
             </View>
             <View style={styles.auditDivider} />
             <View style={styles.auditBottomItem}>
-              <Text style={styles.auditBottomLabel}>পার্থক্যযুক্ত পণ্য:</Text>
+              <Text style={styles.auditBottomLabel}>{label('পার্থক্যযুক্ত পণ্য:', 'Products with differences:')}</Text>
               <Text style={[styles.auditBottomValue, { color: auditSummary.discrepancyCount > 0 ? '#DC2626' : '#16A34A' }]}>
-                {toBnDigits(String(auditSummary.discrepancyCount))} টি
+                {digits(auditSummary.discrepancyCount)} {label('টি', '')}
               </Text>
             </View>
             <View style={styles.auditDivider} />
             <View style={styles.auditBottomItem}>
-              <Text style={styles.auditBottomLabel}>ওজন তারতম্য:</Text>
+              <Text style={styles.auditBottomLabel}>{label('ওজন তারতম্য:', 'Weight difference:')}</Text>
               <Text style={[styles.auditBottomValue, { color: auditSummary.totalDeltaKg < 0 ? '#DC2626' : auditSummary.totalDeltaKg > 0 ? '#16A34A' : '#0F172A' }]}>
-                {auditSummary.totalDeltaKg > 0 ? '+' : ''}{toBnDigits(Math.round(auditSummary.totalDeltaKg).toLocaleString('en-IN'))} কেজি
+                {auditSummary.totalDeltaKg > 0 ? '+' : ''}{digits(Math.round(auditSummary.totalDeltaKg).toLocaleString(lang === 'bn' ? 'en-IN' : 'en-US'))} {label('কেজি', 'kg')}
               </Text>
             </View>
             <View style={styles.auditDivider} />
             <View style={styles.auditBottomItem}>
-              <Text style={styles.auditBottomLabel}>আর্থিক প্রভাব:</Text>
+              <Text style={styles.auditBottomLabel}>{label('আর্থিক প্রভাব:', 'Financial impact:')}</Text>
               <Text style={[styles.auditBottomValue, { color: auditSummary.totalDeltaValue < 0 ? '#DC2626' : auditSummary.totalDeltaValue > 0 ? '#16A34A' : '#0F172A' }]}>
-                {auditSummary.totalDeltaValue > 0 ? '+' : ''}৳{toBnDigits(Math.round(Math.abs(auditSummary.totalDeltaValue)).toLocaleString('en-IN'))}
+                {auditSummary.totalDeltaValue > 0 ? '+' : ''}৳{digits(Math.round(Math.abs(auditSummary.totalDeltaValue)).toLocaleString(lang === 'bn' ? 'en-IN' : 'en-US'))}
               </Text>
             </View>
           </View>
@@ -1044,7 +1050,7 @@ export function StockDashboard() {
           >
             <AppIcon name={icons.done} size={18} iconColor="#FFFFFF" />
             <Text style={styles.applyAdjustmentBtnText}>
-              স্টক সমন্বয় প্রয়োগ করুন ({toBnDigits(String(itemsToAdjust.length))} টি)
+              {label('স্টক সমন্বয় প্রয়োগ করুন', 'Apply stock adjustment')} ({digits(itemsToAdjust.length)})
             </Text>
           </TouchableOpacity>
         </View>
@@ -1058,7 +1064,7 @@ export function StockDashboard() {
             <View style={styles.modalHeader}>
               <View style={styles.modalTitleRow}>
                 <AppIcon name={icons.products} size={22} iconColor="#1c70b9" />
-                <Text style={styles.modalTitle}>{editingProduct ? 'পণ্য সম্পাদনা' : 'নতুন পণ্য যোগ করুন'}</Text>
+                <Text style={styles.modalTitle}>{editingProduct ? label('পণ্য সম্পাদনা', 'Edit product') : label('নতুন পণ্য যোগ করুন', 'Add new product')}</Text>
               </View>
               <TouchableOpacity onPress={() => { setModalOpen(false); setEditingProduct(null); }} style={styles.modalCloseBtn}>
                 <AppIcon name={icons.cancel} size={20} iconColor="#64748B" />
@@ -1069,24 +1075,24 @@ export function StockDashboard() {
             <ScrollView style={styles.modalBody} keyboardShouldPersistTaps="handled">
               <View style={styles.modalTwoCol}>
                 <View style={[styles.modalCol, { flex: 1 }]}>
-                  <Text style={styles.modalLabel}>পণ্য কোড (ঐচ্ছিক)</Text>
+                  <Text style={styles.modalLabel}>{label('পণ্য কোড (ঐচ্ছিক)', 'Product code (optional)')}</Text>
                   <TextInput
                     value={newCode}
                     onChangeText={setNewCode}
                     testID="stock-product-code"
                     style={styles.modalInput}
-                    placeholder="কোড"
+                    placeholder={label('কোড', 'Code')}
                     placeholderTextColor="#94A3B8"
                   />
                 </View>
                 <View style={[styles.modalCol, { flex: 1.6 }]}>
-                  <Text style={styles.modalLabel}>পণ্যের নাম *</Text>
+                  <Text style={styles.modalLabel}>{label('পণ্যের নাম *', 'Product name *')}</Text>
                   <TextInput
                     value={newName}
                     onChangeText={setNewName}
                     testID="stock-product-name"
                     style={styles.modalInput}
-                    placeholder="পণ্যের নাম লিখুন..."
+                    placeholder={label('পণ্যের নাম লিখুন...', 'Enter product name...')}
                     placeholderTextColor="#94A3B8"
                   />
                 </View>
@@ -1094,26 +1100,26 @@ export function StockDashboard() {
 
               <View style={styles.modalTwoCol}>
                 <View style={styles.modalCol}>
-                  <Text style={styles.modalLabel}>প্রতি বস্তায় পরিমাণ (কেজি) *</Text>
+                  <Text style={styles.modalLabel}>{label('প্রতি বস্তায় পরিমাণ (কেজি) *', 'Quantity per bag (kg) *')}</Text>
                   <TextInput
                     value={newBagKg}
                     onChangeText={setNewBagKg}
                     testID="stock-product-bag-kg"
                     style={styles.modalInput}
                     keyboardType="numeric"
-                    placeholder="৫০"
+                    placeholder={label('৫০', '50')}
                     placeholderTextColor="#94A3B8"
                   />
                 </View>
                 <View style={styles.modalCol}>
-                  <Text style={styles.modalLabel}>প্রারম্ভিক মজুদ (বস্তা)</Text>
+                  <Text style={styles.modalLabel}>{label('প্রারম্ভিক মজুদ (বস্তা)', 'Opening stock (bags)')}</Text>
                   <TextInput
                     value={newOpeningBags}
                     onChangeText={setNewOpeningBags}
                     testID="stock-product-opening"
                     style={styles.modalInput}
                     keyboardType="numeric"
-                    placeholder="০"
+                    placeholder={label('০', '0')}
                     placeholderTextColor="#94A3B8"
                   />
                 </View>
@@ -1121,7 +1127,7 @@ export function StockDashboard() {
 
               <View style={styles.modalTwoCol}>
                 <View style={styles.modalCol}>
-                  <Text style={styles.modalLabel}>ক্রয়দর (প্রতি কেজি ৳)</Text>
+                  <Text style={styles.modalLabel}>{label('ক্রয়দর (প্রতি কেজি ৳)', 'Purchase rate (৳/kg)')}</Text>
                   <TextInput
                     value={newCostRate}
                     onChangeText={setNewCostRate}
@@ -1138,7 +1144,7 @@ export function StockDashboard() {
                   )}
                 </View>
                 <View style={styles.modalCol}>
-                  <Text style={styles.modalLabel}>বিক্রয়দর (প্রতি কেজি ৳) *</Text>
+                  <Text style={styles.modalLabel}>{label('বিক্রয়দর (প্রতি কেজি ৳) *', 'Sale rate (৳/kg) *')}</Text>
                   <TextInput
                     value={newSalePrice}
                     onChangeText={setNewSalePrice}
@@ -1157,13 +1163,13 @@ export function StockDashboard() {
               </View>
 
               <View style={styles.modalFormGroup}>
-                <Text style={styles.modalLabel}>বিবরণ (ঐচ্ছিক)</Text>
+                <Text style={styles.modalLabel}>{label('বিবরণ (ঐচ্ছিক)', 'Description (optional)')}</Text>
                 <TextInput
                   value={newDescription}
                   onChangeText={setNewDescription}
                   testID="stock-product-description"
                   style={[styles.modalInput, { height: 65, textAlignVertical: 'top' }]}
-                  placeholder="পণ্যের অতিরিক্ত বিবরণ লিখুন..."
+                  placeholder={label('পণ্যের অতিরিক্ত বিবরণ লিখুন...', 'Enter an additional description...')}
                   placeholderTextColor="#94A3B8"
                   multiline
                 />
@@ -1174,28 +1180,28 @@ export function StockDashboard() {
             <View style={styles.modalFooter}>
               <TouchableOpacity onPress={() => { setModalOpen(false); setEditingProduct(null); }} style={styles.modalCancelBtn}>
                 <AppIcon name={icons.cancel} size={16} iconColor="#475569" />
-                <Text style={styles.modalCancelBtnText}>বাতিল</Text>
+                <Text style={styles.modalCancelBtnText}>{label('বাতিল', 'Cancel')}</Text>
               </TouchableOpacity>
 
               {editingProduct && (
                 <TouchableOpacity
                   onPress={() => {
                     Alert.alert(
-                      'নিশ্চিত করুন',
-                      `আপনি কি '${editingProduct.name}' পণ্যটি ট্র্যাশে পাঠাতে চান?`,
+                      label('নিশ্চিত করুন', 'Confirm'),
+                      `${label('আপনি কি', 'Move')} '${editingProduct.name}' ${label('পণ্যটি ট্র্যাশে পাঠাতে চান?', 'to Trash?')}`,
                       [
-                        { text: 'না', style: 'cancel' },
+                        { text: label('না', 'No'), style: 'cancel' },
                         {
-                          text: 'মুছুন',
+                          text: label('মুছুন', 'Delete'),
                           style: 'destructive',
                           onPress: async () => {
                             try {
                               await deleteProduct(editingProduct.id);
                               setModalOpen(false);
                               setEditingProduct(null);
-                              Alert.alert(t('done'), 'পণ্য সফলভাবে ট্র্যাশে পাঠানো হয়েছে।');
+                              Alert.alert(t('done'), label('পণ্য সফলভাবে ট্র্যাশে পাঠানো হয়েছে।', 'Product moved to Trash.'));
                             } catch (err) {
-                              Alert.alert(t('invalid'), err instanceof Error ? err.message : 'মুছে ফেলা ব্যর্থ হয়েছে।');
+                              Alert.alert(t('invalid'), err instanceof Error ? err.message : label('মুছে ফেলা ব্যর্থ হয়েছে।', 'Could not delete the product.'));
                             }
                           },
                         },
@@ -1205,13 +1211,13 @@ export function StockDashboard() {
                   style={[styles.modalCancelBtn, { borderColor: '#FCA5A5', backgroundColor: '#FEF2F2' }]}
                 >
                   <AppIcon name={icons.del} size={16} iconColor="#DC2626" />
-                  <Text style={[styles.modalCancelBtnText, { color: '#DC2626' }]}>মুছুন</Text>
+                  <Text style={[styles.modalCancelBtnText, { color: '#DC2626' }]}>{label('মুছুন', 'Delete')}</Text>
                 </TouchableOpacity>
               )}
 
               <TouchableOpacity onPress={handleSaveProduct} testID="stock-save-product" style={styles.modalSaveBtn}>
                 <AppIcon name={icons.save} size={18} iconColor="#fff" />
-                <Text style={styles.modalSaveBtnText}>{editingProduct ? 'আপডেট করুন' : 'সংরক্ষণ করুন'}</Text>
+                <Text style={styles.modalSaveBtnText}>{editingProduct ? label('আপডেট করুন', 'Update') : label('সংরক্ষণ করুন', 'Save')}</Text>
               </TouchableOpacity>
             </View>
           </View>
@@ -1233,24 +1239,24 @@ export function StockDashboard() {
                 {viewProduct.code ? <Text style={{ fontSize: 14, color: '#334155' }}>Code: {viewProduct.code}</Text> : null}
                 {viewProduct.description ? <Text testID="product-details-description" style={{ fontSize: 14, color: '#334155' }}>{viewProduct.description}</Text> : null}
                 <Text style={{ fontSize: 14, color: '#334155' }}>
-                  বর্তমান মজুদ: <Text style={{ fontWeight: '700' }}>{n(viewProduct.qty)} কেজি</Text>
+                  {label('বর্তমান মজুদ:', 'Current stock:')} <Text style={{ fontWeight: '700' }}>{n(viewProduct.qty)} {label('কেজি', 'kg')}</Text>
                 </Text>
                 <Text style={{ fontSize: 14, color: '#334155' }}>
-                  বস্তার ওজন: <Text style={{ fontWeight: '700' }}>{viewProduct.mediumBagKg || 50} কেজি</Text>
+                  {label('বস্তার ওজন:', 'Bag weight:')} <Text style={{ fontWeight: '700' }}>{viewProduct.mediumBagKg || 50} {label('কেজি', 'kg')}</Text>
                 </Text>
                 <Text style={{ fontSize: 14, color: '#334155' }}>
-                  আনুমানিক বস্তা: <Text style={{ fontWeight: '700' }}>{Math.round(viewProduct.qty / (viewProduct.mediumBagKg || 50))} বস্তা</Text>
+                  {label('আনুমানিক বস্তা:', 'Approx. bags:')} <Text style={{ fontWeight: '700' }}>{Math.round(viewProduct.qty / (viewProduct.mediumBagKg || 50))} {label('বস্তা', 'bags')}</Text>
                 </Text>
                 <Text style={{ fontSize: 14, color: '#334155' }}>
-                  ক্রয়মূল্য: <Text style={{ fontWeight: '700' }}>৳ {viewProduct.cost} / কেজি</Text>
+                  {label('ক্রয়মূল্য:', 'Purchase rate:')} <Text style={{ fontWeight: '700' }}>৳ {viewProduct.cost} / {label('কেজি', 'kg')}</Text>
                 </Text>
                 <Text style={{ fontSize: 14, color: '#334155' }}>
-                  বিক্রয়মূল্য: <Text style={{ fontWeight: '700' }}>৳ {viewProduct.price} / কেজি</Text>
+                  {label('বিক্রয়মূল্য:', 'Sale rate:')} <Text style={{ fontWeight: '700' }}>৳ {viewProduct.price} / {label('কেজি', 'kg')}</Text>
                 </Text>
               </View>
               <View style={{ padding: 14, alignItems: 'flex-end', borderTopWidth: 1, borderTopColor: '#D2E3F3' }}>
                 <TouchableOpacity onPress={() => setViewProduct(null)} style={styles.modalCancelBtn}>
-                  <Text style={styles.modalCancelBtnText}>বন্ধ করুন</Text>
+                  <Text style={styles.modalCancelBtnText}>{label('বন্ধ করুন', 'Close')}</Text>
                 </TouchableOpacity>
               </View>
             </View>
@@ -1275,7 +1281,7 @@ export function StockDashboard() {
             <View style={styles.modalHeader}>
               <View style={styles.modalTitleRow}>
                 <AppIcon name={icons.stock} size={22} iconColor="#1c70b9" />
-                <Text style={styles.modalTitle}>স্টক সমন্বয় নিশ্চিতকরণ (Stock Adjustment)</Text>
+                <Text style={styles.modalTitle}>{label('স্টক সমন্বয় নিশ্চিতকরণ', 'Confirm stock adjustment')}</Text>
               </View>
               <TouchableOpacity
                 disabled={isAdjusting}
@@ -1291,62 +1297,62 @@ export function StockDashboard() {
               {/* Notice Banner */}
               <View style={styles.auditModalNotice}>
                 <Text style={styles.auditModalNoticeText}>
-                  আপনি <Text style={{ fontWeight: '800' }}>{toBnDigits(String(itemsToAdjust.length))} টি</Text> পণ্যের বর্তমান মজুদ সংশোধন করতে যাচ্ছেন। এর মাধ্যমে পণ্যের মজুদ সমন্বয় হবে এবং স্টক মুভমেন্ট হিস্ট্রিতে স্থায়ী রেকর্ড সংরক্ষিত হবে।
+                  {label('আপনি', 'You are about to adjust the stock of')} <Text style={{ fontWeight: '800' }}>{digits(itemsToAdjust.length)}</Text> {label('টি পণ্যের বর্তমান মজুদ সংশোধন করতে যাচ্ছেন। এর মাধ্যমে পণ্যের মজুদ সমন্বয় হবে এবং স্টক মুভমেন্ট হিস্ট্রিতে স্থায়ী রেকর্ড সংরক্ষিত হবে।', 'products. This updates inventory and creates a permanent stock movement record.')}
                 </Text>
               </View>
 
               {/* KPI Summary Grid */}
               <View style={styles.auditModalSummaryRow}>
                 <View style={styles.auditModalSummaryCard}>
-                  <Text style={styles.auditModalSummaryLabel}>সমন্বয়কৃত পণ্য</Text>
-                  <Text style={styles.auditModalSummaryVal}>{toBnDigits(String(itemsToAdjust.length))} টি</Text>
+                  <Text style={styles.auditModalSummaryLabel}>{label('সমন্বয়কৃত পণ্য', 'Products to adjust')}</Text>
+                  <Text style={styles.auditModalSummaryVal}>{digits(itemsToAdjust.length)}</Text>
                 </View>
                 <View style={styles.auditModalSummaryCard}>
-                  <Text style={styles.auditModalSummaryLabel}>মোট ওজন তারতম্য</Text>
+                  <Text style={styles.auditModalSummaryLabel}>{label('মোট ওজন তারতম্য', 'Total weight difference')}</Text>
                   <Text
                     style={[
                       styles.auditModalSummaryVal,
                       { color: auditSummary.totalDeltaKg < 0 ? '#DC2626' : auditSummary.totalDeltaKg > 0 ? '#16A34A' : '#0F172A' },
                     ]}
                   >
-                    {auditSummary.totalDeltaKg > 0 ? '+' : ''}{toBnDigits(Math.round(auditSummary.totalDeltaKg).toLocaleString('en-IN'))} কেজি
+                    {auditSummary.totalDeltaKg > 0 ? '+' : ''}{digits(Math.round(auditSummary.totalDeltaKg).toLocaleString(lang === 'bn' ? 'en-IN' : 'en-US'))} {label('কেজি', 'kg')}
                   </Text>
                 </View>
                 <View style={styles.auditModalSummaryCard}>
-                  <Text style={styles.auditModalSummaryLabel}>মোট আর্থিক প্রভাব</Text>
+                  <Text style={styles.auditModalSummaryLabel}>{label('মোট আর্থিক প্রভাব', 'Total financial impact')}</Text>
                   <Text
                     style={[
                       styles.auditModalSummaryVal,
                       { color: auditSummary.totalDeltaValue < 0 ? '#DC2626' : auditSummary.totalDeltaValue > 0 ? '#16A34A' : '#0F172A' },
                     ]}
                   >
-                    {auditSummary.totalDeltaValue > 0 ? '+' : ''}৳{toBnDigits(Math.round(Math.abs(auditSummary.totalDeltaValue)).toLocaleString('en-IN'))}
+                    {auditSummary.totalDeltaValue > 0 ? '+' : ''}৳{digits(Math.round(Math.abs(auditSummary.totalDeltaValue)).toLocaleString(lang === 'bn' ? 'en-IN' : 'en-US'))}
                   </Text>
                 </View>
               </View>
 
               {/* Audit Note */}
               <View style={styles.modalFormGroup}>
-                <Text style={styles.modalLabel}>অডিট সমন্বয়ের কারণ বা রেফারেন্স নোট *</Text>
+                <Text style={styles.modalLabel}>{label('অডিট সমন্বয়ের কারণ বা রেফারেন্স নোট *', 'Reason or reference note *')}</Text>
                 <TextInput
                   value={auditNote}
                   onChangeText={setAuditNote}
                   style={styles.modalInput}
-                  placeholder="যেমন: গুদাম নিরীক্ষা ও বার্ষিক স্টক সমন্বয়"
+                  placeholder={label('যেমন: গুদাম নিরীক্ষা ও বার্ষিক স্টক সমন্বয়', 'Example: warehouse count and annual stock adjustment')}
                 />
               </View>
 
               {/* Preview Table of Adjustments */}
               <Text style={[styles.modalLabel, { marginTop: 6, marginBottom: 8 }]}>
-                সমন্বয়যোগ্য পণ্যসমূহের বিবরণ:
+                {label('সমন্বয়যোগ্য পণ্যসমূহের বিবরণ:', 'Products to be adjusted:')}
               </Text>
               <View style={{ borderWidth: 1, borderColor: '#CBD5E1', borderRadius: 8, overflow: 'hidden' }}>
                 <View style={[styles.tableHeaderRow, { backgroundColor: '#F1F5F9' }]}>
-                  <Text style={[styles.th, { flex: 2 }]}>পণ্য</Text>
-                  <Text style={[styles.th, { flex: 1.1, textAlign: 'right' }]}>বর্তমান (কেজি)</Text>
-                  <Text style={[styles.th, { flex: 1.1, textAlign: 'right' }]}>বাস্তব (কেজি)</Text>
-                  <Text style={[styles.th, { flex: 1.1, textAlign: 'right' }]}>পার্থক্য (কেজি)</Text>
-                  <Text style={[styles.th, { flex: 1.3, textAlign: 'right' }]}>আর্থিক প্রভাব (৳)</Text>
+                  <Text style={[styles.th, { flex: 2 }]}>{label('পণ্য', 'Product')}</Text>
+                  <Text style={[styles.th, { flex: 1.1, textAlign: 'right' }]}>{label('বর্তমান (কেজি)', 'Current (kg)')}</Text>
+                  <Text style={[styles.th, { flex: 1.1, textAlign: 'right' }]}>{label('বাস্তব (কেজি)', 'Counted (kg)')}</Text>
+                  <Text style={[styles.th, { flex: 1.1, textAlign: 'right' }]}>{label('পার্থক্য (কেজি)', 'Difference (kg)')}</Text>
+                  <Text style={[styles.th, { flex: 1.3, textAlign: 'right' }]}>{label('আর্থিক প্রভাব (৳)', 'Financial impact (৳)')}</Text>
                 </View>
                 {itemsToAdjust.map(it => (
                   <View key={it.id} style={[styles.tableDataRow, { paddingVertical: 8 }]}>
@@ -1354,7 +1360,7 @@ export function StockDashboard() {
                       <Text style={styles.cellName}>{it.name}</Text>
                       {it.reason ? (
                         <Text style={{ fontSize: 11, color: '#64748B', marginTop: 1 }}>
-                          কারণ: {it.reason}
+                          {label('কারণ:', 'Reason:')} {it.reason}
                         </Text>
                       ) : null}
                     </View>
@@ -1402,7 +1408,7 @@ export function StockDashboard() {
                 onPress={() => setAuditConfirmModalOpen(false)}
                 style={styles.modalCancelBtn}
               >
-                <Text style={styles.modalCancelBtnText}>বাতিল</Text>
+                <Text style={styles.modalCancelBtnText}>{label('বাতিল', 'Cancel')}</Text>
               </TouchableOpacity>
               <TouchableOpacity
                 disabled={isAdjusting}
@@ -1411,7 +1417,7 @@ export function StockDashboard() {
               >
                 <AppIcon name={icons.done} size={18} iconColor="#fff" />
                 <Text style={styles.modalSaveBtnText}>
-                  {isAdjusting ? 'সমন্বয় করা হচ্ছে...' : 'নিশ্চিত ও সমন্বয় সংরক্ষণ করুন'}
+                  {isAdjusting ? label('সমন্বয় করা হচ্ছে...', 'Applying adjustment...') : label('নিশ্চিত ও সমন্বয় সংরক্ষণ করুন', 'Confirm and save adjustment')}
                 </Text>
               </TouchableOpacity>
             </View>

@@ -36,6 +36,13 @@ Authentication verification: `node scripts/verify-auth.cjs`. Set
 `VERIFY_AUTH_WEB_URL` to an isolated, running test environment with no users.
 The check creates temporary users and removes them afterward.
 
+To seed one administrator and one staff account on a server, set
+`SEED_ADMIN_NAME`, `SEED_ADMIN_PHONE`, `SEED_ADMIN_EMAIL`,
+`SEED_ADMIN_PASSWORD`, and the corresponding `SEED_STAFF_*` variables in the
+backend environment. Use passwords of at least 10 characters. Then run
+`cd backend && npm run seed:users` after applying database migrations. The
+seeder creates missing accounts and leaves existing accounts unchanged.
+
 ### Prerequisites
 - Node.js (v18+)
 - Docker & Docker Compose (optional for containerized setup)

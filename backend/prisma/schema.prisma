@@ -7,6 +7,7 @@ model User {
   name String
   phone String
   email String @unique
+  legacyUsername String? @unique
   passwordHash String
   role String @default("staff")
   active Boolean @default(true)
@@ -199,6 +200,7 @@ model CustomerPayment {
   date       String // YYYY-MM-DD
   note       String?
   nextDate   String?
+  active     Boolean  @default(true)
   createdAt  DateTime @default(now())
 
   @@index([customerId])
@@ -215,6 +217,7 @@ model VendorPayment {
   date       String // YYYY-MM-DD
   note       String?
   nextDate   String?
+  active     Boolean  @default(true)
   createdAt  DateTime @default(now())
 
   @@index([vendorId])
@@ -250,6 +253,7 @@ model Expense {
   amount     Float
   date       String // YYYY-MM-DD
   note       String?
+  capitalized Boolean @default(false) // purchase landed cost; cash outflow, not operating expense
   createdAt  DateTime @default(now())
   updatedAt  DateTime @updatedAt
   deletedAt  DateTime?
@@ -282,7 +286,7 @@ model MoneyAccount {
   /// rows and old payloads stay traceable after the migration.
   legacyMethod   String?  @unique
   openingBalance Float    @default(0)
-  openingDate    String? // dated opening baseline (YYYY-MM-DD)
+    openingDate    String   // required dated opening baseline (YYYY-MM-DD)
   bankName       String?
   accountNumber  String?
   branch         String?
@@ -293,6 +297,7 @@ model MoneyAccount {
   updatedAt      DateTime @updatedAt
 
   movements    MoneyMovement[]
+  ledgerAccount ChartAccount?
   outTransfers MoneyTransfer[] @relation("TransferFromAccount")
   inTransfers  MoneyTransfer[] @relation("TransferToAccount")
 
@@ -371,6 +376,58 @@ model ActivityLog {
   @@index([createdAt])
   @@index([userId])
   @@index([entity, createdAt])
+}
+
+// Chart of accounts used by saved journals and accounting reports.
+model ChartAccount {
+  id        String   @id @default(cuid())
+  code      String   @unique
+  name      String   @unique
+  type      String   // asset | liability | equity | income | expense
+  active    Boolean  @default(true)
+  system    Boolean  @default(false)
+  moneyAccountId String? @unique
+  moneyAccount MoneyAccount? @relation(fields: [moneyAccountId], references: [id], onDelete: SetNull)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  lines     JournalLine[]
+
+  @@index([type, active])
+}
+
+// Saved manual journal entries are balanced at write time. Source documents
+// and their generated accounting lines remain auditable and separate.
+model JournalEntry {
+  id          String   @id @default(cuid())
+  entryNo     String   @unique
+  date        String   // YYYY-MM-DD
+  memo        String
+  sourceType  String   @default("manual") // manual | legacy source-linked entries
+  sourceId    String?
+  sourceRef   String?
+  active      Boolean  @default(true)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+  lines       JournalLine[]
+
+  @@index([date])
+  @@index([sourceType, sourceId])
+  @@index([active])
+}
+
+model JournalLine {
+  id          String       @id @default(cuid())
+  entryId     String
+  entry       JournalEntry @relation(fields: [entryId], references: [id], onDelete: Cascade)
+  accountId   String
+  account     ChartAccount @relation(fields: [accountId], references: [id], onDelete: Restrict)
+  description String       @default("")
+  debit       Float        @default(0)
+  credit      Float        @default(0)
+  createdAt   DateTime     @default(now())
+
+  @@index([entryId])
+  @@index([accountId])
 }
 
 model Notification {

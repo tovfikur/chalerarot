@@ -6,6 +6,7 @@ import {
 import { api, AppUser, onAuthExpired } from './api';
 import { color } from './ui';
 import { AppIcon, icons } from './icons';
+import { Lang } from './i18n';
 
 type AuthContext = { user: AppUser; setUser: (u: AppUser) => void; logout: () => Promise<void> };
 const Auth = createContext<AuthContext>(null as any);
@@ -41,23 +42,24 @@ function BrandMark({ size = 52 }: { size?: number }) {
   );
 }
 
-function BrandPanel() {
+function BrandPanel({ lang }: { lang: Lang }) {
+  const text = (bn: string, en: string) => lang === 'bn' ? bn : en;
   return (
     <View style={styles.brandPanel}>
       <View style={styles.brandTop}>
         <BrandMark size={58} />
         <View style={{ marginTop: 20 }}>
-          <Text style={styles.brandName}>চালের আড়ত</Text>
+          <Text style={styles.brandName}>{text('চালের আড়ত', 'Chaler Arot')}</Text>
           <Text style={styles.brandSub}>Chaler Arot</Text>
         </View>
       </View>
-      <Text style={styles.brandTag}>আপনার আড়তের স্টক, বিক্রয়, ক্রয় ও হিসাব — এক জায়গায়, সহজে।</Text>
+      <Text style={styles.brandTag}>{text('আপনার আড়তের স্টক, বিক্রয়, ক্রয় ও হিসাব — এক জায়গায়, সহজে।', 'Manage your inventory, sales, purchases, and accounts in one place.')}</Text>
       <View style={{ gap: 14, marginTop: 34 }}>
         {([
-          [icons.products, 'স্টক ও মজুদ'],
-          [icons.sale, 'বিক্রয় ও চালান'],
-          [icons.purchase, 'ক্রয় ও মহাজন'],
-          [icons.accounts, 'হিসাব ও লেনদেন'],
+          [icons.products, text('স্টক ও মজুদ', 'Stock and inventory')],
+          [icons.sale, text('বিক্রয় ও চালান', 'Sales and invoices')],
+          [icons.purchase, text('ক্রয় ও মহাজন', 'Purchases and vendors')],
+          [icons.accounts, text('হিসাব ও লেনদেন', 'Accounts and transactions')],
         ] as const).map(([icon, label]) => (
           <View key={label} style={styles.feature}>
             <View style={styles.featureIcon}><AppIcon name={icon} size={18} iconColor="#fff" /></View>
@@ -65,18 +67,19 @@ function BrandPanel() {
           </View>
         ))}
       </View>
-      <View style={styles.brandFooter}><Text style={styles.brandFooterText}>নির্ভরযোগ্য আড়ত ম্যানেজমেন্ট</Text></View>
+      <View style={styles.brandFooter}><Text style={styles.brandFooterText}>{text('নির্ভরযোগ্য আড়ত ম্যানেজমেন্ট', 'Reliable business management')}</Text></View>
     </View>
   );
 }
 
 function LoginField({
-  label, value, onChange, icon, password, secure, onToggle, testID, onSubmit,
+  label, value, onChange, icon, password, secure, onToggle, testID, onSubmit, lang,
 }: {
-  label: string; value: string; onChange: (v: string) => void;
+  label: string; value: string; onChange: (v: string) => void; lang: Lang;
   icon: React.ComponentProps<typeof AppIcon>['name'];
   password?: boolean; secure?: boolean; onToggle?: () => void; testID?: string; onSubmit?: () => void;
 }) {
+  const text = (bn: string, en: string) => lang === 'bn' ? bn : en;
   const [focused, setFocused] = useState(false);
   return (
     <View style={{ marginBottom: 16 }}>
@@ -102,7 +105,7 @@ function LoginField({
           style={styles.inputInner}
         />
         {password && onToggle ? (
-          <TouchableOpacity accessibilityRole="button" accessibilityLabel={secure ? 'পাসওয়ার্ড দেখান' : 'পাসওয়ার্ড লুকান'} onPress={onToggle} style={styles.eyeBtn}>
+          <TouchableOpacity accessibilityRole="button" accessibilityLabel={secure ? text('পাসওয়ার্ড দেখান', 'Show password') : text('পাসওয়ার্ড লুকান', 'Hide password')} onPress={onToggle} style={styles.eyeBtn}>
             <AppIcon name={secure ? icons.eye : 'eye-off-outline'} size={20} iconColor={color.muted} />
           </TouchableOpacity>
         ) : null}
@@ -112,6 +115,11 @@ function LoginField({
 }
 
 export function AuthGate({ children }: { children: ReactNode }) {
+  const [lang, setLang] = useState<Lang>(() => {
+    try { return typeof localStorage !== 'undefined' && localStorage.getItem('chaler-arot-language') === 'en' ? 'en' : 'bn'; } catch { return 'bn'; }
+  });
+  const text = (bn: string, en: string) => lang === 'bn' ? bn : en;
+  const changeLang = (next: Lang) => { setLang(next); try { localStorage.setItem('chaler-arot-language', next); } catch {} };
   const [user, setUser] = useState<AppUser | null>(null);
   const [loading, setLoading] = useState(true);
   const [connected, setConnected] = useState(false);
@@ -133,7 +141,7 @@ export function AuthGate({ children }: { children: ReactNode }) {
       setFirstRun(result.setup);
       setConnected(true);
     } catch {
-      setError('সার্ভারে সংযোগ করা যায়নি। ইন্টারনেট ও সার্ভার চালু আছে কিনা দেখুন।');
+      setError(text('সার্ভারে সংযোগ করা যায়নি। ইন্টারনেট ও সার্ভার চালু আছে কিনা দেখুন।', 'Could not connect to the server. Check your internet connection and that the server is running.'));
       setConnected(false);
     } finally {
       setLoading(false);
@@ -144,8 +152,8 @@ export function AuthGate({ children }: { children: ReactNode }) {
 
   const submit = async () => {
     if (busy) return;
-    if (!email.trim()) { setError('ইমেইল লিখুন'); return; }
-    if (!password) { setError('পাসওয়ার্ড লিখুন'); return; }
+    if (!email.trim()) { setError(text('ইমেইল লিখুন', 'Enter your email')); return; }
+    if (!password) { setError(text('পাসওয়ার্ড লিখুন', 'Enter your password')); return; }
     setBusy(true);
     setError('');
     try {
@@ -153,7 +161,7 @@ export function AuthGate({ children }: { children: ReactNode }) {
       setUser(current);
       setPassword('');
     } catch (e) {
-      setError(e instanceof Error ? e.message : 'লগইন করা যায়নি');
+      setError(e instanceof Error ? e.message : text('লগইন করা যায়নি', 'Unable to sign in'));
     } finally {
       setBusy(false);
     }
@@ -163,7 +171,7 @@ export function AuthGate({ children }: { children: ReactNode }) {
     return (
       <View style={[styles.page, styles.center]}>
         <BrandMark size={60} />
-        <Text style={styles.loadingText}>অপেক্ষা করুন…</Text>
+        <Text style={styles.loadingText}>{text('অপেক্ষা করুন…', 'Please wait…')}</Text>
       </View>
     );
   }
@@ -184,30 +192,36 @@ export function AuthGate({ children }: { children: ReactNode }) {
       <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : undefined} style={{ flex: 1 }}>
         <ScrollView contentContainerStyle={styles.scroll} keyboardShouldPersistTaps="handled">
           <View style={[styles.shell, wide && styles.shellWide]}>
-            {wide ? <BrandPanel /> : null}
+            {wide ? <BrandPanel lang={lang} /> : null}
             <View style={[styles.card, wide && styles.cardWide]}>
               {!wide ? (
                 <View style={{ alignItems: 'center', marginBottom: 22 }}>
                   <BrandMark size={56} />
-                  <Text style={styles.mobileBrand}>চালের আড়ত</Text>
+                  <Text style={styles.mobileBrand}>{text('চালের আড়ত', 'Chaler Arot')}</Text>
                   <Text style={styles.mobileBrandSub}>Chaler Arot</Text>
                 </View>
               ) : null}
 
-              <Text style={styles.title}>{wide ? 'লগইন' : 'স্বাগতম'}</Text>
-              <Text style={styles.subtitle}>আপনার আড়তের হিসাব চালিয়ে যেতে লগইন করুন</Text>
+              <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
+                <Text style={styles.title}>{wide ? text('লগইন', 'Sign in') : text('স্বাগতম', 'Welcome')}</Text>
+                <View style={{ flexDirection: 'row', gap: 6 }}>
+                  {(['bn', 'en'] as Lang[]).map(value => <TouchableOpacity key={value} accessibilityRole="button" accessibilityLabel={value === 'bn' ? 'বাংলা' : 'English'} onPress={() => changeLang(value)} style={{ padding: 8, borderRadius: 8, backgroundColor: lang === value ? '#EAF2FC' : '#F8FAFC' }}><Text style={{ color: '#1c70b9', fontWeight: '700' }}>{value === 'bn' ? 'বাংলা' : 'English'}</Text></TouchableOpacity>)}
+                </View>
+              </View>
+              <Text style={styles.subtitle}>{text('আপনার আড়তের হিসাব চালিয়ে যেতে লগইন করুন', 'Sign in to continue to your business')}</Text>
 
               {firstRun ? (
                 <View style={styles.notice}>
                   <AppIcon name={icons.lock} size={18} iconColor={color.amber} />
-                  <Text style={styles.noticeText}>এখনও কোনো অ্যাকাউন্ট তৈরি হয়নি। প্রথম প্রশাসক অ্যাকাউন্ট তৈরি হলে এখানে লগইন করুন।</Text>
+                  <Text style={styles.noticeText}>{text('এখনও কোনো অ্যাকাউন্ট তৈরি হয়নি। প্রথম প্রশাসক অ্যাকাউন্ট তৈরি হলে এখানে লগইন করুন।', 'No account exists yet. Sign in here after the first administrator account is created.')}</Text>
                 </View>
               ) : null}
 
               {connected ? (
                 <>
                   <LoginField
-                    label="ইমেইল"
+                    label={text('ইমেইল', 'Email')}
+                    lang={lang}
                     value={email}
                     onChange={v => { setEmail(v); setError(''); }}
                     icon={icons.mail}
@@ -215,7 +229,8 @@ export function AuthGate({ children }: { children: ReactNode }) {
                     onSubmit={submit}
                   />
                   <LoginField
-                    label="পাসওয়ার্ড"
+                    label={text('পাসওয়ার্ড', 'Password')}
+                    lang={lang}
                     value={password}
                     onChange={v => { setPassword(v); setError(''); }}
                     icon={icons.lock}
@@ -245,13 +260,13 @@ export function AuthGate({ children }: { children: ReactNode }) {
               >
                 {busy ? <ActivityIndicator color="#fff" /> : (
                   <>
-                    <Text style={styles.submitText}>{connected ? 'লগইন করুন' : 'আবার চেষ্টা করুন'}</Text>
+                    <Text style={styles.submitText}>{connected ? text('লগইন করুন', 'Sign in') : text('আবার চেষ্টা করুন', 'Try again')}</Text>
                     {connected ? <AppIcon name={icons.chevR} size={20} iconColor="#fff" /> : null}
                   </>
                 )}
               </TouchableOpacity>
 
-              <Text style={styles.footer}>© {new Date().getFullYear()} চালের আড়ত · সর্বস্বত্ব সংরক্ষিত</Text>
+              <Text style={styles.footer}>© {new Date().getFullYear()} {text('চালের আড়ত · সর্বস্বত্ব সংরক্ষিত', 'Chaler Arot · All rights reserved')}</Text>
             </View>
           </View>
         </ScrollView>

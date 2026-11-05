@@ -6,7 +6,7 @@ import { Card, Title, Muted, Btn, Field, Chips, Row, Empty, Screen, SectionHead,
 import { AppIcon, icons } from './icons';
 import { RGrid, TwoPanel, FormGrid, useFs, useBreakpoint } from './responsive';
 import { SearchToggle, SearchableSelect, SearchDropdown, NoResult, matchProduct, matchParty } from './search';
-import { api, ApiError, type TxnPayment, type SettlementStatus, DetailItem, RecvDetail, PayDetail, TrashItem, SaleDetail, PurchaseDetail, ReturnDetail, ReturnableTxn, type AccountType, type Expense, type MoneyBalance, type MoneyMethod } from './api';
+import { api, ApiError, type TxnPayment, type SettlementStatus, DetailItem, RecvDetail, PayDetail, TrashItem, SaleDetail, PurchaseDetail, ReturnDetail, ReturnableTxn, type AccountType, type Expense, type MoneyBalance, type MoneyMethod, type ChartAccountRow, type SavedJournalEntry, type JournalWrite } from './api';
 import { unitDetail, fmtTime, buildInvoiceText, buildInvoiceHTML, InvData, UnitNames } from './invoice';
 import { tp, Key } from './i18n';
 import { toEnDigits, toBnDigits, parseNum } from './bn';
@@ -650,6 +650,7 @@ function TxnHistory({ kind, onNew, focus, onFocusDone }: {
   const [status, setStatus] = useState<'all' | 'paid' | 'due'>('all');
   const [sort, setSort] = useState<TableSort | null>(null);
   const [inv, setInv] = useState<string | null>(focus ?? null);
+  const [editingId, setEditingId] = useState<string | null>(null);
   const scrollRef = useRef<ScrollView>(null);
   const scrollY = useRef(0);
   const [restoreTo, setRestoreTo] = useState<number | null>(null);
@@ -716,6 +717,7 @@ function TxnHistory({ kind, onNew, focus, onFocusDone }: {
   );
   const sums = rows.reduce((s, r) => ({ total: s.total + r.total, paid: s.paid + r.paid, due: s.due + r.due }), { total: 0, paid: 0, due: 0 });
 
+  if (editingId) return <TradeDashboardForm mode={kind} editId={editingId} onDone={() => setEditingId(null)} onOpenHistory={() => setEditingId(null)} />;
   return (
     <Screen scrollRef={scrollRef} onScrollY={onScrollY}>
       <ListPageHeader title={isSale ? t('saleHistory') : t('purchaseHistory')} addLabel={isSale ? t('newSale') : t('newPurchase')} onAdd={onNew} />
@@ -793,7 +795,7 @@ function TxnHistory({ kind, onNew, focus, onFocusDone }: {
           </Card>
         )) : <Card>{needle ? <NoResult /> : <Empty />}</Card>
       )}
-      {inv ? <InvoiceModal kind={isSale ? 'sale' : 'purchase'} id={inv} onClose={closeInv} onBack={closeInv} /> : null}
+      {inv ? <InvoiceModal kind={isSale ? 'sale' : 'purchase'} id={inv} onClose={closeInv} onBack={closeInv} onEdit={() => { setEditingId(inv); setInv(null); }} /> : null}
     </Screen>
   );
 }
@@ -2103,13 +2105,65 @@ function TransferHistory({ limit = 8 }: { limit?: number }) {
  */
 export { BankCashDashboard as BankCash } from "./screens/BankCashDashboard";
 
+type JournalDraftLine = { accountId: string; description: string; debit: string; credit: string };
+export function JournalEntryModal({ onClose, onSaved, initial }: { onClose: () => void; onSaved?: () => void; initial?: SavedJournalEntry }) {
+  const { lang } = useApp();
+  const [accounts, setAccounts] = useState<ChartAccountRow[]>([]);
+  const [date, setDate] = useState(initial?.date ?? today());
+  const [memo, setMemo] = useState(initial?.memo ?? '');
+  const [busy, setBusy] = useState(false);
+  const [lines, setLines] = useState<JournalDraftLine[]>(initial?.lines.map(l => ({ accountId: l.accountId, description: l.description, debit: l.debit ? String(l.debit) : '', credit: l.credit ? String(l.credit) : '' })) ?? [{ accountId: '', description: '', debit: '', credit: '' }, { accountId: '', description: '', debit: '', credit: '' }]);
+  const label = (en: string, bn: string) => lang === 'bn' ? bn : en;
+  useEffect(() => { api.chartAccounts().then(rows => { setAccounts(rows.filter(a => a.active)); setLines(current => current.map(l => ({ ...l, accountId: l.accountId || rows.find(a => a.active)?.id || '' }))); }).catch(e => Alert.alert('Chart of accounts', e.message)); }, []);
+  const setLine = (index: number, update: Partial<JournalDraftLine>) => setLines(current => current.map((line, i) => i === index ? { ...line, ...update } : line));
+  const save = async () => {
+    if (!date.match(/^\d{4}-\d{2}-\d{2}$/) || !memo.trim()) return Alert.alert(label('Date and memo are required.', 'তারিখ ও বিবরণ আবশ্যক।'));
+    const payload: JournalWrite = { date, memo: memo.trim(), sourceType: 'manual',
+      lines: lines.map(l => ({ accountId: l.accountId, description: l.description.trim(), debit: parseNum(l.debit), credit: parseNum(l.credit) })) };
+    try { setBusy(true); if (initial) await api.updateJournalEntry(initial.id, payload); else await api.createJournalEntry(payload); onSaved?.(); onClose(); }
+    catch (e) { Alert.alert(label('Could not save journal entry', 'জার্নাল এন্ট্রি সংরক্ষণ করা যায়নি'), e instanceof Error ? e.message : undefined); }
+    finally { setBusy(false); }
+  };
+  return <Modal visible transparent animationType="slide" onRequestClose={onClose}><View style={{ flex: 1, backgroundColor: '#0F172A88', justifyContent: 'center', padding: 14 }}><View style={{ maxHeight: '94%', backgroundColor: '#F8FAFC', borderRadius: 18, overflow: 'hidden' }}>
+    <View style={{ padding: 16, backgroundColor: '#123D64', flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }}><Text style={{ color: '#fff', fontSize: 19, fontWeight: '800' }}>{label(initial ? 'Edit journal entry' : 'New journal entry', initial ? 'জার্নাল এন্ট্রি সম্পাদনা' : 'নতুন জার্নাল এন্ট্রি')}</Text><TouchableOpacity onPress={onClose}><Text style={{ color: '#fff', fontSize: 24 }}>×</Text></TouchableOpacity></View>
+    <ScrollView keyboardShouldPersistTaps="handled" contentContainerStyle={{ padding: 16, gap: 10 }}>
+      <Field label={label('Date (YYYY-MM-DD)', 'তারিখ (YYYY-MM-DD)')} value={date} onChange={setDate} /><Field label={label('Memo', 'বিবরণ')} value={memo} onChange={setMemo} />
+      {lines.map((line, index) => { const selected = accounts.find(a => a.id === line.accountId); const current = Math.max(0, accounts.findIndex(a => a.id === line.accountId)); return <Card key={index}>
+        <Text style={{ color: '#123D64', fontWeight: '800', marginBottom: 7 }}>{label('Line', 'লাইন')} {index + 1}</Text>
+        <TouchableOpacity onPress={() => setLine(index, { accountId: accounts[(current + 1) % Math.max(accounts.length, 1)]?.id ?? '' })} style={{ padding: 10, borderRadius: 8, backgroundColor: '#EFF6FF', marginBottom: 7 }}><Text style={{ color: '#1D4ED8', fontWeight: '700' }}>{selected ? `${selected.code} · ${selected.name} (${selected.type})` : label('Tap to choose account', 'অ্যাকাউন্ট বাছাই করতে চাপুন')}</Text></TouchableOpacity>
+        {accounts.length > 1 ? <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 5, marginBottom: 8 }}>{accounts.map(a => <TouchableOpacity key={a.id} onPress={() => setLine(index, { accountId: a.id })} style={{ paddingHorizontal: 7, paddingVertical: 5, borderRadius: 14, backgroundColor: a.id === line.accountId ? '#DBEAFE' : '#F1F5F9' }}><Text style={{ color: '#334155', fontSize: 11 }}>{a.code}</Text></TouchableOpacity>)}</View> : null}
+        <Field label={label('Line description', 'লাইনের বিবরণ')} value={line.description} onChange={v => setLine(index, { description: v })} />
+        <View style={{ flexDirection: 'row', gap: 8 }}><View style={{ flex: 1 }}><Field label="Debit" value={line.debit} onChange={v => setLine(index, { debit: v, credit: '' })} num /></View><View style={{ flex: 1 }}><Field label="Credit" value={line.credit} onChange={v => setLine(index, { credit: v, debit: '' })} num /></View></View>
+      </Card>; })}
+      <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8 }}><Btn kind="ghost" label={label('Add line', 'লাইন যোগ')} onPress={() => setLines(current => [...current, { accountId: accounts[0]?.id ?? '', description: '', debit: '', credit: '' }])} /><Btn label={busy ? label('Saving…', 'সংরক্ষণ হচ্ছে…') : label('Save balanced entry', 'সুষম এন্ট্রি সংরক্ষণ')} onPress={() => { if (!busy) void save(); }} /></View>
+    </ScrollView>
+  </View></View></Modal>;
+}
+
+export function ChartOfAccountsModal({ onClose, onSaved }: { onClose: () => void; onSaved?: () => void }) {
+  const { lang } = useApp(); const [rows, setRows] = useState<ChartAccountRow[]>([]); const [code, setCode] = useState(''); const [name, setName] = useState(''); const [type, setType] = useState<ChartAccountRow['type']>('asset');
+  const [editId, setEditId] = useState<string | null>(null);
+  const label = (en: string, bn: string) => lang === 'bn' ? bn : en;
+  const reload = () => api.chartAccounts().then(setRows).catch(e => Alert.alert('Chart of accounts', e.message));
+  useEffect(() => { void reload(); }, []);
+  const create = async () => { try { if (editId) { const row = rows.find(x => x.id === editId)!; await api.updateChartAccount(editId, { ...row, code, name, type, active: row.active }); } else await api.createChartAccount({ code, name, type }); setCode(''); setName(''); setEditId(null); reload(); onSaved?.(); } catch (e) { Alert.alert(label('Could not save account', 'অ্যাকাউন্ট সংরক্ষণ করা যায়নি'), e instanceof Error ? e.message : undefined); } };
+  const typesList: ChartAccountRow['type'][] = ['asset','liability','equity','income','expense'];
+  return <Modal visible transparent animationType="slide" onRequestClose={onClose}><View style={{ flex: 1, backgroundColor: '#0F172A88', justifyContent: 'center', padding: 14 }}><View style={{ maxHeight: '94%', backgroundColor: '#F8FAFC', borderRadius: 18, padding: 16 }}><View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}><Text style={{ fontSize: 20, fontWeight: '800', color: '#123D64' }}>{label('Chart of accounts', 'হিসাবের চার্ট')}</Text><TouchableOpacity onPress={onClose}><Text style={{ fontSize: 24 }}>×</Text></TouchableOpacity></View>
+    <Field label={label('Code', 'কোড')} value={code} onChange={setCode} /><Field label={label('Account name', 'অ্যাকাউন্টের নাম')} value={name} onChange={setName} /><View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 6, marginVertical: 8 }}>{typesList.map(x => <TouchableOpacity key={x} onPress={() => setType(x)} style={{ padding: 8, borderRadius: 16, backgroundColor: type === x ? '#2563EB' : '#E2E8F0' }}><Text style={{ color: type === x ? '#fff' : '#334155' }}>{x}</Text></TouchableOpacity>)}</View><Btn label={label(editId ? 'Save changes' : 'Add account', editId ? 'পরিবর্তন সংরক্ষণ' : 'অ্যাকাউন্ট যোগ করুন')} onPress={() => { void create(); }} />
+    <ScrollView style={{ marginTop: 12 }}>{rows.map(a => <View key={a.id} style={{ flexDirection: 'row', alignItems: 'center', paddingVertical: 9, borderBottomWidth: 1, borderBottomColor: '#E2E8F0', gap: 8 }}><Text style={{ flex: 1, color: a.active ? '#0F172A' : '#94A3B8' }}>{a.code} · {a.name} · {a.type}</Text><TouchableOpacity onPress={() => { setEditId(a.id); setCode(a.code); setName(a.name); setType(a.type); }}><Text style={{ color: '#1D4ED8', fontWeight: '700' }}>{label('Edit', 'সম্পাদনা')}</Text></TouchableOpacity><TouchableOpacity onPress={() => { void api.updateChartAccount(a.id, { ...a, active: !a.active }).then(reload).catch(e => Alert.alert('Account', e.message)); }}><Text style={{ color: '#2563EB', fontWeight: '700' }}>{a.active ? label('Archive', 'আর্কাইভ') : label('Restore', 'ফিরিয়ে আনুন')}</Text></TouchableOpacity></View>)}</ScrollView>
+  </View></View></Modal>;
+}
+
 /** Add / edit one money account. Cash and Bank accounts only. */
 export function AccountFormModal({ id, onClose }: { id?: string; onClose: () => void }) {
-  const { t, moneyAccounts, saveAccount, setAccountOpening } = useApp();
+  const { t, lang, moneyAccounts, saveAccount, setAccountOpening } = useApp();
+  const m = useMoney();
+  const label = (bn: string, en: string) => lang === 'bn' ? bn : en;
   const cur = id ? moneyAccounts.find(a => a.id === id) : undefined;
   const [name, setName] = useState(cur?.name ?? '');
   const [type, setType] = useState<string>(cur?.type === 'bank' ? 'bank' : 'cash');
-  const [opening, setOpening] = useState(cur ? String(cur.openingBalance) : '');
+  const [opening, setOpening] = useState(cur ? String(cur.adjustedOpeningBalance ?? cur.openingBalance) : '');
+  const [openingDate, setOpeningDate] = useState(cur?.openingDate ?? today());
   const [bankName, setBankName] = useState(cur?.bankName ?? '');
   const [accountNumber, setAccountNumber] = useState(cur?.accountNumber ?? '');
   const [branch, setBranch] = useState(cur?.branch ?? '');
@@ -2121,6 +2175,10 @@ export function AccountFormModal({ id, onClose }: { id?: string; onClose: () => 
   const save = () => {
     if (!name.trim()) return Alert.alert(t('accountName'));
     if (busy) return;
+    const dateValue = toEnDigits(openingDate).trim();
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(dateValue) || !Number.isFinite(Date.parse(dateValue)) || new Date(dateValue).toISOString().slice(0, 10) !== dateValue) {
+      return Alert.alert(label('শুরুর তারিখ সঠিকভাবে দিন (YYYY-MM-DD)', 'Enter a valid opening date (YYYY-MM-DD)'));
+    }
     setBusy(true);
     (async () => {
       try {
@@ -2128,6 +2186,7 @@ export function AccountFormModal({ id, onClose }: { id?: string; onClose: () => 
         if (openingVal < 0) return Alert.alert(t('invalidAmount'));
         const payload = {
           name: name.trim(), type: (type === 'bank' ? 'bank' : 'cash') as AccountType,
+          openingDate: dateValue,
           bankName: isBank ? bankName.trim() : '', accountNumber: isBank ? accountNumber.trim() : '',
           branch: isBank ? branch.trim() : '', mobileNumber: '',
           note: note.trim(), active: activeOn,
@@ -2136,9 +2195,11 @@ export function AccountFormModal({ id, onClose }: { id?: string; onClose: () => 
           await saveAccount({ ...payload, id: cur.id });
           // Opening balance is changed through its own safe endpoint so
           // historical movements are never silently rewritten.
-          if (openingVal !== cur.openingBalance) await setAccountOpening(cur.id, openingVal);
+          // Update the single opening entry; the API folds any legacy opening
+          // adjustments into it and retires those duplicate movements.
+          await setAccountOpening(cur.id, openingVal, dateValue);
         } else {
-          await saveAccount({ ...payload, openingBalance: openingVal });
+          await saveAccount({ ...payload, openingBalance: openingVal, openingDate: dateValue });
         }
         Alert.alert(t('done'));
         onClose();
@@ -2180,7 +2241,8 @@ export function AccountFormModal({ id, onClose }: { id?: string; onClose: () => 
             );
           })}
         </View>
-        <Field label={t('openingBalanceLabel')} value={opening} onChange={setOpening} num />
+        <Field label={`${t('openingBalanceLabel')} *`} value={opening} onChange={setOpening} num />
+        <Field label={`${label('Opening date', 'Opening balance date')} *`} value={openingDate} onChange={setOpeningDate} />
         {isBank ? (
           <>
             <Field label={t('bankName')} value={bankName} onChange={setBankName} />
@@ -2540,8 +2602,9 @@ function useInvoice() {
 }
 
 // Full saved-transaction invoice preview with Print / Share / Close.
-export function InvoiceModal({ kind, id, onClose, onReturn, onBack }: {
+export function InvoiceModal({ kind, id, onClose, onReturn, onBack, onEdit }: {
   kind: 'sale' | 'purchase'; id: string; onClose: () => void; onReturn?: () => void;
+  onEdit?: () => void;
   /** Set when the document was opened from its module list: shows Back to list. */
   onBack?: () => void;
 }) {
@@ -2601,6 +2664,7 @@ export function InvoiceModal({ kind, id, onClose, onReturn, onBack }: {
           <Btn icon={icons.print} label={t('printInvoice')} onPress={() => printTxn(kind, id)} />
           <Btn kind="ghost" icon={icons.print} label={t('preview')} onPress={() => previewTxn(kind, id)} />
           <Btn kind="ghost" icon={icons.share} label={t('share')} onPress={() => shareTxn(kind, id)} />
+          {onEdit && !rets.length ? <Btn kind="ghost" icon={icons.edit} label={t('edit')} onPress={onEdit} /> : null}
           {rets.length ? (
             <Card>
               <SectionHead icon={icons.history}>{t('returns')}</SectionHead>

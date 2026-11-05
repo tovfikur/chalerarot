@@ -7,13 +7,15 @@ import { RGrid } from '../responsive';
 import { icons } from '../icons';
 import { toEnDigits } from '../bn';
 import { AccountFormModal, AccountDetailModal } from '../screens';
+import { MoneyMovementDetail, MoneyMovementItem } from './MoneyMovementDetail';
 
 export function AccountPage({ id, onBack }: { id: string; onBack: () => void }) {
-  const { lang, t, moneyAccounts } = useApp();
+  const { lang, t, moneyAccounts, refresh } = useApp();
   const m = useMoney(), fd = useDateStr();
   const l = (bn: string, en: string) => lang === 'bn' ? bn : en;
   const [data, setData] = useState<MoneyAccountDetail | null>(null), [error, setError] = useState(''), [loading, setLoading] = useState(true);
   const [retry, setRetry] = useState(0), [edit, setEdit] = useState(false), [manage, setManage] = useState(false);
+  const [selectedMovement, setSelectedMovement] = useState<MoneyAccountMovement | null>(null);
   const [query, setQuery] = useState(''), [from, setFrom] = useState(''), [to, setTo] = useState(''), [kind, setKind] = useState('all'), [direction, setDirection] = useState('all'), [page, setPage] = useState(0);
   useEffect(() => {
     let current = true; setLoading(true); setError('');
@@ -26,7 +28,7 @@ export function AccountPage({ id, onBack }: { id: string; onBack: () => void }) 
   const start = toEnDigits(from), end = toEnDigits(to);
   const validDate = (value: string) => !value || (/^\d{4}-\d{2}-\d{2}$/.test(value) && Number.isFinite(Date.parse(value)) && new Date(value).toISOString().slice(0, 10) === value);
   const invalid = !validDate(start) || !validDate(end) || (!!start && !!end && start > end);
-  const filtered = invalid ? [] : (data?.movements ?? []).filter(row =>
+  const filtered = invalid ? [] : (data?.movements ?? []).filter(row => row.sourceType !== 'openingAdjust' &&
     (!start || row.date >= start) && (!end || row.date <= end) && (kind === 'all' || row.sourceType === kind) &&
     (direction === 'all' || row.direction === direction) &&
     `${names[row.sourceType] ?? row.sourceType} ${row.note ?? ''} ${row.transferNo ?? ''} ${otherName(row)} ${row.amount}`.toLowerCase().includes(toEnDigits(query).trim().toLowerCase()));
@@ -52,7 +54,8 @@ export function AccountPage({ id, onBack }: { id: string; onBack: () => void }) 
       <Title>{account.name}</Title>
       <RGrid mobile={1} tablet={2} desktop={2}>
         <Card><Text>{t('accountBalanceLabel')}</Text><Text testID="account-current-balance" style={{ fontSize: 34, fontWeight: '800', color: '#123D64', marginVertical: 12 }}>{m(account.balance)}</Text><Text>{account.active ? t('activeAccount') : t('inactiveAccount')}</Text></Card>
-        <Card><Row left={t('accountType')} right={methodName(account.type, t)} /><Row left={t('openingMoney')} right={m(account.openingBalance)} />
+        <Card><Row left={t('accountType')} right={methodName(account.type, t)} />
+          <Row left={t('openingMoney')} right={m(account.adjustedOpeningBalance ?? account.openingBalance)} /><Row left={l('শুরুর ব্যালেন্সের তারিখ', 'Opening balance date')} right={fd(account.openingDate)} />
           {account.bankName ? <Row left={t('bankName')} right={account.bankName} /> : null}
           {account.accountNumber ? <Row left={t('accountNumber')} right={account.accountNumber} /> : null}
           {account.branch ? <Row left={t('branch')} right={account.branch} /> : null}
@@ -68,11 +71,13 @@ export function AccountPage({ id, onBack }: { id: string; onBack: () => void }) 
         <Chips value={kind} onPick={setKind} items={[{ id: 'all', name: l('সব ধরন', 'All types') }, ...Object.entries(names).map(([id, name]) => ({ id, name }))]} />
         {invalid ? <Text accessibilityRole="alert" style={{ color: '#DC2626' }}>{l('সঠিক তারিখসীমা দিন', 'Enter a valid date range')}</Text> : null}
         <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 20, marginVertical: 14 }}><Text>{l('মোট জমা', 'Filtered money in')}: {m(incoming)}</Text><Text>{l('মোট উত্তোলন', 'Filtered money out')}: {m(outgoing)}</Text><Text testID="account-result-count">{l('লেনদেন', 'Transactions')}: {filtered.length}</Text></View>
-        <ScrollView horizontal><View testID="account-transactions" style={{ minWidth: 960, flex: 1 }}><ListTable columns={columns} rows={filtered.slice(visiblePage * 25, (visiblePage + 1) * 25)} rowKey={r => r.id} /></View></ScrollView>
+        <Text style={{ color: '#64748B', marginBottom: 8 }}>{l('লেনদেনের সারিতে চাপ দিন বিস্তারিত দেখতে', 'Select a transaction to view its details')}</Text>
+        <ScrollView horizontal><View testID="account-transactions" style={{ minWidth: 960, flex: 1 }}><ListTable columns={columns} rows={filtered.slice(visiblePage * 25, (visiblePage + 1) * 25)} rowKey={r => r.id} onRowPress={setSelectedMovement} /></View></ScrollView>
         {pages > 1 ? <View style={{ flexDirection: 'row', gap: 12, alignItems: 'center', marginTop: 16 }}><Btn kind="ghost" label={l('আগের', 'Previous')} onPress={() => setPage(Math.max(0, visiblePage - 1))} /><Text>{visiblePage + 1} / {pages}</Text><Btn kind="ghost" label={l('পরের', 'Next')} onPress={() => setPage(Math.min(pages - 1, visiblePage + 1))} /></View> : null}
       </Card>
     </> : null}
     {edit ? <AccountFormModal id={id} onClose={() => setEdit(false)} /> : null}
     {manage ? <AccountDetailModal id={id} onClose={() => { setManage(false); if (!moneyAccounts.some(a => a.id === id)) onBack(); }} onEdit={() => { setManage(false); setEdit(true); }} /> : null}
+    {selectedMovement ? <MoneyMovementDetail movement={selectedMovement as MoneyMovementItem} accountName={account?.name} onClose={() => setSelectedMovement(null)} onSaved={async () => { setSelectedMovement(null); setRetry(v => v + 1); await refresh(); }} /> : null}
   </Screen>;
 }

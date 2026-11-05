@@ -30,6 +30,7 @@ const ENTITY: Record<string, { bn: string; en: string; icon: IconName; tone: str
 };
 
 const ACTION: Record<string, { bn: string; en: string }> = {
+  edit: { bn: 'সংশোধন করে পোস্ট', en: 'edited and reposted' },
   create: { bn: 'তৈরি', en: 'created' },
   update: { bn: 'আপডেট', en: 'updated' },
   delete: { bn: 'মুছে ফেলা', en: 'deleted' },
@@ -179,6 +180,9 @@ export function ActivityLog() {
         if (detail.direction) push(subtitle, detail.direction === 'in' ? l('জমা', 'In') : l('উত্তোলন', 'Out'));
         if (detail.kind) push(subtitle, detail.kind === 'sale' ? l('বিক্রয়', 'Sale') : detail.kind === 'purchase' ? l('ক্রয়', 'Purchase') : detail.kind);
         push(subtitle, detail.note);
+        if (typeof detail.previousAmount === 'number' && row.amount != null) {
+          push(subtitle, `${l('পরিমাণ', 'Amount')}: ${money(detail.previousAmount)} → ${money(row.amount)}`);
+        }
         const count = typeof detail.count === 'number' ? detail.count : typeof detail.items === 'number' ? detail.items : undefined;
         if (count) push(subtitle, `${count} ${l('আইটেম', 'items')}`);
         const role = row.userRole === 'admin' ? l('প্রশাসক', 'Admin') : row.userRole === 'staff' ? l('কর্মী', 'Staff') : '';

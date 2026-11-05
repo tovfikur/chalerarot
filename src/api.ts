@@ -70,21 +70,22 @@ export type TxnResult = { id: string; invoiceNo?: string; total: number };
 export type SettlementStatus = 'paid' | 'partial' | 'due';
 
 export type TxnItem = {
-  productName: string; unit: string; enteredQty: number; qtyKg: number; rate: number; otherCost?: number; unitCost?: number;
+  productId?: string; productName: string; unit: string; enteredQty: number; qtyKg: number; rate: number; otherCost?: number; unitCost?: number;
 };
+export type InvoicePayment = { accountId?: string | null; amount: number };
 /** Payment account recorded on the ledger row when the document was saved. */
 export type TxnPayment = { accountName: string | null; method: string; amount: number; date: string } | null;
 export type SaleDetail = {
   id: string; invoiceNo?: string; date: string; createdAt: string; discount: number;
   total: number; paid: number; due: number; status?: SettlementStatus; nextDate?: string;
-  customer: { name: string; mobile: string } | null; items: TxnItem[];
-  payment?: TxnPayment;
+  customer: { id?: string; name: string; mobile: string } | null; items: TxnItem[];
+  payment?: TxnPayment; payments?: InvoicePayment[]; returns?: { id: string; returnNo?: string; date: string; amount: number }[];
 };
 export type PurchaseDetail = {
   id: string; invoiceNo?: string; date: string; createdAt: string;
   total: number; paid: number; due: number; status?: SettlementStatus; nextDate?: string;
-  vendor: { name: string; mobile: string }; items: TxnItem[];
-  payment?: TxnPayment;
+  vendor: { id?: string; name: string; mobile: string }; items: TxnItem[];
+  payment?: TxnPayment; payments?: InvoicePayment[]; returns?: { id: string; returnNo?: string; date: string; amount: number }[];
 };
 
 // Stable internal payment method values. Never store translated labels.
@@ -92,7 +93,7 @@ export type MoneyMethod = 'cash' | 'bkash' | 'nagad' | 'bank';
 
 export type Expense = {
   id: string; voucherNo?: string; category: string; customName?: string;
-  amount: number; date: string; note?: string; method?: MoneyMethod; accountId?: string;
+  amount: number; date: string; note?: string; method?: MoneyMethod; accountId?: string; capitalized?: boolean;
 };
 
 export type ExpenseCategoryKind = 'operating' | 'landing' | 'transport' | 'other';
@@ -112,7 +113,7 @@ export type AccountType = 'cash' | 'bank' | 'bkash' | 'nagad' | 'rocket';
 
 export type MoneyAccountRow = {
   id: string; name: string; type: AccountType;
-  openingBalance: number; openingDate?: string;
+  openingBalance: number; openingDate: string; openingAdjustments?: number; adjustedOpeningBalance?: number;
   bankName?: string; accountNumber?: string; branch?: string; mobileNumber?: string; note?: string;
   active: boolean;
   /** Backend-computed financial history; drives whether Delete is offered. */
@@ -139,10 +140,26 @@ export type PeriodFinance = {
   start: string; end: string;
   sales: number; salesReturn: number; netSales: number;
   openingStockValue: number; openingStockCarryIn: number; openingStockAdded: number;
-  purchase: number; purchaseReturn: number; netPurchase: number;
+  purchase: number; purchaseReturn: number; netPurchase: number; capitalizedLandedCost: number;
   closingStockValue: number; damagedStockValue: number;
-  cogs: number; grossProfit: number; expense: number; netProfit: number;
+  cogs: number; grossProfit: number; expense: number; otherIncomeExpense: number; netProfit: number;
 };
+
+export type CashFlowStatement = {
+  from: string; to: string; openingBalance: number; customerReceipts: number;
+  supplierPayments: number; inventoryCostPayments: number; expensePayments: number; returnInflows: number;
+  returnOutflows: number; otherInflows: number; otherOutflows: number;
+  operatingInflows: number; operatingOutflows: number; netCashFlow: number; closingBalance: number;
+};
+
+export type BalanceSheet = { asOf: string; assets: { cash: number | null; bank: number | null; wallets: number | null; receivables: number; inventory: number; other?: number; total: number }; liabilities: { payables: number; other?: number; total: number }; equity: number; journalEquity: number; otherEquity: number; totalLiabilitiesAndEquity: number; balanced: boolean };
+export type JournalLine = { date: string; reference: string; account: string; accountId?: string; description: string; debit: number; credit: number; journalNo: string; sequence: number; entryId?: string; editable?: boolean };
+export type JournalEntries = { from: string; to: string; entries: { date: string; reference: string; lines: JournalLine[]; debitTotal: number; creditTotal: number; entryId?: string; editable?: boolean; sourceType?: string; sourceId?: string; sourceRef?: string }[]; debitTotal: number; creditTotal: number; balanced: boolean };
+export type GeneralLedger = { from: string; to: string; accounts: { account: string; code: string; openingBalance: number; periodDebit: number; periodCredit: number; closingBalance: number; netBalance: number; balanceSide: 'Dr' | 'Cr'; rows: (JournalLine & { runningBalance: number })[] }[]; debitTotal: number; creditTotal: number; balanced: boolean };
+export type ChartAccountRow = { id: string; code: string; name: string; type: 'asset' | 'liability' | 'equity' | 'income' | 'expense'; active: boolean; system: boolean };
+export type JournalEntryLine = { id?: string; accountId: string; account?: ChartAccountRow; description: string; debit: number; credit: number };
+export type SavedJournalEntry = { id: string; entryNo: string; date: string; memo: string; sourceType: string; sourceId?: string | null; sourceRef?: string | null; active: boolean; lines: JournalEntryLine[] };
+export type JournalWrite = { date: string; memo: string; sourceType?: 'manual'; lines: JournalEntryLine[] };
 
 /** One money transfer = one business event (its two movements stay linked). */
 export type MoneyTransfer = {
@@ -164,6 +181,7 @@ export const api = {
   profile: (body: { name: string; phone: string; email: string; password: string; currentPassword: string }) => req<AppUser>('/auth/profile', { method: 'PUT', body: JSON.stringify(body) }),
   moneyMovements: () => req<MoneyMovementRow[]>('/money/movements?limit=30'),
   moneyEntry: (body: { accountId: string; direction: 'in' | 'out'; amount: number; date: string; note: string; requestId: string }) => req<MoneyMovementRow>('/money/entries', { method: 'POST', body: JSON.stringify(body) }),
+  updateMoneyEntry: (id: string, body: { amount: number; note: string }) => req<MoneyMovementRow & { previousAmount: number }>(`/money/entries/${id}`, { method: 'PUT', body: JSON.stringify(body) }),
   settings: () => req<BusinessSettings>('/settings'),
   saveSettings: (value: BusinessSettings) => req<BusinessSettings>('/settings', { method: 'PUT', body: JSON.stringify(value) }),
   bootstrap: () => req<{
@@ -174,7 +192,7 @@ export const api = {
     purchases: { id: string; vendorId: string; date: string; total: number; paid: number; due: number; status: SettlementStatus; invoiceNo?: string }[];
     customerPayments: { id: string; customerId: string; amount: number; date: string; note?: string; method?: string; returnId?: string; returnNo?: string; createdAt?: string; saleId?: string; accountId?: string; accountName?: string }[];
     vendorPayments: { id: string; vendorId: string; amount: number; date: string; note?: string; returnId?: string; returnNo?: string; createdAt?: string; purchaseId?: string; accountId?: string; accountName?: string }[];
-    movements: { id: string; productId: string; productName: string; type: string; qty: number; bags: number; unitCost: number; bagUnitPrice: number; amount: number; date: string }[];
+    movements: { id: string; productId: string; productName: string; type: string; qty: number; bags: number; unitCost: number; bagUnitPrice: number; amount: number; date: string; transactionNo?: string; note?: string }[];
     expenses: Expense[];
     returns: ReturnSummary[];
     money: MoneyBalance[];
@@ -202,6 +220,8 @@ export const api = {
 
   createSale: (b: object) => req<TxnResult>('/sales', { method: 'POST', body: JSON.stringify(b) }),
   createPurchase: (b: object) => req<TxnResult>('/purchases', { method: 'POST', body: JSON.stringify(b) }),
+  updateSale: (id: string, b: object) => req<TxnResult>(`/sales/${id}`, { method: 'PUT', body: JSON.stringify(b) }),
+  updatePurchase: (id: string, b: object) => req<TxnResult>(`/purchases/${id}`, { method: 'PUT', body: JSON.stringify(b) }),
   saleDetail: (id: string) => req<SaleDetail>(`/sales/${id}`),
   purchaseDetail: (id: string) => req<PurchaseDetail>(`/purchases/${id}`),
   customerPayment: (b: object) => req<IdRes>('/customer-payments', { method: 'POST', body: JSON.stringify(b) }),
@@ -228,11 +248,20 @@ export const api = {
   // Permanent delete. The API refuses when any movement/transfer references
   // the account, so the UI can never destroy financial history.
   deleteMoneyAccount: (id: string) => req<{ id: string; deleted: boolean }>(`/money/accounts/${id}`, { method: 'DELETE' }),
-  setAccountOpening: (id: string, openingBalance: number, date?: string) =>
+  setAccountOpening: (id: string, openingBalance: number, date: string) =>
     req<IdRes>(`/money/accounts/${id}/opening`, { method: 'PUT', body: JSON.stringify({ openingBalance, date }) }),
   /** Canonical Net Sales / COGS / Gross Profit / Expenses / Net Profit. */
   finance: (mode: 'day' | 'month' | 'year' | 'all' | 'range', from?: string, to?: string) =>
     req<PeriodFinance>(`/finance?mode=${mode}${from ? `&from=${from}` : ''}${to ? `&to=${to}` : ''}`),
+  cashflow: (from: string, to: string) => req<CashFlowStatement>(`/cashflow?from=${from}&to=${to}`),
+  balanceSheet: (asOf: string) => req<BalanceSheet>(`/balance-sheet?asOf=${asOf}`),
+  generalLedger: (from: string, to: string) => req<GeneralLedger>(`/general-ledger?from=${from}&to=${to}`),
+  journalEntries: (from: string, to: string) => req<JournalEntries>(`/journal-entries?from=${from}&to=${to}`),
+  chartAccounts: () => req<ChartAccountRow[]>('/chart-of-accounts'),
+  createChartAccount: (body: { code: string; name: string; type: ChartAccountRow['type'] }) => req<ChartAccountRow>('/chart-of-accounts', { method: 'POST', body: JSON.stringify(body) }),
+  updateChartAccount: (id: string, body: Partial<ChartAccountRow>) => req<ChartAccountRow>(`/chart-of-accounts/${id}`, { method: 'PUT', body: JSON.stringify(body) }),
+  createJournalEntry: (body: JournalWrite) => req<SavedJournalEntry>('/journal-entries', { method: 'POST', body: JSON.stringify(body) }),
+  updateJournalEntry: (id: string, body: JournalWrite) => req<SavedJournalEntry>(`/journal-entries/${id}`, { method: 'PUT', body: JSON.stringify(body) }),
   moneyTransfers: (limit?: number) => req<MoneyTransfer[]>(`/money/transfers${limit ? `?limit=${limit}` : ''}`),
   createMoneyTransfer: (b: { fromId: string; toId: string; amount: number; date?: string; note?: string }) =>
     req<MoneyTransfer & { money: MoneyBalance[] }>('/money/transfers', { method: 'POST', body: JSON.stringify(b) }),

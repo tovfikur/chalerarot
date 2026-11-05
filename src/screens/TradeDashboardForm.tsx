@@ -17,7 +17,7 @@ import { parseNum } from '../bn';
 import { AppIcon, icons } from '../icons';
 import { MonthCal } from '../screens';
 import { BagUnit, kgPerUnit } from '../bags';
-import { api } from '../api';
+import { api, SaleDetail, PurchaseDetail } from '../api';
 import { UnitNames, InvData, fmtTime, unitDetail, buildInvoiceHTML } from '../invoice';
 
 export interface FormItemLine {
@@ -36,6 +36,7 @@ interface TradeDashboardFormProps {
   mode: 'purchase' | 'sale';
   onDone: () => void;
   onOpenHistory?: () => void;
+  editId?: string | null;
 }
 
 const DRAFT_STORAGE_KEY_PREFIX = 'chaler_arot_draft_';
@@ -104,10 +105,12 @@ const fromCalendarDate = (value: string): string => {
   const parts = value.match(/^(\d{4})-(\d{2})-(\d{2})$/);
   return parts ? `${parts[3]}/${parts[2]}/${parts[1]}` : '';
 };
+const roundToMoney = (value: number) => Math.round(value * 100) / 100;
 
-export function TradeDashboardForm({ mode, onDone, onOpenHistory }: TradeDashboardFormProps) {
+export function TradeDashboardForm({ mode, onDone, onOpenHistory, editId }: TradeDashboardFormProps) {
   const isSale = mode === 'sale';
-  const { t, lang, products, vendors, customers, bal, purchase, sale, moneyAccounts, saveExpense, sales, purchases } = useApp();
+  const { t, lang, products, vendors, customers, bal, purchase, sale, moneyAccounts, saveExpense, deleteExpense, expenses, sales, purchases, refresh } = useApp();
+  const tx = (bn: string, en: string) => lang === 'bn' ? bn : en;
   const m = useMoney();
   const n = useNum();
 
@@ -205,11 +208,11 @@ export function TradeDashboardForm({ mode, onDone, onOpenHistory }: TradeDashboa
         if (defaultPartyCode.trim().toLowerCase() === targetCode.toLowerCase()) {
           window.localStorage.removeItem(defaultStorageKey);
           setDefaultPartyCode('');
-          setCopiedToast(isSale ? 'ডিফল্ট কাস্টমার কোড সরানো হয়েছে' : 'ডিফল্ট সরবরাহকারী কোড সরানো হয়েছে');
+          setCopiedToast(isSale ? tx('ডিফল্ট কাস্টমার কোড সরানো হয়েছে', 'Default customer code removed') : tx('ডিফল্ট সরবরাহকারী কোড সরানো হয়েছে', 'Default vendor code removed'));
         } else {
           window.localStorage.setItem(defaultStorageKey, targetCode);
           setDefaultPartyCode(targetCode);
-          setCopiedToast(isSale ? `কাস্টমার কোড '${targetCode}' ডিফল্ট সেট করা হয়েছে` : `সরবরাহকারী কোড '${targetCode}' ডিফল্ট সেট করা হয়েছে`);
+          setCopiedToast(isSale ? tx(`কাস্টমার কোড '${targetCode}' ডিফল্ট সেট করা হয়েছে`, `Customer code '${targetCode}' set as default`) : tx(`সরবরাহকারী কোড '${targetCode}' ডিফল্ট সেট করা হয়েছে`, `Vendor code '${targetCode}' set as default`));
         }
         setTimeout(() => setCopiedToast(null), 2500);
       }
@@ -284,6 +287,8 @@ export function TradeDashboardForm({ mode, onDone, onOpenHistory }: TradeDashboa
 
   // Additional costs (Transport, Landing)
   const [transportCost, setTransportCost] = useState('');
+  const [transportExpenseId, setTransportExpenseId] = useState<string>();
+  const [landingExpenseId, setLandingExpenseId] = useState<string>();
 
   // Payments (Cash, Bank) & Discount (no default '0' strings)
   const [cashPaid, setCashPaid] = useState('');
@@ -312,6 +317,58 @@ export function TradeDashboardForm({ mode, onDone, onOpenHistory }: TradeDashboa
 
   // Copy feedback toast
   const [copiedToast, setCopiedToast] = useState<string | null>(null);
+  const [editLoading, setEditLoading] = useState(!!editId);
+  const [editPaymentUnsupported, setEditPaymentUnsupported] = useState(false);
+
+  useEffect(() => {
+    if (!editId) { setEditLoading(false); return; }
+    let active = true;
+    setEditLoading(true);
+    const load = async () => {
+      const doc = mode === 'sale' ? await api.saleDetail(editId) : await api.purchaseDetail(editId);
+      if (!active) return;
+      const partyId = mode === 'sale'
+        ? (doc as SaleDetail).customer?.id ?? ''
+        : (doc as PurchaseDetail).vendor.id ?? '';
+      const party = (mode === 'sale' ? customers : vendors).find(p => p.id === partyId);
+      setSelectedPartyId(partyId ?? ''); setPartyCode(party?.code ?? '');
+      setPartyName(party?.name ?? (mode === 'sale' ? (doc as SaleDetail).customer?.name ?? '' : (doc as PurchaseDetail).vendor.name));
+      setPartyMobile(party?.mobile ?? ''); setPartyAddress(party?.address ?? '');
+      setMemoNo(doc.invoiceNo ?? ''); setBillDate(`${doc.date.slice(8, 10)}/${doc.date.slice(5, 7)}/${doc.date.slice(0, 4)}`);
+      setDiscount(mode === 'sale' ? String((doc as SaleDetail).discount ?? 0) : '');
+      setItems(doc.items.filter(line => line.productId && line.enteredQty > 0).map((line, index) => {
+        const product = products.find(p => p.id === line.productId);
+        const unit = (line.unit || 'medium') as BagUnit;
+        const per = product ? kgPerUnit(product, unit) : 1;
+        return { id: `edit_${index}`, code: product?.code ?? '', productId: line.productId!, name: line.productName, unit,
+          qty: String(line.enteredQty), rate: String(roundToMoney(line.rate * per)),
+          purchaseRate: mode === 'sale' ? String(roundToMoney((line.unitCost ?? product?.cost ?? 0) * per)) : '',
+          otherCost: mode === 'purchase' ? String(line.otherCost ?? 0) : '' };
+      }));
+      const paymentLines = doc.payments ?? [];
+      const unsupportedPaymentLines = paymentLines.filter(p => {
+        const account = moneyAccounts.find(a => a.id === p.accountId);
+        return !account || !['cash', 'bank'].includes(account.type);
+      });
+      if (unsupportedPaymentLines.length) setEditPaymentUnsupported(true);
+      for (const p of paymentLines) {
+        const account = moneyAccounts.find(a => a.id === p.accountId);
+        if (account?.type === 'bank') { setBankAccountId(account.id); setBankPaid(v => String(parseNum(v) + p.amount)); }
+        else if (account?.type === 'cash') { setCashAccountId(account.id); setCashPaid(v => String(parseNum(v) + p.amount)); }
+      }
+      if (unsupportedPaymentLines.length) setFormError(tx('এই ইনভয়েসে ক্যাশ/ব্যাংক ছাড়া অন্য অ্যাকাউন্টের পেমেন্ট আছে। সম্পাদনার আগে হিসাবরক্ষকের সাহায্য নিন।', 'This invoice has a payment account the editor cannot preserve. Ask an administrator before editing it.'));
+      const invoiceRef = doc.invoiceNo ?? editId;
+      const linkedTransport = expenses.find(e => e.category === 'transport' && (e.note ?? '').includes(`#${invoiceRef}`));
+      const linkedLanding = expenses.find(e => e.capitalized && (e.note ?? '').includes(`#${invoiceRef}`));
+      setTransportExpenseId(linkedTransport?.id); setLandingExpenseId(linkedLanding?.id);
+      setTransportCost(linkedTransport ? String(linkedTransport.amount) : '');
+      if (linkedTransport?.accountId) setExpenseAccountId(linkedTransport.accountId);
+      if (linkedLanding?.accountId) setExpenseAccountId(linkedLanding.accountId);
+      setEditLoading(false);
+    };
+    load().catch(error => { if (active) { setFormError(error instanceof Error ? error.message : tx('ইনভয়েস লোড করা যায়নি।', 'Could not load invoice.')); setEditLoading(false); } });
+    return () => { active = false; };
+  }, [editId]);
 
   // Previous balance for selected party
   const prevDue = useMemo(() => {
@@ -371,7 +428,7 @@ export function TradeDashboardForm({ mode, onDone, onOpenHistory }: TradeDashboa
   const copyToClipboard = useCallback((text: string, label: string) => {
     if (Platform.OS === 'web' && typeof navigator !== 'undefined' && navigator.clipboard) {
       navigator.clipboard.writeText(text);
-      setCopiedToast(`${label} কপি করা হয়েছে`);
+    setCopiedToast(lang === 'bn' ? `${label} কপি করা হয়েছে` : `${label} copied`);
       setTimeout(() => setCopiedToast(null), 2000);
     }
   }, []);
@@ -628,10 +685,10 @@ export function TradeDashboardForm({ mode, onDone, onOpenHistory }: TradeDashboa
       if (Platform.OS === 'web' && typeof localStorage !== 'undefined') {
         localStorage.setItem(`${DRAFT_STORAGE_KEY_PREFIX}${mode}`, JSON.stringify(draftData));
       }
-      setCopiedToast('ড্রাফট সফলভাবে সংরক্ষণ করা হয়েছে');
+      setCopiedToast(tx('ড্রাফট সফলভাবে সংরক্ষণ করা হয়েছে', 'Draft saved'));
       setTimeout(() => setCopiedToast(null), 2500);
     } catch {
-      Alert.alert('ড্রাফট', 'ড্রাফট সফলভাবে সংরক্ষণ করা হয়েছে।');
+      Alert.alert(tx('ড্রাফট', 'Draft'), tx('ড্রাফট সফলভাবে সংরক্ষণ করা হয়েছে।', 'Draft saved.'));
     }
   }, [
     mode, orderNo, memoNo, selectedPartyId, partyCode, partyName, partyMobile,
@@ -680,7 +737,7 @@ export function TradeDashboardForm({ mode, onDone, onOpenHistory }: TradeDashboa
     if (typeof window === 'undefined') return;
     const w = targetWindow || window.open('', '_blank');
     if (w && !w.document.body?.innerHTML) {
-      w.document.write('<html><body>লোড হচ্ছে...</body></html>');
+      w.document.write(`<html><body>${tx('লোড হচ্ছে...', 'Loading...')}</body></html>`);
     }
     (kind === 'sale' ? api.saleDetail(id) : api.purchaseDetail(id)).then(
       d => {
@@ -688,16 +745,18 @@ export function TradeDashboardForm({ mode, onDone, onOpenHistory }: TradeDashboa
         const isSaleKind = kind === 'sale';
         const sd = d as any, pd = d as any;
         const party = isSaleKind ? sd.customer : pd.vendor;
-        const un: UnitNames = { kg: 'কেজি', small: 'ছোট বস্তা', medium: 'বস্তা', large: 'বড় বস্তা', ton: 'টন' };
+        const un: UnitNames = lang === 'bn'
+          ? { kg: 'কেজি', small: 'ছোট বস্তা', medium: 'বস্তা', large: 'বড় বস্তা', ton: 'টন' }
+          : { kg: 'kg', small: 'Small bag', medium: 'Bag', large: 'Large bag', ton: 'ton' };
         const doc: InvData = {
           no: (d.invoiceNo ?? '').toString(),
           date: d.date,
           time: fmtTime(d.createdAt, lang === 'bn'),
-          partyName: party?.name ?? (isSaleKind ? 'ক্যাশ কাস্টমার' : 'সরবরাহকারী'),
+          partyName: party?.name ?? (isSaleKind ? tx('ক্যাশ কাস্টমার', 'Cash customer') : tx('সরবরাহকারী', 'Vendor')),
           partyMobile: party?.mobile ?? '',
           lines: d.items.map((it: any) => ({
             name: it.productName,
-            detail: `${unitDetail(it.unit, it.enteredQty, it.qtyKg, un, n)} • ৳${it.rate}/কেজি`,
+            detail: `${unitDetail(it.unit, it.enteredQty, it.qtyKg, un, n)} • ৳${it.rate}/${tx('কেজি', 'kg')}`,
             total: `৳${Math.round(it.qtyKg * it.rate)}`,
           })),
           total: `৳${d.total}`,
@@ -705,12 +764,12 @@ export function TradeDashboardForm({ mode, onDone, onOpenHistory }: TradeDashboa
           due: `৳${d.due}`,
           next: d.nextDate,
           labels: {
-            shop: 'চালের আড়ৎ',
-            docTitle: isSaleKind ? 'বিক্রয় ইনভয়েস' : 'ক্রয় ইনভয়েস',
-            invoiceNo: 'ইনভয়েস নং', date: 'তারিখ', time: 'সময়',
-            partyLabel: isSaleKind ? 'কাস্টমার' : 'সরবরাহকারী',
-            mobile: 'মোবাইল', product: 'পণ্য', qty: 'পরিমাণ', rate: 'দর',
-            total: 'মোট', paid: 'পরিশোধ', due: 'বাকি', payDate: 'পরবর্তী তারিখ', thanks: 'ধন্যবাদ, আবার আসবেন',
+            shop: tx('চালের আড়ৎ', 'Chaler Arot'),
+            docTitle: isSaleKind ? tx('বিক্রয় ইনভয়েস', 'Sales invoice') : tx('ক্রয় ইনভয়েস', 'Purchase invoice'),
+            invoiceNo: tx('ইনভয়েস নং', 'Invoice no.'), date: tx('তারিখ', 'Date'), time: tx('সময়', 'Time'),
+            partyLabel: isSaleKind ? tx('কাস্টমার', 'Customer') : tx('সরবরাহকারী', 'Vendor'),
+            mobile: tx('মোবাইল', 'Mobile'), product: tx('পণ্য', 'Product'), qty: tx('পরিমাণ', 'Quantity'), rate: tx('দর', 'Rate'),
+            total: tx('মোট', 'Total'), paid: tx('পরিশোধ', 'Paid'), due: tx('বাকি', 'Due'), payDate: tx('পরবর্তী তারিখ', 'Next date'), thanks: tx('ধন্যবাদ, আবার আসবেন', 'Thank you for your business'),
           },
         };
         w.document.open();
@@ -727,6 +786,10 @@ export function TradeDashboardForm({ mode, onDone, onOpenHistory }: TradeDashboa
 
   // Open Split Confirmation Modal after preliminary validation
   const handleOpenConfirm = useCallback(() => {
+    if (editPaymentUnsupported) {
+      setFormError(tx('এই ইনভয়েসের পেমেন্ট অ্যাকাউন্ট সম্পাদনা করা যাবে না।', 'This invoice uses a payment account that this editor cannot preserve.'));
+      return;
+    }
     setFormError('');
     const validLines = items.filter(it => it.name.trim() && parseNum(it.qty) !== 0);
     if (!validLines.length) {
@@ -744,32 +807,37 @@ export function TradeDashboardForm({ mode, onDone, onOpenHistory }: TradeDashboa
       return !(enteredRate > 0);
     });
     if (hasInvalidLine) {
-      setFormError(isSale ? 'Enter a sale rate / পণ্যের সঠিক বিক্রয় দর দিন।' : 'Enter a purchase rate / পণ্যের সঠিক ক্রয় দর দিন।');
+      setFormError(isSale ? tx('পণ্যের সঠিক বিক্রয় দর দিন।', 'Enter a valid sale rate.') : tx('পণ্যের সঠিক ক্রয় দর দিন।', 'Enter a valid purchase rate.'));
       return;
     }
 
     // Default cash receive (sale) or cash payment (purchase) to the exact invoice amount
     const invoiceAmt = Math.max(0, Math.round(totalProductValue - numTransport - numDiscount));
-    setCashPaid(String(invoiceAmt));
+    if (!editId) setCashPaid(String(invoiceAmt));
 
     setReviewSplitOpen(true);
-  }, [items, isSale, selectedPartyId, parties, t, lang, products, totalProductValue, numTransport, numDiscount]);
+  }, [items, isSale, selectedPartyId, parties, t, lang, products, totalProductValue, numTransport, numDiscount, editId, editPaymentUnsupported, tx]);
 
   // Final submission handler that creates the invoice
   const executeTransaction = useCallback(async (printWin?: any) => {
     const win = (printWin && typeof printWin === 'object' && typeof printWin.close === 'function') ? (printWin as Window) : null;
     if (submitting) return;
+    if (editPaymentUnsupported) {
+      setFormError(tx('এই ইনভয়েসের পেমেন্ট অ্যাকাউন্ট সম্পাদনা করা যাবে না।', 'This invoice uses a payment account that this editor cannot preserve.'));
+      if (win && !win.closed) win.close();
+      return;
+    }
     setFormError('');
     const validLines = items.filter(it => it.name.trim() && parseNum(it.qty) !== 0);
     if (!validLines.length) {
       if (win && !win.closed) win.close();
-      setFormError('অনুগ্রহ করে অন্তত একটি পণ্যের নাম ও পরিমাণ দিন।');
+      setFormError(tx('অনুগ্রহ করে অন্তত একটি পণ্যের নাম ও পরিমাণ দিন।', 'Enter at least one product and quantity.'));
       return;
     }
 
     if (!selectedPartyId) {
       if (win && !win.closed) win.close();
-      setFormError(isSale ? 'ইনভয়েস তৈরির আগে কাস্টমার নির্বাচন করুন।' : 'ইনভয়েস তৈরির আগে সরবরাহকারী নির্বাচন করুন।');
+      setFormError(isSale ? tx('ইনভয়েস তৈরির আগে কাস্টমার নির্বাচন করুন।', 'Select a customer before creating the invoice.') : tx('ইনভয়েস তৈরির আগে সরবরাহকারী নির্বাচন করুন।', 'Select a vendor before creating the invoice.'));
       return;
     }
 
@@ -780,7 +848,7 @@ export function TradeDashboardForm({ mode, onDone, onOpenHistory }: TradeDashboa
 
     if (hasInvalidLine) {
       if (win && !win.closed) win.close();
-      setFormError(isSale ? 'Enter a sale rate / পণ্যের সঠিক বিক্রয় দর দিন।' : 'Enter a purchase rate / পণ্যের সঠিক ক্রয় দর দিন।');
+      setFormError(isSale ? tx('পণ্যের সঠিক বিক্রয় দর দিন।', 'Enter a valid sale rate.') : tx('পণ্যের সঠিক ক্রয় দর দিন।', 'Enter a valid purchase rate.'));
       return;
     }
 
@@ -849,7 +917,7 @@ export function TradeDashboardForm({ mode, onDone, onOpenHistory }: TradeDashboa
       let res: { id: string; invoiceNo?: string; total: number };
 
       if (isSale) {
-        res = await sale({
+        const payload = {
           customerId: effectivePartyId || undefined,
           lines: processedLines,
           discount: numDiscount,
@@ -861,9 +929,10 @@ export function TradeDashboardForm({ mode, onDone, onOpenHistory }: TradeDashboa
           ],
           date: isoDate,
           memoNo: memoNo.trim() || undefined,
-        });
+        };
+        res = editId ? await api.updateSale(editId, payload) : await sale(payload);
       } else {
-        res = await purchase({
+        const payload = {
           vendorId: effectivePartyId,
           lines: processedLines,
           paid: totalPaid,
@@ -874,8 +943,10 @@ export function TradeDashboardForm({ mode, onDone, onOpenHistory }: TradeDashboa
           ],
           date: isoDate,
           memoNo: memoNo.trim() || undefined,
-        });
+        };
+        res = editId ? await api.updatePurchase(editId, payload) : await purchase(payload);
       }
+      if (editId) await refresh();
 
       const todayISO = isoDate || today();
       const invoiceRef = res?.invoiceNo || memoNo.trim() || 'Invoice';
@@ -885,6 +956,7 @@ export function TradeDashboardForm({ mode, onDone, onOpenHistory }: TradeDashboa
       if (numTransport > 0 && expAccountId) {
         try {
           await saveExpense({
+            id: editId ? transportExpenseId : undefined,
             category: 'transport',
             customName: 'পরিবহন খরচ',
             amount: numTransport,
@@ -896,6 +968,9 @@ export function TradeDashboardForm({ mode, onDone, onOpenHistory }: TradeDashboa
           console.error('Failed to save transport expense:', e);
           expenseSaveFailures.push('transport');
         }
+      }
+      if (editId && numTransport <= 0 && transportExpenseId) {
+        await deleteExpense(transportExpenseId);
       }
 
       const totalLinesOtherCost = !isSale
@@ -929,17 +1004,22 @@ export function TradeDashboardForm({ mode, onDone, onOpenHistory }: TradeDashboa
 
         try {
           await saveExpense({
+            id: editId ? landingExpenseId : undefined,
             category: 'loading',
             customName: 'ক্রয় খরচ (প্রতি বস্তা)',
             amount: totalLinesOtherCost,
             accountId: expAccountId,
             date: todayISO,
+            capitalized: true,
             note: `[ধরন: ল্যান্ডিং] ক্রয় #${invoiceRef} বস্তা প্রতি খরচ (${lineDetails})`,
           });
         } catch (e) {
           console.error('Failed to save per-bag other expense:', e);
           expenseSaveFailures.push('per-bag landing cost');
         }
+      }
+      if (editId && totalLinesOtherCost <= 0 && landingExpenseId) {
+        await deleteExpense(landingExpenseId);
       }
 
       if (Platform.OS === 'web' && typeof localStorage !== 'undefined') {
@@ -957,8 +1037,8 @@ export function TradeDashboardForm({ mode, onDone, onOpenHistory }: TradeDashboa
       const savedMemo = res.invoiceNo || memoNo;
       setCopiedToast(
         isSale
-          ? `বিক্রয় সফল হয়েছে (মেমো নং: ${savedMemo})`
-          : `ক্রয় সফল হয়েছে (মেমো নং: ${savedMemo})`
+          ? tx(`বিক্রয় সফল হয়েছে (মেমো নং: ${savedMemo})`, `Sale completed (memo no.: ${savedMemo})`)
+          : tx(`ক্রয় সফল হয়েছে (মেমো নং: ${savedMemo})`, `Purchase completed (memo no.: ${savedMemo})`)
       );
       setTimeout(() => setCopiedToast(null), 3500);
 
@@ -978,24 +1058,25 @@ export function TradeDashboardForm({ mode, onDone, onOpenHistory }: TradeDashboa
       resetForm(nextNo);
       setTimeout(focusCustomerInput, 150);
       setTimeout(focusCustomerInput, 350);
+      if (editId) onDone();
       if (expenseSaveFailures.length) {
         Alert.alert(
           lang === 'bn' ? 'ইনভয়েস হয়েছে, খরচ সংরক্ষণ হয়নি' : 'Invoice saved, expense not recorded',
           lang === 'bn'
-            ? `ইনভয়েস ${invoiceRef} সংরক্ষিত হয়েছে, কিন্তু ${expenseSaveFailures.join(', ')} খরচ সংরক্ষণ করা যায়নি। খরচের হিসাব পরীক্ষা করুন।`
+            ? tx(`ইনভয়েস ${invoiceRef} সংরক্ষিত হয়েছে, কিন্তু ${expenseSaveFailures.join(', ')} খরচ সংরক্ষণ করা যায়নি। খরচের হিসাব পরীক্ষা করুন।`, `Invoice ${invoiceRef} was saved, but these expenses could not be recorded: ${expenseSaveFailures.join(', ')}. Please check expenses.`)
             : `Invoice ${invoiceRef} was saved, but these expense records failed: ${expenseSaveFailures.join(', ')}. Please review the expense ledger.`,
         );
       }
     } catch (err) {
       if (win && !win.closed) win.close();
-      setFormError(err instanceof Error ? err.message : 'লেনদেন সম্পন্ন করা সম্ভব হয়নি।');
+      setFormError(err instanceof Error ? err.message : tx('লেনদেন সম্পন্ন করা সম্ভব হয়নি।', 'Could not complete the transaction.'));
     } finally {
       setSubmitting(false);
     }
   }, [
-    submitting, items, selectedPartyId, isSale, products, moneyAccounts, numBank, billDate,
+    submitting, items, selectedPartyId, isSale, products, moneyAccounts, numBank, billDate, editPaymentUnsupported,
     lang, sale, numDiscount, totalPaid, memoNo, purchase, numTransport, saveExpense, mode,
-    printDoc, resetForm, sales, purchases, focusCustomerInput
+    printDoc, resetForm, sales, purchases, focusCustomerInput, editId, refresh, onDone
   ]);
 
   // Global Keyboard Shortcuts Listener
@@ -1095,6 +1176,8 @@ export function TradeDashboardForm({ mode, onDone, onOpenHistory }: TradeDashboa
 
   const isInputFocused = (key: string) => focusedField === key;
 
+  if (editLoading) return <View style={{ flex: 1, alignItems: 'center', justifyContent: 'center', backgroundColor: '#F4F8FC' }}><Text style={{ color: '#64748B' }}>{t('wait')}</Text></View>;
+
   return (
     <View style={styles.outerWrapper}>
       {/* Floating Error Toast (highest z-index, always on top) */}
@@ -1167,7 +1250,7 @@ export function TradeDashboardForm({ mode, onDone, onOpenHistory }: TradeDashboa
             <TouchableOpacity
               onPress={onDone}
               style={styles.backButton3D}
-              accessibilityLabel="পিছনে যান"
+              accessibilityLabel={tx('পিছনে যান', 'Go back')}
             >
               <AppIcon name={icons.back} size={22} iconColor="#fff" />
             </TouchableOpacity>
@@ -1176,8 +1259,9 @@ export function TradeDashboardForm({ mode, onDone, onOpenHistory }: TradeDashboa
               <View style={styles.titleIconBadge}>
                 <AppIcon name={isSale ? icons.sale : icons.purchase} size={22} iconColor="#fff" />
               </View>
-              <Text style={styles.headerTitle}>{isSale ? 'নতুন বিক্রয়' : 'নতুন ক্রয়'}</Text>
+              <Text style={styles.headerTitle}>{editId ? (isSale ? tx('বিক্রয় সম্পাদনা', 'Edit sale') : tx('ক্রয় সম্পাদনা', 'Edit purchase')) : (isSale ? tx('নতুন বিক্রয়', 'New sale') : tx('নতুন ক্রয়', 'New purchase'))}</Text>
             </View>
+            {editId ? <Text style={{ color: '#DBEAFE', fontSize: 12, marginTop: 4, marginLeft: 54 }}>{tx('ড্রাফট পরিবর্তন', 'Draft changes')} · #{lang === 'bn' ? toBnDigits(memoNo) : memoNo} · {tx('নিশ্চিত না করা পর্যন্ত ইনভয়েস ও স্টক পোস্ট হবে না', 'Invoice and stock stay unchanged until confirmed')}</Text> : null}
           </View>
 
           {/* Right: Tactile 3D Buttons for F1, Search, Bell */}
@@ -1190,22 +1274,22 @@ export function TradeDashboardForm({ mode, onDone, onOpenHistory }: TradeDashboa
                 accessibilityLabel={isSale ? 'Sales list' : 'Purchase list'}
                 testID={isSale ? 'open-sales-history' : 'open-purchase-history'}
               >
-                <Text style={styles.shortcutGuideBadgeText}>{isSale ? 'বিক্রয় তালিকা' : 'ক্রয় তালিকা'}</Text>
+                <Text style={styles.shortcutGuideBadgeText}>{isSale ? tx('বিক্রয় তালিকা', 'Sales list') : tx('ক্রয় তালিকা', 'Purchase list')}</Text>
               </TouchableOpacity>
             ) : null}
             <TouchableOpacity
               onPress={() => setShowShortcutsHelp(true)}
               style={styles.shortcutGuideBadge3D}
-              accessibilityLabel="কীবোর্ড শর্টকাট"
+              accessibilityLabel={tx('কীবোর্ড শর্টকাট', 'Keyboard shortcuts')}
             >
-              <Text style={styles.shortcutGuideBadgeText}>⌨️ F1: কীবোর্ড</Text>
+              <Text style={styles.shortcutGuideBadgeText}>⌨️ F1: {tx('কীবোর্ড', 'Shortcuts')}</Text>
             </TouchableOpacity>
 
-            <TouchableOpacity style={styles.iconCircleButton3D} accessibilityLabel="খুঁজুন">
+            <TouchableOpacity style={styles.iconCircleButton3D} accessibilityLabel={tx('খুঁজুন', 'Search')}>
               <AppIcon name={icons.search} size={20} iconColor="#fff" />
             </TouchableOpacity>
 
-            <TouchableOpacity style={styles.iconCircleButton3D} accessibilityLabel="নোটিফিকেশন">
+            <TouchableOpacity style={styles.iconCircleButton3D} accessibilityLabel={tx('নোটিফিকেশন', 'Notifications')}>
               <AppIcon name={icons.bell} size={20} iconColor="#fff" />
             </TouchableOpacity>
           </View>
@@ -1218,12 +1302,12 @@ export function TradeDashboardForm({ mode, onDone, onOpenHistory }: TradeDashboa
           <View style={[styles.card3D, styles.colLeft, { position: 'relative', zIndex: partyDropdownOpen ? 1000 : 10 }]}>
             <View style={styles.cardHeaderFlex}>
               <View style={[styles.cardHeaderDot, { backgroundColor: '#1c70b9' }]} />
-              <Text style={styles.cardHeaderTitle}>{isSale ? 'বিক্রয়ের তথ্য' : 'ক্রয়ের তথ্য'}</Text>
+              <Text style={styles.cardHeaderTitle}>{isSale ? tx('বিক্রয়ের তথ্য', 'Sale details') : tx('ক্রয়ের তথ্য', 'Purchase details')}</Text>
             </View>
 
             {/* Memo No */}
             <View style={styles.formGroup}>
-              <Text style={styles.fieldLabel}>{isSale ? 'বিক্রয় মেমো নং' : 'ক্রয় মেমো নং'}</Text>
+                <Text style={styles.fieldLabel}>{isSale ? tx('বিক্রয় মেমো নং', 'Sale memo no.') : tx('ক্রয় মেমো নং', 'Purchase memo no.')}</Text>
               <View style={[styles.inputDebossed, isInputFocused('memoNo') && styles.inputFocusedGlow]}>
                 <TextInput
                   ref={el => (inputRefs.current['memoNo'] = el)}
@@ -1237,9 +1321,9 @@ export function TradeDashboardForm({ mode, onDone, onOpenHistory }: TradeDashboa
                   returnKeyType="next"
                 />
                 <TouchableOpacity
-                  onPress={() => copyToClipboard(memoNo, 'মেমো নং')}
+                  onPress={() => copyToClipboard(memoNo, tx('মেমো নং', 'Memo no.'))}
                   style={styles.tactileInnerBtn}
-                  accessibilityLabel="কপি করুন"
+                  accessibilityLabel={tx('কপি করুন', 'Copy')}
                 >
                   <AppIcon name={icons.copy} size={18} iconColor="#1c70b9" />
                 </TouchableOpacity>
@@ -1249,7 +1333,7 @@ export function TradeDashboardForm({ mode, onDone, onOpenHistory }: TradeDashboa
             {/* Party Code (Cursor starts here by default) */}
             <View style={[styles.formGroup, { position: 'relative', zIndex: partyDropdownOpen ? 1100 : 1 }]}>
               <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 4 }}>
-                <Text style={styles.fieldLabel}>{isSale ? 'কাস্টমার কোড' : 'সরবরাহকারী কোড'}</Text>
+                <Text style={styles.fieldLabel}>{isSale ? tx('কাস্টমার কোড', 'Customer code') : tx('সরবরাহকারী কোড', 'Vendor code')}</Text>
                 {/* Default Code Indicator & Toggle Button */}
                 {partyCode.trim() ? (
                   <TouchableOpacity
@@ -1265,7 +1349,7 @@ export function TradeDashboardForm({ mode, onDone, onOpenHistory }: TradeDashboa
                       borderWidth: 1,
                       borderColor: defaultPartyCode.trim().toLowerCase() === partyCode.trim().toLowerCase() ? '#F59E0B' : '#CBD5E1',
                     }}
-                    accessibilityLabel="ডিফল্ট হিসেবে সেট বা মুছুন"
+                    accessibilityLabel={tx('ডিফল্ট হিসেবে সেট বা মুছুন', 'Set or remove default')}
                   >
                     <Text style={{
                       fontSize: 11,
@@ -1273,8 +1357,8 @@ export function TradeDashboardForm({ mode, onDone, onOpenHistory }: TradeDashboa
                       color: defaultPartyCode.trim().toLowerCase() === partyCode.trim().toLowerCase() ? '#B45309' : '#475569',
                     }}>
                       {defaultPartyCode.trim().toLowerCase() === partyCode.trim().toLowerCase()
-                        ? '★ ডিফল্ট কোড (মুছুন)'
-                        : '☆ ডিফল্ট সেট করুন'}
+                        ? tx('★ ডিফল্ট কোড (মুছুন)', '★ Default code (remove)')
+                        : tx('☆ ডিফল্ট সেট করুন', '☆ Set default')}
                     </Text>
                   </TouchableOpacity>
                 ) : defaultPartyCode ? (
@@ -1297,7 +1381,7 @@ export function TradeDashboardForm({ mode, onDone, onOpenHistory }: TradeDashboa
                     }}
                   >
                     <Text style={{ fontSize: 11, fontWeight: '800', color: '#B45309' }}>
-                      ★ ডিফল্ট: {defaultPartyCode} (লোড করুন)
+                      {tx('★ ডিফল্ট:', '★ Default:')} {defaultPartyCode} ({tx('লোড করুন', 'Load')})
                     </Text>
                   </TouchableOpacity>
                 ) : null}
@@ -1401,11 +1485,11 @@ export function TradeDashboardForm({ mode, onDone, onOpenHistory }: TradeDashboa
                                 <Text style={styles.dropdownItemText}>{p.name}</Text>
                                 {isThisDefault && (
                                   <View style={{ backgroundColor: '#FEF3C7', paddingHorizontal: 5, paddingVertical: 1, borderRadius: 4, borderWidth: 1, borderColor: '#F59E0B' }}>
-                                    <Text style={{ fontSize: 10, fontWeight: '800', color: '#B45309' }}>★ ডিফল্ট</Text>
+                                    <Text style={{ fontSize: 10, fontWeight: '800', color: '#B45309' }}>★ {tx('ডিফল্ট', 'Default')}</Text>
                                   </View>
                                 )}
                               </View>
-                              <Text style={styles.dropdownItemSub}>{[p.mobile, pDisplayCode ? `কোড: ${pDisplayCode}` : ''].filter(Boolean).join(' • ')}</Text>
+                              <Text style={styles.dropdownItemSub}>{[p.mobile, pDisplayCode ? `${tx('কোড:', 'Code:')} ${pDisplayCode}` : ''].filter(Boolean).join(' • ')}</Text>
                             </View>
                             <View style={{ alignItems: 'flex-end', gap: 2 }}>
                               <Text style={styles.dropdownItemDue}>{m(bal(isSale ? 'c' : 'v', p.id).balance)}</Text>
@@ -1416,10 +1500,10 @@ export function TradeDashboardForm({ mode, onDone, onOpenHistory }: TradeDashboa
                                     handleToggleDefaultParty(pDisplayCode);
                                   }}
                                   style={{ padding: 2 }}
-                                  accessibilityLabel="ডিফল্ট হিসেবে সেট বা মুছুন"
+                                  accessibilityLabel={tx('ডিফল্ট হিসেবে সেট বা মুছুন', 'Set or remove default')}
                                 >
                                   <Text style={{ fontSize: 10, color: isThisDefault ? '#B45309' : '#94A3B8', fontWeight: '700' }}>
-                                    {isThisDefault ? '★ ডিফল্ট' : '☆ ডিফল্ট করুন'}
+                                    {isThisDefault ? `★ ${tx('ডিফল্ট', 'Default')}` : `☆ ${tx('ডিফল্ট করুন', 'Set default')}`}
                                   </Text>
                                 </TouchableOpacity>
                               ) : null}
@@ -1430,7 +1514,7 @@ export function TradeDashboardForm({ mode, onDone, onOpenHistory }: TradeDashboa
                     ) : (
                       <View style={{ padding: 12 }}>
                         <Text style={{ color: '#5B728F', fontSize: 13, textAlign: 'center' }}>
-                          {isSale ? 'কোন কাস্টমার পাওয়া যায়নি' : 'কোন সরবরাহকারী পাওয়া যায়নি'}
+                          {isSale ? tx('কোন কাস্টমার পাওয়া যায়নি', 'No customers found') : tx('কোন সরবরাহকারী পাওয়া যায়নি', 'No vendors found')}
                         </Text>
                       </View>
                     )}
@@ -1442,10 +1526,10 @@ export function TradeDashboardForm({ mode, onDone, onOpenHistory }: TradeDashboa
             {/* Party Name */}
             <View style={styles.formGroup}>
               <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 6 }}>
-                <Text style={styles.fieldLabel}>{isSale ? 'কাস্টমারের নাম' : 'সরবরাহকারীর নাম'}</Text>
+                <Text style={styles.fieldLabel}>{isSale ? tx('কাস্টমারের নাম', 'Customer name') : tx('সরবরাহকারীর নাম', 'Vendor name')}</Text>
                 <View style={styles.readOnlyBadge}>
                   <AppIcon name={icons.lock} size={11} iconColor="#64748B" />
-                  <Text style={styles.readOnlyBadgeText}>ডাটাবেজ থেকে</Text>
+                  <Text style={styles.readOnlyBadgeText}>{tx('ডাটাবেজ থেকে', 'From database')}</Text>
                 </View>
               </View>
               <View style={[styles.inputDebossed, styles.inputReadOnly]}>
@@ -1454,7 +1538,7 @@ export function TradeDashboardForm({ mode, onDone, onOpenHistory }: TradeDashboa
                   value={partyName}
                   editable={false}
                   style={[styles.textInput, styles.textInputReadOnly]}
-                  placeholder="কোড লিখলে নাম স্বয়ংক্রিয় আসবে"
+                  placeholder={tx('কোড লিখলে নাম স্বয়ংক্রিয় আসবে', 'Name fills in when you enter a code')}
                   placeholderTextColor="#94A3B8"
                 />
               </View>
@@ -1463,9 +1547,9 @@ export function TradeDashboardForm({ mode, onDone, onOpenHistory }: TradeDashboa
             {/* Mobile */}
             <View style={styles.formGroup}>
               <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 6 }}>
-                <Text style={styles.fieldLabel}>মোবাইল নম্বর</Text>
+                <Text style={styles.fieldLabel}>{tx('মোবাইল নম্বর', 'Mobile number')}</Text>
                 <View style={styles.readOnlyBadge}>
-                  <Text style={styles.readOnlyBadgeText}>রিড-অনলি</Text>
+                  <Text style={styles.readOnlyBadgeText}>{tx('রিড-অনলি', 'Read only')}</Text>
                 </View>
               </View>
               <View style={[styles.inputDebossed, styles.inputReadOnly]}>
@@ -1474,7 +1558,7 @@ export function TradeDashboardForm({ mode, onDone, onOpenHistory }: TradeDashboa
                   value={partyMobile}
                   editable={false}
                   style={[styles.textInput, styles.textInputReadOnly]}
-                  placeholder="মোবাইল নম্বর"
+                  placeholder={tx('মোবাইল নম্বর', 'Mobile number')}
                   placeholderTextColor="#94A3B8"
                 />
               </View>
@@ -1483,9 +1567,9 @@ export function TradeDashboardForm({ mode, onDone, onOpenHistory }: TradeDashboa
             {/* Address */}
             <View style={styles.formGroup}>
               <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 6 }}>
-                <Text style={styles.fieldLabel}>ঠিকানা</Text>
+                <Text style={styles.fieldLabel}>{tx('ঠিকানা', 'Address')}</Text>
                 <View style={styles.readOnlyBadge}>
-                  <Text style={styles.readOnlyBadgeText}>রিড-অনলি</Text>
+                  <Text style={styles.readOnlyBadgeText}>{tx('রিড-অনলি', 'Read only')}</Text>
                 </View>
               </View>
               <View style={[styles.textareaDebossed, styles.inputReadOnly]}>
@@ -1494,7 +1578,7 @@ export function TradeDashboardForm({ mode, onDone, onOpenHistory }: TradeDashboa
                   value={partyAddress}
                   editable={false}
                   style={[styles.textareaInput, styles.textInputReadOnly]}
-                  placeholder="ঠিকানা"
+                  placeholder={tx('ঠিকানা', 'Address')}
                   placeholderTextColor="#94A3B8"
                   multiline
                 />
@@ -1506,7 +1590,7 @@ export function TradeDashboardForm({ mode, onDone, onOpenHistory }: TradeDashboa
           <View style={[styles.card3D, styles.colRight]}>
             <View style={styles.cardHeaderFlex}>
               <View style={[styles.cardHeaderDot, { backgroundColor: '#0284C7' }]} />
-              <Text style={styles.cardHeaderTitle}>তারিখ বিবরণ</Text>
+              <Text style={styles.cardHeaderTitle}>{tx('তারিখ বিবরণ', 'Date details')}</Text>
             </View>
 
             {/* Bill Date with Lock / Unlock and Set Buttons */}
@@ -1607,7 +1691,7 @@ export function TradeDashboardForm({ mode, onDone, onOpenHistory }: TradeDashboa
               <View style={styles.modalOverlay}>
                 <View testID="invoice-calendar-modal" style={[styles.shortcutModalBox, { maxWidth: 400 }]}>
                   <View style={styles.modalHeader3D}>
-                    <Text style={styles.modalTitle}>তারিখ নির্বাচন</Text>
+                    <Text style={styles.modalTitle}>{tx('তারিখ নির্বাচন', 'Select date')}</Text>
                     <TouchableOpacity
                       onPress={() => setDateCalendarOpen(false)}
                       accessibilityRole="button"
@@ -1641,7 +1725,7 @@ export function TradeDashboardForm({ mode, onDone, onOpenHistory }: TradeDashboa
           <View style={styles.tableCardHeader}>
             <View style={styles.cardHeaderFlex}>
               <View style={[styles.cardHeaderDot, { backgroundColor: '#10B981' }]} />
-              <Text style={styles.cardHeaderTitle}>পণ্যের তালিকা</Text>
+              <Text style={styles.cardHeaderTitle}>{tx('পণ্যের তালিকা', 'Product list')}</Text>
             </View>
 
             <TouchableOpacity
@@ -1649,12 +1733,12 @@ export function TradeDashboardForm({ mode, onDone, onOpenHistory }: TradeDashboa
               testID="add-product-row"
               style={styles.addProductBtnModern}
               activeOpacity={0.85}
-              accessibilityLabel="পণ্য যোগ করুন (Alt+A)"
+              accessibilityLabel={tx('পণ্য যোগ করুন (Alt+A)', 'Add product (Alt+A)')}
             >
               <View style={styles.addIconCircle}>
                 <AppIcon name={icons.plus} size={15} iconColor="#FFFFFF" />
               </View>
-              <Text style={styles.addProductBtnText}>পণ্য যোগ করুন</Text>
+              <Text style={styles.addProductBtnText}>{tx('পণ্য যোগ করুন', 'Add product')}</Text>
               <View style={styles.shortcutKeyBadge}>
                 <Text style={styles.shortcutKeyText}>Alt+A</Text>
               </View>
@@ -1663,22 +1747,22 @@ export function TradeDashboardForm({ mode, onDone, onOpenHistory }: TradeDashboa
 
           {/* Table Header Row */}
           <View style={styles.tableHeaderRow3D}>
-            <Text style={[styles.th, { width: 44, textAlign: 'center' }]}>ক্রম</Text>
-            <Text style={[styles.th, { width: 120 }]}>পণ্য কোড</Text>
-            <Text style={[styles.th, { flex: 1, minWidth: 200 }]}>পণ্যের নাম</Text>
-            <Text style={[styles.th, { width: 120, textAlign: 'center' }]}>পরিমাণ (বস্তা)</Text>
-            <Text style={[styles.th, { width: 110, textAlign: 'center' }]}>মোট কেজি</Text>
+            <Text style={[styles.th, { width: 44, textAlign: 'center' }]}>{tx('ক্রম', '#')}</Text>
+            <Text style={[styles.th, { width: 120 }]}>{tx('পণ্য কোড', 'Product code')}</Text>
+            <Text style={[styles.th, { flex: 1, minWidth: 200 }]}>{tx('পণ্যের নাম', 'Product name')}</Text>
+            <Text style={[styles.th, { width: 120, textAlign: 'center' }]}>{tx('পরিমাণ (বস্তা)', 'Quantity (bags)')}</Text>
+            <Text style={[styles.th, { width: 110, textAlign: 'center' }]}>{tx('মোট কেজি', 'Total kg')}</Text>
             {isSale && (
-              <Text style={[styles.th, { width: 120, textAlign: 'center' }]}>গড় ক্রয়দর (৳)</Text>
+              <Text style={[styles.th, { width: 120, textAlign: 'center' }]}>{tx('গড় ক্রয়দর (৳)', 'Average cost (৳)')}</Text>
             )}
             <Text style={[styles.th, { width: 120, textAlign: 'center' }]}>
-              {isSale ? 'বিক্রয় দর (৳)' : 'ক্রয় দর (৳)'}
+              {isSale ? tx('বিক্রয় দর (৳)', 'Sale rate (৳)') : tx('ক্রয় দর (৳)', 'Purchase rate (৳)')}
             </Text>
             {!isSale && (
-              <Text style={[styles.th, { width: 130, textAlign: 'center' }]}>অন্যান্য খরচ/বস্তা (৳)</Text>
+              <Text style={[styles.th, { width: 130, textAlign: 'center' }]}>{tx('অন্যান্য খরচ/বস্তা (৳)', 'Other cost/bag (৳)')}</Text>
             )}
-            <Text style={[styles.th, { width: 125, textAlign: 'center' }]}>মোট (৳)</Text>
-            <Text style={[styles.th, { width: 48, textAlign: 'center' }]}>অ্যাকশন</Text>
+            <Text style={[styles.th, { width: 125, textAlign: 'center' }]}>{tx('মোট (৳)', 'Total (৳)')}</Text>
+            <Text style={[styles.th, { width: 48, textAlign: 'center' }]}>{tx('অ্যাকশন', 'Action')}</Text>
           </View>
 
           {/* Table Rows */}
@@ -1755,7 +1839,7 @@ export function TradeDashboardForm({ mode, onDone, onOpenHistory }: TradeDashboa
                           setActiveItemDropdownIdx(null);
                         }
                       }}
-                      placeholder="কোড"
+                    placeholder={tx('কোড', 'Code')}
                       placeholderTextColor="#94A3B8"
                       style={styles.tableTextInputNoBorder}
                       returnKeyType="next"
@@ -1783,7 +1867,7 @@ export function TradeDashboardForm({ mode, onDone, onOpenHistory }: TradeDashboa
                               <View style={{ flex: 1 }}>
                                 <Text style={styles.dropdownItemText}>{p.name}</Text>
                                 <Text style={styles.dropdownItemSub}>
-                                  কোড: {toBnDigits(pCode)} ({pCode}) • স্টক: {n(p.qty)} কেজি ({n(Math.round(p.qty / pBagKg))} বস্তা) • প্রতি বস্তা: {n(pBagKg)} কেজি
+                        {tx('কোড:', 'Code:')} {lang === 'bn' ? toBnDigits(pCode) : pCode} • {tx('স্টক:', 'Stock:')} {n(p.qty)} {tx('কেজি', 'kg')} ({n(Math.round(p.qty / pBagKg))} {tx('বস্তা', 'bags')}) • {tx('প্রতি বস্তা:', 'Per bag:')} {n(pBagKg)} {tx('কেজি', 'kg')}
                                 </Text>
                               </View>
                             </TouchableOpacity>
@@ -1831,7 +1915,7 @@ export function TradeDashboardForm({ mode, onDone, onOpenHistory }: TradeDashboa
                         marginLeft: 8,
                       }}>
                         <Text style={{ fontSize: 11, fontWeight: '700', color: '#047857' }} numberOfLines={1}>
-                          স্টক: {n(Math.round(rowProduct.qty / bagKg))} বস্তা
+                        {tx('স্টক:', 'Stock:')} {n(Math.round(rowProduct.qty / bagKg))} {tx('বস্তা', 'bags')}
                         </Text>
                       </View>
                     ) : null}
@@ -1874,7 +1958,7 @@ export function TradeDashboardForm({ mode, onDone, onOpenHistory }: TradeDashboa
                       { height: 40, width: '100%', textAlign: 'center' },
                       isInputFocused(`qty_${rowIdx}`) && styles.inputFocusedGlow,
                     ]}
-                    placeholder="বস্তা"
+                    placeholder={tx('বস্তা', 'Bags')}
                     placeholderTextColor="#94A3B8"
                     keyboardType="numeric"
                     returnKeyType="next"
@@ -2094,13 +2178,13 @@ export function TradeDashboardForm({ mode, onDone, onOpenHistory }: TradeDashboa
             paddingHorizontal: 16,
           }}>
             <Text style={{ fontSize: 13, fontWeight: '700', color: '#64748B' }}>
-              মোট আইটেম: {toBnDigits(String(items.filter(it => it.name.trim()).length || items.length))}
+                  {tx('মোট আইটেম:', 'Items:')} {lang === 'bn' ? toBnDigits(String(items.filter(it => it.name.trim()).length || items.length)) : (items.filter(it => it.name.trim()).length || items.length)}
             </Text>
             <View style={{ flexDirection: 'row', alignItems: 'center', gap: 16 }}>
               <Text style={{ fontSize: 14, fontWeight: '700', color: '#0F172A' }}>
-                মোট পরিমাণ:{' '}
+                  {tx('মোট পরিমাণ:', 'Total quantity:')}{' '}
                 <Text style={{ color: '#1c70b9', fontWeight: '800' }}>
-                  {toBnDigits(String(Math.round(items.reduce((sum, it) => sum + parseNum(it.qty), 0))))} বস্তা
+                    {lang === 'bn' ? toBnDigits(String(Math.round(items.reduce((sum, it) => sum + parseNum(it.qty), 0)))) : Math.round(items.reduce((sum, it) => sum + parseNum(it.qty), 0))} {tx('বস্তা', 'bags')}
                 </Text>
                 {' '}(
                 <Text style={{ color: '#059669', fontWeight: '800' }}>
@@ -2108,7 +2192,7 @@ export function TradeDashboardForm({ mode, onDone, onOpenHistory }: TradeDashboa
                     const prod = products.find(p => p.id === it.productId || p.name === it.name);
                     const per = kgPerUnit(prod, it.unit || 'medium');
                     return sum + parseNum(it.qty) * per;
-                  }, 0))))} কেজি
+                  }, 0))))} {tx('কেজি', 'kg')}
                 </Text>
                 )
               </Text>
@@ -2149,11 +2233,11 @@ export function TradeDashboardForm({ mode, onDone, onOpenHistory }: TradeDashboa
             }}
             focusable={true}
             {...(Platform.OS === 'web' ? { tabIndex: 0 } as any : {})}
-            accessibilityLabel={isSale ? 'বিক্রয় নিশ্চিত করুন' : 'ক্রয় নিশ্চিত করুন'}
+            accessibilityLabel={editId ? tx('পরিবর্তন নিশ্চিত করুন', 'Confirm changes') : isSale ? tx('বিক্রয় নিশ্চিত করুন', 'Confirm sale') : tx('ক্রয় নিশ্চিত করুন', 'Confirm purchase')}
           >
             <AppIcon name={isSale ? icons.sale : icons.purchase} size={22} iconColor="#fff" />
             <Text style={styles.completeButton3DText}>
-              {isSale ? 'বিক্রয় নিশ্চিত করুন' : 'ক্রয় নিশ্চিত করুন'}
+              {editId ? tx('পরিবর্তন নিশ্চিত করুন', 'Confirm changes') : isSale ? tx('বিক্রয় নিশ্চিত করুন', 'Confirm sale') : tx('ক্রয় নিশ্চিত করুন', 'Confirm purchase')}
             </Text>
           </TouchableOpacity>
 
@@ -2161,19 +2245,19 @@ export function TradeDashboardForm({ mode, onDone, onOpenHistory }: TradeDashboa
             <TouchableOpacity
               onPress={handleSaveDraft}
               style={styles.draftButton3D}
-              accessibilityLabel="ড্রাফট সংরক্ষণ (Ctrl+D)"
+                accessibilityLabel={tx('ড্রাফট সংরক্ষণ (Ctrl+D)', 'Save draft (Ctrl+D)')}
             >
               <AppIcon name={icons.draft} size={18} iconColor="#1c70b9" />
-              <Text style={styles.draftButton3DText}>ড্রাফট সংরক্ষণ</Text>
+                <Text style={styles.draftButton3DText}>{tx('ড্রাফট সংরক্ষণ', 'Save draft')}</Text>
             </TouchableOpacity>
 
             <TouchableOpacity
               onPress={onDone}
               style={styles.cancelButton3D}
-              accessibilityLabel="বাতিল করুন (Esc)"
+                accessibilityLabel={tx('বাতিল করুন (Esc)', 'Cancel (Esc)')}
             >
               <AppIcon name={icons.cancel} size={18} iconColor="#4B627E" />
-              <Text style={styles.cancelButton3DText}>বাতিল করুন</Text>
+                <Text style={styles.cancelButton3DText}>{tx('বাতিল করুন', 'Cancel')}</Text>
             </TouchableOpacity>
           </View>
         </View>
@@ -2202,13 +2286,13 @@ export function TradeDashboardForm({ mode, onDone, onOpenHistory }: TradeDashboa
               <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10 }}>
                 <AppIcon name={isSale ? icons.sale : icons.purchase} size={24} iconColor="#fff" />
                 <Text style={styles.modalTitle}>
-                  {isSale ? 'বিক্রয় নিশ্চিতকরণ ও বিবরণ পর্যালোচনা' : 'ক্রয় নিশ্চিতকরণ ও বিবরণ পর্যালোচনা'}
+                  {editId ? tx('ইনভয়েস পরিবর্তন ও পেমেন্ট পর্যালোচনা', 'Review invoice changes and payment') : isSale ? tx('বিক্রয় নিশ্চিতকরণ ও বিবরণ পর্যালোচনা', 'Review and confirm sale') : tx('ক্রয় নিশ্চিতকরণ ও বিবরণ পর্যালোচনা', 'Review and confirm purchase')}
                 </Text>
               </View>
               <TouchableOpacity
                 onPress={() => setReviewSplitOpen(false)}
                 style={{ padding: 6 }}
-                accessibilityLabel="বন্ধ করুন"
+              accessibilityLabel={tx('বন্ধ করুন', 'Close')}
               >
                 <AppIcon name={icons.cancel} size={22} iconColor="#fff" />
               </TouchableOpacity>
@@ -2222,7 +2306,7 @@ export function TradeDashboardForm({ mode, onDone, onOpenHistory }: TradeDashboa
                 <View style={{ flex: 1.2, backgroundColor: '#FFFFFF', borderRadius: 12, padding: 14, borderWidth: 1.5, borderColor: '#CBD5E1' }}>
                   <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, marginBottom: 12, borderBottomWidth: 1.5, borderBottomColor: '#E2E8F0', paddingBottom: 8 }}>
                     <AppIcon name={icons.stock} size={20} iconColor="#1c70b9" />
-                    <Text style={{ fontSize: 16, fontWeight: '700', color: '#0F1E36' }}>পণ্যের তালিকা ও দর</Text>
+              <Text style={{ fontSize: 16, fontWeight: '700', color: '#0F1E36' }}>{tx('পণ্যের তালিকা ও দর', 'Products and rates')}</Text>
                   </View>
 
                   {items.filter(it => it.name.trim()).map((it, idx) => {
@@ -2251,7 +2335,7 @@ export function TradeDashboardForm({ mode, onDone, onOpenHistory }: TradeDashboa
                             <Text style={{ fontSize: 16, fontWeight: '700', color: '#1E293B' }}>{it.name}</Text>
                             {isRet && (
                               <View style={{ backgroundColor: '#FEE2E2', paddingHorizontal: 6, paddingVertical: 1, borderRadius: 4, borderWidth: 1, borderColor: '#FCA5A5' }}>
-                                <Text style={{ fontSize: 11, fontWeight: '800', color: '#DC2626' }}>{isSale ? 'বিক্রয় ফেরত' : 'ক্রয় ফেরত'}</Text>
+                                <Text style={{ fontSize: 11, fontWeight: '800', color: '#DC2626' }}>{isSale ? tx('বিক্রয় ফেরত', 'Sales return') : tx('ক্রয় ফেরত', 'Purchase return')}</Text>
                               </View>
                             )}
                           </View>
@@ -2264,20 +2348,20 @@ export function TradeDashboardForm({ mode, onDone, onOpenHistory }: TradeDashboa
 
                           <Text style={{ fontSize: 13, color: '#475569' }}>
                             পরিমাণ: <Text style={{ fontWeight: '700', color: isRet ? '#DC2626' : undefined }}>
-                              {q < 0 ? '-' : ''}{toBnDigits(String(Math.abs(q)))} বস্তা ({q < 0 ? '-' : ''}{toBnDigits(String(Math.abs(Math.round(q * bagKg))))} কেজি)
+                              {q < 0 ? '-' : ''}{lang === 'bn' ? toBnDigits(String(Math.abs(q))) : Math.abs(q)} {tx('বস্তা', 'bags')} ({q < 0 ? '-' : ''}{lang === 'bn' ? toBnDigits(String(Math.abs(Math.round(q * bagKg)))) : Math.abs(Math.round(q * bagKg))} {tx('কেজি', 'kg')})
                             </Text>
                           </Text>
                           <Text style={{ fontSize: 13, color: '#475569' }}>
-                            দর: <Text style={{ fontWeight: '700' }}>৳{toBnDigits(String(r))}</Text>
+                            {tx('দর:', 'Rate:')} <Text style={{ fontWeight: '700' }}>৳{lang === 'bn' ? toBnDigits(String(r)) : r}</Text>
                           </Text>
                           {!isSale && parseNum(it.otherCost) > 0 ? (
                             <Text style={{ fontSize: 13, color: '#047857' }}>
-                              অন্যান্য খরচ: <Text style={{ fontWeight: '700' }}>৳{toBnDigits(String(parseNum(it.otherCost)))}/বস্তা</Text> (মোট: ৳{toBnDigits(String(Math.abs(q) * parseNum(it.otherCost)))})
+                              {tx('অন্যান্য খরচ:', 'Other cost:')} <Text style={{ fontWeight: '700' }}>৳{lang === 'bn' ? toBnDigits(String(parseNum(it.otherCost))) : parseNum(it.otherCost)}/{tx('বস্তা', 'bag')}</Text> ({tx('মোট:', 'Total:')} ৳{lang === 'bn' ? toBnDigits(String(Math.abs(q) * parseNum(it.otherCost))) : Math.abs(q) * parseNum(it.otherCost)})
                             </Text>
                           ) : null}
                           {isSale && pr > 0 ? (
                             <Text style={{ fontSize: 13, color: '#B45309' }}>
-                              ক্রয় খরচ: <Text style={{ fontWeight: '700' }}>৳{toBnDigits(String(pr))}</Text>
+                              {tx('ক্রয় খরচ:', 'Cost:')} <Text style={{ fontWeight: '700' }}>৳{lang === 'bn' ? toBnDigits(String(pr)) : pr}</Text>
                             </Text>
                           ) : null}
                         </View>
@@ -2286,7 +2370,7 @@ export function TradeDashboardForm({ mode, onDone, onOpenHistory }: TradeDashboa
                   })}
 
                   <View style={{ marginTop: 8, paddingTop: 10, borderTopWidth: 1.5, borderTopColor: '#E2E8F0', flexDirection: 'row', justifyContent: 'space-between' }}>
-                    <Text style={{ fontSize: 15, fontWeight: '700', color: '#334155' }}>মোট পণ্যের মূল্য:</Text>
+                    <Text style={{ fontSize: 15, fontWeight: '700', color: '#334155' }}>{tx('মোট পণ্যের মূল্য:', 'Total product value:')}</Text>
                     <Text style={{ fontSize: 17, fontWeight: '800', color: totalProductValue < 0 ? '#DC2626' : '#0F172A' }}>
                       {totalProductValue < 0 ? '-' : ''}৳{toBnDigits(String(Math.abs(Math.round(totalProductValue))))}
                     </Text>
@@ -2295,7 +2379,7 @@ export function TradeDashboardForm({ mode, onDone, onOpenHistory }: TradeDashboa
                   {!isSale && totalOtherCost > 0 ? (
                     <View style={{ marginTop: 4, flexDirection: 'row', justifyContent: 'space-between', backgroundColor: '#FEF3C7', paddingHorizontal: 8, paddingVertical: 4, borderRadius: 6 }}>
                       <Text style={{ fontSize: 13, color: '#92400E', fontWeight: '700' }}>
-                        মোট বস্তা প্রতি খরচ (খরচ খাতায় যাবে):
+                        {tx('মোট বস্তা প্রতি খরচ (খরচ খাতায় যাবে):', 'Total cost per bag (recorded as expense):')}
                       </Text>
                       <Text style={{ fontSize: 14, fontWeight: '800', color: '#92400E' }}>
                         ৳{toBnDigits(String(Math.round(totalOtherCost)))}
@@ -2305,7 +2389,7 @@ export function TradeDashboardForm({ mode, onDone, onOpenHistory }: TradeDashboa
 
                   {isSale ? (
                     <View style={{ marginTop: 4, flexDirection: 'row', justifyContent: 'space-between' }}>
-                      <Text style={{ fontSize: 14, color: '#475569' }}>মোট আনুমানিক ক্রয় খরচ:</Text>
+                      <Text style={{ fontSize: 14, color: '#475569' }}>{tx('মোট আনুমানিক ক্রয় খরচ:', 'Estimated total purchase cost:')}</Text>
                       <Text style={{ fontSize: 15, fontWeight: '700', color: '#B45309' }}>৳{toBnDigits(String(Math.round(totalEstimatedCost)))}</Text>
                     </View>
                   ) : null}
@@ -2326,27 +2410,27 @@ export function TradeDashboardForm({ mode, onDone, onOpenHistory }: TradeDashboa
                     {/* Header: Party & Memo Info */}
                     <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, marginBottom: 10, borderBottomWidth: 1.5, borderBottomColor: '#E2E8F0', paddingBottom: 8 }}>
                       <AppIcon name={icons.accounts} size={20} iconColor="#1c70b9" />
-                      <Text style={{ fontSize: 16, fontWeight: '700', color: '#0F1E36' }}>পেমেন্ট ও হিসাব বিবরণ</Text>
+                    <Text style={{ fontSize: 16, fontWeight: '700', color: '#0F1E36' }}>{tx('পেমেন্ট ও হিসাব বিবরণ', 'Payment details')}</Text>
                     </View>
 
                     <View style={{ gap: 4, marginBottom: 10 }}>
                       <View style={{ flexDirection: 'row', justifyContent: 'space-between' }}>
                         <Text style={{ fontSize: 13, color: '#64748B' }}>{isSale ? 'কাস্টমার' : 'সরবরাহকারী'}:</Text>
-                        <Text style={{ fontSize: 14, fontWeight: '700', color: '#0F172A' }}>{partyName || 'ক্যাশ'}</Text>
+                    <Text style={{ fontSize: 14, fontWeight: '700', color: '#0F172A' }}>{partyName || tx('ক্যাশ', 'Cash')}</Text>
                       </View>
                       {partyMobile ? (
                         <View style={{ flexDirection: 'row', justifyContent: 'space-between' }}>
-                          <Text style={{ fontSize: 13, color: '#64748B' }}>মোবাইল:</Text>
+                    <Text style={{ fontSize: 13, color: '#64748B' }}>{tx('মোবাইল:', 'Mobile:')}</Text>
                           <Text style={{ fontSize: 13, color: '#334155' }}>{partyMobile}</Text>
                         </View>
                       ) : null}
                       <View style={{ flexDirection: 'row', justifyContent: 'space-between' }}>
-                        <Text style={{ fontSize: 13, color: '#64748B' }}>তারিখ:</Text>
-                        <Text style={{ fontSize: 13, fontWeight: '600', color: '#334155' }}>{billDate || 'আজ'}</Text>
+                    <Text style={{ fontSize: 13, color: '#64748B' }}>{tx('তারিখ:', 'Date:')}</Text>
+                    <Text style={{ fontSize: 13, fontWeight: '600', color: '#334155' }}>{billDate || tx('আজ', 'Today')}</Text>
                       </View>
                       {memoNo ? (
                         <View style={{ flexDirection: 'row', justifyContent: 'space-between' }}>
-                          <Text style={{ fontSize: 13, color: '#64748B' }}>মেমো নং:</Text>
+                          <Text style={{ fontSize: 13, color: '#64748B' }}>{tx('মেমো নং:', 'Memo no.:')}</Text>
                           <Text style={{ fontSize: 13, fontWeight: '700', color: '#1c70b9' }}>{memoNo}</Text>
                         </View>
                       ) : null}
@@ -2354,7 +2438,7 @@ export function TradeDashboardForm({ mode, onDone, onOpenHistory }: TradeDashboa
 
                     {/* 1. TOTAL INVOICE VALUE */}
                     <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', backgroundColor: '#F8FAFC', paddingVertical: 10, paddingHorizontal: 12, borderRadius: 8, borderWidth: 1.5, borderColor: '#E2E8F0', marginBottom: 10 }}>
-                      <Text style={{ fontSize: 14, fontWeight: '800', color: '#1E293B' }}>মোট ইনভয়েস মূল্য:</Text>
+                      <Text style={{ fontSize: 14, fontWeight: '800', color: '#1E293B' }}>{tx('মোট ইনভয়েস মূল্য:', 'Invoice total:')}</Text>
                       <Text style={{ fontSize: 18, fontWeight: '900', color: '#0F172A' }}>৳{toBnDigits(String(Math.round(totalProductValue)))}</Text>
                     </View>
 
@@ -2362,7 +2446,7 @@ export function TradeDashboardForm({ mode, onDone, onOpenHistory }: TradeDashboa
                     <View style={{ marginBottom: 8 }}>
                       <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 3 }}>
                         <Text style={{ fontSize: 13, fontWeight: '700', color: '#475569' }}>
-                          {isSale ? 'ক্যাশ গ্রহণ (৳):' : 'ক্যাশ পরিশোধ (৳):'}
+                          {isSale ? tx('ক্যাশ গ্রহণ (৳):', 'Cash received (৳):') : tx('ক্যাশ পরিশোধ (৳):', 'Cash paid (৳):')}
                         </Text>
                         <TouchableOpacity
                           onPress={() => {
@@ -2379,7 +2463,7 @@ export function TradeDashboardForm({ mode, onDone, onOpenHistory }: TradeDashboa
                           }}
                         >
                           <Text style={{ fontSize: 11, fontWeight: '700', color: '#0369A1' }}>
-                            ইনভয়েস মূল্য (৳{toBnDigits(String(Math.max(0, Math.round(totalProductValue - numTransport - numDiscount))))})
+                            {tx('ইনভয়েস মূল্য', 'Invoice amount')} (৳{lang === 'bn' ? toBnDigits(String(Math.max(0, Math.round(totalProductValue - numTransport - numDiscount)))) : Math.max(0, Math.round(totalProductValue - numTransport - numDiscount))})
                           </Text>
                         </TouchableOpacity>
                       </View>
@@ -2413,12 +2497,12 @@ export function TradeDashboardForm({ mode, onDone, onOpenHistory }: TradeDashboa
                         }}
                       >
                         <Text style={{ fontSize: 12, fontWeight: '700', color: totalDue > 0 ? '#991B1B' : '#166534' }}>
-                          {isSale ? 'ক্যাশ গ্রহণের পর বাকি:' : 'ক্যাশ পরিশোধের পর বাকি:'}
+                          {isSale ? tx('ক্যাশ গ্রহণের পর বাকি:', 'Due after cash received:') : tx('ক্যাশ পরিশোধের পর বাকি:', 'Due after cash paid:')}
                         </Text>
                         <Text style={{ fontSize: 13, fontWeight: '800', color: totalDue > 0 ? '#DC2626' : '#15803D' }}>
                           ৳{toBnDigits(String(Math.round(totalDue)))}
-                          {prevDue > 0 ? ` (ইনভয়েস বাকি: ৳${toBnDigits(String(Math.round(invoiceDue)))})` : ''}
-                          {prevDue + netInvoiceBalance < 0 ? ` (ফেরত: ৳${toBnDigits(String(Math.round(Math.abs(prevDue + netInvoiceBalance))))})` : ''}
+                          {prevDue > 0 ? ` (${tx('ইনভয়েস বাকি:', 'Invoice due:')} ৳${lang === 'bn' ? toBnDigits(String(Math.round(invoiceDue))) : Math.round(invoiceDue)})` : ''}
+                          {prevDue + netInvoiceBalance < 0 ? ` (${tx('ফেরত:', 'Refund:')} ৳${lang === 'bn' ? toBnDigits(String(Math.round(Math.abs(prevDue + netInvoiceBalance)))) : Math.round(Math.abs(prevDue + netInvoiceBalance))})` : ''}
                         </Text>
                       </View>
                     </View>
@@ -2427,7 +2511,7 @@ export function TradeDashboardForm({ mode, onDone, onOpenHistory }: TradeDashboa
 
                     {/* 3. BANK */}
                     <View style={{ marginBottom: 8 }}>
-                      <Text style={{ fontSize: 13, fontWeight: '700', color: '#475569', marginBottom: 3 }}>{isSale ? 'ব্যাংকে গ্রহণ (৳):' : 'ব্যাংক পরিশোধ (৳):'}</Text>
+                      <Text style={{ fontSize: 13, fontWeight: '700', color: '#475569', marginBottom: 3 }}>{isSale ? tx('ব্যাংকে গ্রহণ (৳):', 'Bank received (৳):') : tx('ব্যাংক পরিশোধ (৳):', 'Bank paid (৳):')}</Text>
                       <TextInput
                         ref={el => (inputRefs.current['modal_bankPaid'] = el)}
                         accessibilityLabel="Bank paid"
@@ -2444,7 +2528,7 @@ export function TradeDashboardForm({ mode, onDone, onOpenHistory }: TradeDashboa
 
                     {/* 4. DISCOUNT */}
                     <View style={{ marginBottom: 10 }}>
-                      <Text style={{ fontSize: 13, fontWeight: '700', color: '#475569', marginBottom: 3 }}>ছাড় / ডিসকাউন্ট (৳):</Text>
+                      <Text style={{ fontSize: 13, fontWeight: '700', color: '#475569', marginBottom: 3 }}>{tx('ছাড় / ডিসকাউন্ট (৳):', 'Discount (৳):')}</Text>
                       <TextInput
                         ref={el => (inputRefs.current['modal_discount'] = el)}
                         accessibilityLabel="Discount"
@@ -2462,7 +2546,7 @@ export function TradeDashboardForm({ mode, onDone, onOpenHistory }: TradeDashboa
                       <AccountPicker accountId={expenseAccountId} onPick={setExpenseAccountId} label="Account for purchase costs" required />
                     ) : null}
                     {isSale ? <View style={{ marginBottom: 8, padding: 8, backgroundColor: '#F8FAFC', borderRadius: 8, borderWidth: 1, borderColor: '#E2E8F0' }}>
-                      <Text style={{ fontSize: 12, fontWeight: '700', color: '#64748B', marginBottom: 4 }}>পরিবহন খরচ (ঐচ্ছিক)</Text>
+                      <Text style={{ fontSize: 12, fontWeight: '700', color: '#64748B', marginBottom: 4 }}>{tx('পরিবহন খরচ (ঐচ্ছিক)', 'Transport cost (optional)')}</Text>
                       <TextInput
                         ref={el => (inputRefs.current['modal_transportCost'] = el)}
                         accessibilityLabel="Transport cost"
@@ -2476,7 +2560,7 @@ export function TradeDashboardForm({ mode, onDone, onOpenHistory }: TradeDashboa
                       />
                       {numTransport > 0 && (
                         <Text style={{ fontSize: 11, color: '#1c70b9', marginTop: 3, fontWeight: '600' }}>
-                          মোট বাকি থেকে বাদ যাবে: ৳{toBnDigits(String(numTransport))}
+                          {tx('মোট বাকি থেকে বাদ যাবে:', 'Deducted from total due:')} ৳{lang === 'bn' ? toBnDigits(String(numTransport)) : numTransport}
                         </Text>
                       )}
                     </View> : null}
@@ -2484,10 +2568,10 @@ export function TradeDashboardForm({ mode, onDone, onOpenHistory }: TradeDashboa
                     {!isSale && totalOtherCost > 0 && (
                       <View style={{ marginBottom: 8, padding: 8, backgroundColor: '#FEF3C7', borderRadius: 8, borderWidth: 1, borderColor: '#FDE68A' }}>
                         <Text style={{ fontSize: 12, fontWeight: '700', color: '#92400E', marginBottom: 2 }}>
-                          ক্রয় খরচ (প্রতি বস্তা)
+                          {tx('ক্রয় খরচ (প্রতি বস্তা)', 'Purchase cost (per bag)')}
                         </Text>
                         <Text style={{ fontSize: 13, fontWeight: '800', color: '#B45309' }}>
-                          মোট খরচ: ৳{toBnDigits(String(Math.round(totalOtherCost)))} (খরচ খাতায় স্বয়ংক্রিয় যুক্ত হবে)
+                          {tx('মোট খরচ:', 'Total cost:')} ৳{lang === 'bn' ? toBnDigits(String(Math.round(totalOtherCost))) : Math.round(totalOtherCost)} ({tx('খরচ খাতায় স্বয়ংক্রিয় যুক্ত হবে', 'added to expenses automatically')})
                         </Text>
                       </View>
                     )}
@@ -2496,15 +2580,15 @@ export function TradeDashboardForm({ mode, onDone, onOpenHistory }: TradeDashboa
                     <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingVertical: 5 }}>
                       <Text style={{ fontSize: 14, fontWeight: '700', color: '#475569' }}>
                         {numTransport > 0
-                          ? `মোট ইনভয়েস বাকি (-পরিবহন ৳${toBnDigits(String(Math.round(numTransport)))}):`
-                          : 'মোট ইনভয়েস বাকি:'}
+                          ? `${tx('মোট ইনভয়েস বাকি (-পরিবহন', 'Invoice due (less transport')} ৳${lang === 'bn' ? toBnDigits(String(Math.round(numTransport))) : Math.round(numTransport)}):`
+                          : tx('মোট ইনভয়েস বাকি:', 'Invoice due:')}
                       </Text>
                       <Text style={{ fontSize: 16, fontWeight: '800', color: '#B45309' }}>৳{toBnDigits(String(Math.round(invoiceDue)))}</Text>
                     </View>
 
                     {/* 6. TOTAL PREVIOUS DUE */}
                     <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingVertical: 5 }}>
-                      <Text style={{ fontSize: 14, fontWeight: '700', color: '#64748B' }}>পূর্বের মোট বাকি:</Text>
+                      <Text style={{ fontSize: 14, fontWeight: '700', color: '#64748B' }}>{tx('পূর্বের মোট বাকি:', 'Previous balance due:')}</Text>
                       <Text style={{ fontSize: 16, fontWeight: '800', color: '#DC2626' }}>৳{toBnDigits(String(Math.round(prevDue)))}</Text>
                     </View>
 
@@ -2513,7 +2597,7 @@ export function TradeDashboardForm({ mode, onDone, onOpenHistory }: TradeDashboa
 
                     {/* 8. TOTAL DUE */}
                     <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', backgroundColor: '#EFF6FF', paddingVertical: 10, paddingHorizontal: 12, borderRadius: 10, borderWidth: 1.5, borderColor: '#93C5FD', marginBottom: 12 }}>
-                      <Text style={{ fontSize: 16, fontWeight: '800', color: '#1E3A8A' }}>সর্বমোট বাকি:</Text>
+                      <Text style={{ fontSize: 16, fontWeight: '800', color: '#1E3A8A' }}>{tx('সর্বমোট বাকি:', 'Total due:')}</Text>
                       <Text style={{ fontSize: 22, fontWeight: '900', color: '#1E3A8A' }}>৳{toBnDigits(String(Math.round(totalDue)))}</Text>
                     </View>
 
@@ -2595,7 +2679,7 @@ export function TradeDashboardForm({ mode, onDone, onOpenHistory }: TradeDashboa
             <View style={styles.modalHeader3D}>
               <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
                 <AppIcon name={icons.calc} size={22} iconColor="#fff" />
-                <Text style={styles.modalTitle}>কীবোর্ড শর্টকাট সহায়িকা (Keyboard First)</Text>
+                <Text style={styles.modalTitle}>{tx('কীবোর্ড শর্টকাট সহায়িকা', 'Keyboard shortcuts')}</Text>
               </View>
               <TouchableOpacity
                 onPress={() => setShowShortcutsHelp(false)}
@@ -2608,42 +2692,42 @@ export function TradeDashboardForm({ mode, onDone, onOpenHistory }: TradeDashboa
             <ScrollView style={{ padding: 18, maxHeight: 420 }}>
               <View style={styles.shortcutItem}>
                 <View style={styles.keyBadge}><Text style={styles.keyBadgeText}>Enter</Text></View>
-                <Text style={styles.shortcutDesc}>পরবর্তী ঘরে যান (Next Field) / ড্রপডাউন থেকে নির্বাচন</Text>
+                <Text style={styles.shortcutDesc}>{tx('পরবর্তী ঘরে যান / ড্রপডাউন থেকে নির্বাচন', 'Go to the next field or choose from a dropdown')}</Text>
               </View>
 
               <View style={styles.shortcutItem}>
                 <View style={styles.keyBadge}><Text style={styles.keyBadgeText}>Shift + Enter</Text></View>
-                <Text style={styles.shortcutDesc}>পূর্ববর্তী ঘরে ফেরত যান (Previous Field)</Text>
+                <Text style={styles.shortcutDesc}>{tx('পূর্ববর্তী ঘরে ফেরত যান', 'Go to the previous field')}</Text>
               </View>
 
               <View style={styles.shortcutItem}>
                 <View style={styles.keyBadge}><Text style={styles.keyBadgeText}>Alt + A / Insert</Text></View>
-                <Text style={styles.shortcutDesc}>নতুন পণ্যের সারি যোগ করুন (Add Product Row)</Text>
+                <Text style={styles.shortcutDesc}>{tx('নতুন পণ্যের সারি যোগ করুন', 'Add a product row')}</Text>
               </View>
 
               <View style={styles.shortcutItem}>
                 <View style={styles.keyBadge}><Text style={styles.keyBadgeText}>Ctrl + S / F8</Text></View>
-                <Text style={styles.shortcutDesc}>ক্রয় সম্পন্ন করুন ও সেভ করুন (Complete Purchase)</Text>
+                <Text style={styles.shortcutDesc}>{tx('ক্রয় সম্পন্ন করুন ও সেভ করুন', 'Complete and save the purchase')}</Text>
               </View>
 
               <View style={styles.shortcutItem}>
                 <View style={styles.keyBadge}><Text style={styles.keyBadgeText}>Ctrl + D / F9</Text></View>
-                <Text style={styles.shortcutDesc}>ড্রাফট সংরক্ষণ করুন (Save Draft)</Text>
+                <Text style={styles.shortcutDesc}>{tx('ড্রাফট সংরক্ষণ করুন', 'Save draft')}</Text>
               </View>
 
               <View style={styles.shortcutItem}>
                 <View style={styles.keyBadge}><Text style={styles.keyBadgeText}>↑ / ↓</Text></View>
-                <Text style={styles.shortcutDesc}>পণ্য ও সরবরাহকারী সাজেশনে স্ক্রল করুন (Navigate Dropdown)</Text>
+                <Text style={styles.shortcutDesc}>{tx('পণ্য ও সরবরাহকারীর সাজেশনে চলাচল করুন', 'Navigate product and vendor suggestions')}</Text>
               </View>
 
               <View style={styles.shortcutItem}>
                 <View style={styles.keyBadge}><Text style={styles.keyBadgeText}>Esc</Text></View>
-                <Text style={styles.shortcutDesc}>ড্রপডাউন বা ডায়লগ বন্ধ করুন / বাতিল করুন (Cancel/Close)</Text>
+                <Text style={styles.shortcutDesc}>{tx('ড্রপডাউন বা ডায়লগ বন্ধ করুন / বাতিল করুন', 'Close the dropdown or dialog / cancel')}</Text>
               </View>
 
               <View style={styles.shortcutItem}>
                 <View style={styles.keyBadge}><Text style={styles.keyBadgeText}>F1</Text></View>
-                <Text style={styles.shortcutDesc}>শর্টকাট সহায়িকা খুলুন বা বন্ধ করুন (Toggle Shortcuts)</Text>
+                <Text style={styles.shortcutDesc}>{tx('শর্টকাট সহায়িকা খুলুন বা বন্ধ করুন', 'Show or hide keyboard shortcuts')}</Text>
               </View>
 
               

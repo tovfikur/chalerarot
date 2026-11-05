@@ -31,6 +31,31 @@ export type ReportDoc = {
   closeLabel?: string;
 };
 
+export function downloadReportCSV(d: ReportDoc, filename: string): boolean {
+  if (typeof document === 'undefined') return false;
+  const cell = (value: string) => `"${String(value ?? '').replace(/"/g, '""')}"`;
+  const rows: string[] = [[d.shop, d.title, d.period].map(cell).join(',')];
+  for (const meta of d.meta ?? []) rows.push([meta.label, meta.value].map(cell).join(','));
+  for (const section of d.sections) {
+    if (section.title) rows.push('', cell(section.title));
+    rows.push([cell('Description'), cell('Details'), cell('Amount')].join(','));
+    for (const row of section.rows) rows.push([cell(row.label), cell(row.sub ?? ''), cell(row.right)].join(','));
+  }
+  if (d.total) rows.push('', [cell(d.total.label), '', cell(d.total.value)].join(','));
+  try {
+    const blob = new Blob(['\uFEFF' + rows.join('\r\n')], { type: 'text/csv;charset=utf-8;' });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = filename;
+    document.body.appendChild(link);
+    link.click();
+    link.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 1000);
+    return true;
+  } catch { return false; }
+}
+
 const esc = (s: string) => String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
 
 export function reportText(d: ReportDoc): string {
@@ -153,6 +178,22 @@ export function printReport(d: ReportDoc): boolean {
     return true;
   } catch {
     cleanup();
+    return false;
+  }
+}
+
+/** Open a read-only browser preview without invoking the print dialog. */
+export function previewReport(d: ReportDoc): boolean {
+  if (typeof window === 'undefined' || typeof document === 'undefined') return false;
+  const preview = window.open('', '_blank');
+  if (!preview) return false;
+  try {
+    preview.document.open();
+    preview.document.write(buildReportHTML(d, false));
+    preview.document.close();
+    return true;
+  } catch {
+    preview.close();
     return false;
   }
 }

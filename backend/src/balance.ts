@@ -6,7 +6,7 @@ export async function customerBalance(id: string) {
   const [c, sales, pays] = await Promise.all([
     db.customer.findUnique({ where: { id } }),
     db.sale.findMany({ where: { customerId: id } }),
-    db.customerPayment.findMany({ where: { customerId: id } }),
+    db.customerPayment.findMany({ where: { customerId: id, active: true } }),
   ]);
   if (!c) return null;
   const total = sales.reduce((s, x) => s + x.total, 0);
@@ -18,7 +18,7 @@ export async function vendorBalance(id: string) {
   const [v, purs, pays] = await Promise.all([
     db.vendor.findUnique({ where: { id } }),
     db.purchase.findMany({ where: { vendorId: id } }),
-    db.vendorPayment.findMany({ where: { vendorId: id } }),
+    db.vendorPayment.findMany({ where: { vendorId: id, active: true } }),
   ]);
   if (!v) return null;
   const total = purs.reduce((s, x) => s + x.total, 0);

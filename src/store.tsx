@@ -12,7 +12,7 @@ export type Tx = { id: string; partyId: string; kind: 'sale' | 'purchase' | 'pay
 export type Line = { productId: string; qty: number; rate: number };
 export type SaleLineIn = { productId: string; unit: string; enteredQty: number; rate: number; unitCost?: number };
 export type PurchaseLineIn = { productId: string; unit: string; enteredQty: number; rate: number; otherCost?: number; otherCostPerBag?: number; unitCost?: number };
-export type StockTx = { id: string; productId: string; productName?: string; type: 'OPENING' | 'PURCHASE' | 'SALE' | 'ADJUSTMENT' | string; qty: number; bags: number; unitCost: number; bagUnitPrice: number; amount: number; date: string };
+export type StockTx = { id: string; productId: string; productName?: string; type: 'OPENING' | 'PURCHASE' | 'SALE' | 'ADJUSTMENT' | string; qty: number; bags: number; unitCost: number; bagUnitPrice: number; amount: number; date: string; transactionNo?: string; note?: string };
 export type SaleRec = { id: string; date: string; profit: number; total: number; customerId?: string; invoiceNo?: string; paid: number; due: number; status: SettlementStatus; cogs: number; createdAt?: string };
 /** Completed purchase, straight from the bootstrap payload (no extra request). */
 export type PurchaseRec = { id: string; vendorId: string; date: string; total: number; paid: number; due: number; status: SettlementStatus; invoiceNo?: string };
@@ -36,11 +36,11 @@ export interface Service {
   sale(a: { customerId?: string; lines: SaleLineIn[]; discount: number; paid: number; accountId?: string; payments?: { accountId: string; amount: number }[]; next?: string; date?: string; memoNo?: string }): Promise<{ id: string; invoiceNo?: string; total: number }>;
   purchase(a: { vendorId: string; lines: PurchaseLineIn[]; paid: number; accountId?: string; payments?: { accountId: string; amount: number }[]; next?: string; date?: string; memoNo?: string }): Promise<{ id: string; invoiceNo?: string; total: number }>;
   money(kind: 'c' | 'v', a: { partyId: string; amount: number; accountId: string; date: string; note?: string; next?: string }): Promise<void>;
-  saveExpense(e: { id?: string; category: string; customName?: string; amount: number; accountId: string; date: string; note?: string }): Promise<void>;
+  saveExpense(e: { id?: string; category: string; customName?: string; amount: number; accountId: string; date: string; note?: string; capitalized?: boolean }): Promise<void>;
   deleteExpense(id: string): Promise<void>;
   saveReturn(a: { kind: 'sale' | 'purchase'; saleId?: string; purchaseId?: string; lines: object[]; settlement: 'credit' | 'refund'; accountId?: string; date?: string; note?: string }): Promise<{ id: string; returnNo?: string; totalAmount: number }>;
   saveAccount(a: Partial<MoneyAccountRow> & { id?: string }): Promise<void>;
-  setAccountOpening(id: string, openingBalance: number): Promise<void>;
+  setAccountOpening(id: string, openingBalance: number, date: string): Promise<void>;
   deleteAccount(id: string): Promise<void>;
   loadFinance(mode: 'day' | 'month' | 'year' | 'all' | 'range', from?: string, to?: string): Promise<PeriodFinance>;
   transferMoney(a: { fromId: string; toId: string; amount: number; date?: string; note?: string }): Promise<MoneyTransfer>;
@@ -74,6 +74,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
     const saved = await api.saveSettings(value);
     setBusiness(saved);
     setLang(saved.language);
+    try { if (typeof localStorage !== 'undefined') localStorage.setItem('chaler-arot-language', saved.language); } catch {}
   };
   const [lang, setLang] = useState<Lang>('bn');
   const [ready, setReady] = useState(false);
@@ -99,6 +100,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
     const settings = await api.settings();
     setBusiness(settings);
     setLang(settings.language);
+    try { if (typeof localStorage !== 'undefined') localStorage.setItem('chaler-arot-language', settings.language); } catch {}
     const b = await api.bootstrap();
     setProducts(b.products);
     setCustomers(b.customers);
@@ -117,7 +119,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
     ];
     setCTx(ctx);
     setVTx(vtx);
-    setStockTx(b.movements.map(mv => ({ id: mv.id, productId: mv.productId, productName: mv.productName, type: mv.type as StockTx['type'], qty: mv.qty, bags: mv.bags, unitCost: mv.unitCost, bagUnitPrice: mv.bagUnitPrice, amount: mv.amount, date: mv.date })));
+    setStockTx(b.movements.map(mv => ({ id: mv.id, productId: mv.productId, productName: mv.productName, type: mv.type as StockTx['type'], qty: mv.qty, bags: mv.bags, unitCost: mv.unitCost, bagUnitPrice: mv.bagUnitPrice, amount: mv.amount, date: mv.date, transactionNo: mv.transactionNo, note: mv.note })));
     setSales(b.sales.map(s => ({ id: s.id, date: s.date, total: s.total, profit: s.profit, cogs: s.cogs ?? 0, customerId: s.customerId, invoiceNo: s.invoiceNo, paid: s.paid, due: s.due, status: s.status ?? (s.due > 0 ? 'due' : 'paid'), createdAt: s.createdAt })));
     // Purchases were already fetched by /bootstrap; keep the saved fields so the
     // Purchase module can list its own records without another request.
@@ -204,7 +206,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
       await refresh();
     },
     saveExpense: async e => {
-      const body = { category: e.category, customName: e.customName, amount: e.amount, accountId: e.accountId, date: e.date, note: e.note };
+      const body = { category: e.category, customName: e.customName, amount: e.amount, accountId: e.accountId, date: e.date, note: e.note, capitalized: e.capitalized };
       if (e.id && expenses.some(x => x.id === e.id)) await api.updateExpense(e.id, body);
       else await api.createExpense(body);
       await refresh();
@@ -220,8 +222,8 @@ export function AppProvider({ children }: { children: ReactNode }) {
       else await api.createMoneyAccount(a);
       await refresh();
     },
-    setAccountOpening: async (id, openingBalance) => {
-      await api.setAccountOpening(id, openingBalance);
+    setAccountOpening: async (id, openingBalance, date) => {
+      await api.setAccountOpening(id, openingBalance, date);
       await refresh();
     },
     deleteAccount: async id => {

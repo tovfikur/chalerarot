@@ -17,15 +17,16 @@ const num = (v: unknown, d = 0) => {
 };
 
 const shape = (
-  e: { id: string; voucherNo: string | null; category: string; customName: string | null; amount: number; date: string; note: string | null },
+  e: { id: string; voucherNo: string | null; category: string; customName: string | null; amount: number; date: string; note: string | null; capitalized: boolean },
   mv?: { method: string; moneyAccountId: string | null },
 ) => ({
   id: e.id, voucherNo: e.voucherNo ?? undefined, category: e.category, customName: e.customName ?? undefined,
   amount: e.amount, date: e.date, note: e.note ?? undefined,
+  capitalized: e.capitalized,
   method: mv?.method, accountId: mv?.moneyAccountId ?? undefined,
 });
 
-type CleanExpense = { category: string; customName: string | null; amount: number; date: string; note: string | null };
+type CleanExpense = { category: string; customName: string | null; amount: number; date: string; note: string | null; capitalized: boolean };
 type Valid = { error?: string; code?: string; clean?: CleanExpense };
 
 function validate(body: Record<string, unknown>, opts?: { allowPastDate?: boolean }): Valid {
@@ -49,10 +50,14 @@ function validate(body: Record<string, unknown>, opts?: { allowPastDate?: boolea
     }
   }
   const note = String(body.note ?? '').trim();
+  const capitalized = body.capitalized === true;
+  if (capitalized && (category !== 'loading' || !note.startsWith('[ধরন: ল্যান্ডিং] ক্রয় #'))) {
+    return { error: 'Capitalized landed costs must be linked to a purchase' };
+  }
   // An expense always spends real money, so an account is mandatory. Older
   // clients may still send a payment method; it is resolved to that account.
   if (!body.accountId && !body.method) return { error: 'Payment account is required' };
-  return { clean: { category, customName: customName || null, amount, date, note: note || null } };
+  return { clean: { category, customName: customName || null, amount, date, note: note || null, capitalized } };
 }
 
 export const expenses = Router();
@@ -106,6 +111,7 @@ expenses.put('/:id', async (req: Request, res: Response) => {
     amount: req.body.amount ?? cur.amount,
     date: req.body.date ?? cur.date,
     note: req.body.note ?? cur.note ?? '',
+    capitalized: req.body.capitalized ?? cur.capitalized,
     // Keep the original account when the caller does not resend it.
     accountId: req.body.accountId ?? curMv?.moneyAccountId ?? '',
     method: req.body.method ?? curMv?.method ?? '',

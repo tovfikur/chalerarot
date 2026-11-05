@@ -137,8 +137,8 @@ export async function settleAll(
       select: { saleId: true, purchaseId: true, totalAmount: true },
     }),
     kind === 'sale'
-      ? client.customerPayment.findMany({ select: { customerId: true, saleId: true, returnId: true, date: true, amount: true, createdAt: true } })
-      : client.vendorPayment.findMany({ select: { vendorId: true, purchaseId: true, returnId: true, date: true, amount: true, createdAt: true } }),
+      ? client.customerPayment.findMany({ where: { active: true }, select: { customerId: true, saleId: true, returnId: true, date: true, amount: true, createdAt: true } })
+      : client.vendorPayment.findMany({ where: { active: true }, select: { vendorId: true, purchaseId: true, returnId: true, date: true, amount: true, createdAt: true } }),
   ]);
   return buildSettlement(
     invoices.map(inv => ({
@@ -187,11 +187,11 @@ export async function settleParty(
     : [];
   const pays = kind === 'sale'
     ? await client.customerPayment.findMany({
-        where: { customerId: partyId },
+        where: { customerId: partyId, active: true },
         select: { saleId: true, returnId: true, date: true, amount: true, createdAt: true },
       })
     : await client.vendorPayment.findMany({
-        where: { vendorId: partyId },
+        where: { vendorId: partyId, active: true },
         select: { purchaseId: true, returnId: true, date: true, amount: true, createdAt: true },
       });
   return buildSettlement(

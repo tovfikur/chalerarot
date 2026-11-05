@@ -133,7 +133,7 @@ customers.get('/:id/ledger', async (req: Request, res: Response) => {
   if (!cur || cur.deletedAt) return res.status(404).json({ error: 'Customer not found' });
   const [sales, pays] = await Promise.all([
     db.sale.findMany({ where: { customerId: id }, orderBy: { date: 'desc' } }),
-    db.customerPayment.findMany({ where: { customerId: id }, orderBy: { date: 'desc' } }),
+    db.customerPayment.findMany({ where: { customerId: id, active: true }, orderBy: { date: 'desc' } }),
   ]);
   res.json([
     ...sales.map(s => ({ id: s.id, kind: 'sale', amount: s.total, date: s.date })),
@@ -257,7 +257,7 @@ vendors.get('/:id/ledger', async (req: Request, res: Response) => {
   if (!cur || cur.deletedAt) return res.status(404).json({ error: 'Vendor not found' });
   const [purs, pays] = await Promise.all([
     db.purchase.findMany({ where: { vendorId: id }, orderBy: { date: 'desc' } }),
-    db.vendorPayment.findMany({ where: { vendorId: id }, orderBy: { date: 'desc' } }),
+    db.vendorPayment.findMany({ where: { vendorId: id, active: true }, orderBy: { date: 'desc' } }),
   ]);
   res.json([
     ...purs.map(p => ({ id: p.id, kind: 'purchase', amount: p.total, date: p.date })),

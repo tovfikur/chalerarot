@@ -77,7 +77,8 @@ auth.post('/setup', throttle, wrap(async (req, res) => {
   const user = await db.$transaction(async tx => {
     await tx.$executeRaw`SELECT pg_advisory_xact_lock(918276)`;
     if (await tx.user.count()) return null;
-    return tx.user.create({ data: { name: b.name.trim(), phone: b.phone.trim(), email: b.email.trim().toLowerCase(), passwordHash, role: 'admin' }, select: publicFields });
+    const email = b.email.trim().toLowerCase();
+    return tx.user.create({ data: { name: b.name.trim(), phone: b.phone.trim(), email, legacyUsername: email, passwordHash, role: 'admin' }, select: publicFields });
   });
   if (!user) return res.status(409).json({ error: 'প্রথম ব্যবহারকারী ইতিমধ্যে তৈরি হয়েছে' });
   await signIn(res, user.id); res.status(201).json(user);
@@ -85,7 +86,10 @@ auth.post('/setup', throttle, wrap(async (req, res) => {
 auth.post('/login', throttle, wrap(async (req, res) => {
   const { email, password } = req.body;
   if (typeof email !== 'string' || typeof password !== 'string' || password.length > 128) return res.status(400).json({ error: 'লগইন তথ্য সঠিক নয়' });
-  const user = await db.user.findUnique({ where: { email: email.toLowerCase().trim() } });
+  const identifier = email.trim();
+  const normalized = identifier.toLowerCase();
+  const user = await db.user.findUnique({ where: { email: normalized } })
+    ?? await db.user.findFirst({ where: { legacyUsername: { in: [identifier, normalized] } } });
   // Perform the same expensive password derivation for unknown users.
   const ok = await verify(password, user?.passwordHash ?? '00000000000000000000000000000000:' + '00'.repeat(64));
   if (!user?.active || !ok) return res.status(401).json({ error: 'ইমেইল বা পাসওয়ার্ড সঠিক নয়' });
@@ -116,7 +120,8 @@ users.get('/', wrap(async (_req, res) => { res.json(await db.user.findMany({ sel
 users.post('/', wrap(async (req, res) => {
   const b = req.body;
   if (!validProfile(b) || !validPassword(b.password) || !['admin', 'staff'].includes(b.role)) return res.status(400).json({ error: 'সঠিক তথ্য দিন; পাসওয়ার্ড অন্তত ১০ অক্ষর হতে হবে' });
-  res.status(201).json(await db.user.create({ data: { name: b.name.trim(), phone: b.phone.trim(), email: b.email.trim().toLowerCase(), role: b.role, passwordHash: await hashPassword(b.password) }, select: publicFields }));
+  const email = b.email.trim().toLowerCase();
+  res.status(201).json(await db.user.create({ data: { name: b.name.trim(), phone: b.phone.trim(), email, legacyUsername: email, role: b.role, passwordHash: await hashPassword(b.password) }, select: publicFields }));
 }));
 users.put('/:id', wrap(async (req, res) => {
   const b = req.body;

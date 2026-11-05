@@ -14,6 +14,8 @@ const num = (v: unknown, d = 0) => {
 };
 const round2 = (n: number) => Math.round(n * 100) / 100;
 const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
+const validDate = (value: unknown): value is string => typeof value === 'string' && DATE_RE.test(value)
+  && Number.isFinite(Date.parse(value)) && new Date(value).toISOString().slice(0, 10) === value;
 const today = () => businessToday();
 const fail = (res: Response, error: string, code: string, status = 400) =>
   res.status(status).json({ error, code });
@@ -58,11 +60,47 @@ money.post('/entries', async (req: Request, res: Response) => {
   }
 });
 
+// Only standalone deposits and withdrawals can be edited here. Sales,
+// purchases, expenses, transfers and journal rows must be changed at source.
+money.put('/entries/:id', async (req: Request, res: Response) => {
+  const amount = req.body?.amount;
+  const note = req.body?.note;
+  if (typeof amount !== 'number' || !Number.isFinite(amount) || round2(amount) <= 0 ||
+      (note !== undefined && (typeof note !== 'string' || note.length > 500))) {
+    return fail(res, 'Enter a valid amount and note', 'INVALID_ENTRY');
+  }
+  try {
+    const updated = await db.$transaction(async t => {
+      const current = await t.moneyMovement.findUnique({ where: { id: req.params.id } });
+      if (!current?.active) throw Object.assign(new Error('Transaction not found'), { status: 404 });
+      if (!['deposit', 'withdrawal'].includes(current.sourceType)) {
+        throw Object.assign(new Error('Edit this transaction in its source module.'), { status: 409, code: 'SOURCE_TRANSACTION' });
+      }
+      if (!current.moneyAccountId) throw Object.assign(new Error('This transaction has no linked account and cannot be edited here.'), { status: 409, code: 'ACCOUNT_MISSING' });
+      await lockAccount(t, current.moneyAccountId);
+      const nextAmount = round2(amount);
+      if (current.direction === 'out' && nextAmount > current.amount &&
+          round2(await accountBalance(t, current.moneyAccountId) + current.amount) < nextAmount) {
+        throw Object.assign(new Error('Not enough money in this account'), { status: 400, code: 'INSUFFICIENT_FUNDS' });
+      }
+      const saved = await t.moneyMovement.update({
+        where: { id: current.id },
+        data: { amount: nextAmount, note: typeof note === 'string' ? note.trim() || null : null },
+      });
+      return { ...saved, previousAmount: current.amount };
+    });
+    res.json(updated);
+  } catch (e) {
+    const err = e as { status?: number; message?: string; code?: string };
+    res.status(err.status ?? 500).json({ error: err.message ?? 'Could not edit transaction', code: err.code });
+  }
+});
+
 const accountBody = (b: Record<string, unknown>) => ({
   name: String(b.name ?? '').trim(),
   type: String(b.type ?? ''),
   openingBalance: round2(num(b.openingBalance, 0)),
-  openingDate: typeof b.openingDate === 'string' && DATE_RE.test(b.openingDate) ? b.openingDate : today(),
+  openingDate: typeof b.openingDate === 'string' ? b.openingDate : '',
   bankName: String(b.bankName ?? '').trim() || null,
   accountNumber: String(b.accountNumber ?? '').trim() || null,
   branch: String(b.branch ?? '').trim() || null,
@@ -101,15 +139,21 @@ money.get('/accounts/:id', async (req: Request, res: Response) => {
   ]);
   const acc = list.find(a => a.id === req.params.id);
   if (!acc) return res.status(404).json({ error: 'Money account not found' });
+  const chartAccount = await db.chartAccount.findUnique({ where: { moneyAccountId: acc.id } });
+  const journalLines = chartAccount ? await db.journalLine.findMany({ where: { accountId: chartAccount.id, entry: { active: true } }, include: { entry: { select: { id: true, entryNo: true, date: true, memo: true, sourceType: true, sourceRef: true } } } }) : [];
+  const merged = [
+    ...rows.map(m => ({ id: m.id, date: m.date, direction: m.direction as 'in' | 'out', amount: m.amount, sourceType: m.sourceType, sourceId: m.sourceId, note: m.note ?? undefined, transferNo: m.transfer?.transferNo, counterpartyAccountId: m.transfer ? (m.transfer.fromAccountId === acc.id ? m.transfer.toAccountId : m.transfer.fromAccountId) ?? undefined : undefined, active: m.active, createdAt: m.createdAt })),
+    ...journalLines.filter(line => line.debit > 0 || line.credit > 0).map(line => ({ id: `journal-${line.id}`, date: line.entry.date, direction: line.debit > 0 ? 'in' as const : 'out' as const, amount: line.debit > 0 ? line.debit : line.credit, sourceType: 'journal', sourceId: line.entry.id, note: `${line.entry.entryNo} · ${line.entry.memo}`, transferNo: undefined, counterpartyAccountId: undefined, active: true, createdAt: line.createdAt })),
+  ].sort((a, b) => b.date.localeCompare(a.date) || b.createdAt.getTime() - a.createdAt.getTime() || b.id.localeCompare(a.id));
   // Running balance from the newest entry backwards.
   let running = acc.balance;
-  const movements = rows.map(m => {
+  const movements = merged.map(m => {
     const signed = m.direction === 'in' ? m.amount : -m.amount;
     const entry = {
-      id: m.id, date: m.date, direction: m.direction as 'in' | 'out', amount: m.amount,
-      sourceType: m.sourceType, sourceId: m.sourceId, note: m.note ?? undefined,
-      transferNo: m.transfer?.transferNo ?? undefined,
-      counterpartyAccountId: m.transfer ? (m.transfer.fromAccountId === acc.id ? m.transfer.toAccountId : m.transfer.fromAccountId) ?? undefined : undefined,
+      id: m.id, date: m.date, direction: m.direction, amount: m.amount,
+      sourceType: m.sourceType, sourceId: m.sourceId, note: m.note,
+      transferNo: m.transferNo,
+      counterpartyAccountId: m.counterpartyAccountId,
       active: m.active, balance: running,
     };
     running = round2(running - signed);
@@ -125,6 +169,7 @@ money.post('/accounts', async (req: Request, res: Response) => {
     const v = accountBody(b);
     if (!v.name) return fail(res, 'Account name is required', 'ACCOUNT_NAME');
     if (!isAccountType(v.type)) return fail(res, 'Invalid account type', 'ACCOUNT_TYPE');
+    if (!validDate(v.openingDate)) return fail(res, 'A valid opening balance date is required (YYYY-MM-DD)', 'ACCOUNT_OPENING_DATE');
     if (v.openingBalance < 0) return fail(res, 'Opening balance cannot be negative', 'ACCOUNT_OPENING');
     const dup = await db.moneyAccount.findFirst({ where: { name: v.name, type: v.type } });
     if (dup) return fail(res, 'An account with this name already exists', 'ACCOUNT_DUP');
@@ -193,10 +238,11 @@ money.delete('/accounts/:id', async (req: Request, res: Response) => {
   const blockers = async (t: TxClient) => {
     const movements = await t.moneyMovement.count({ where: { moneyAccountId: id } });
     const transfers = await t.moneyTransfer.count({ where: { OR: [{ fromAccountId: id }, { toAccountId: id }] } });
-    return { movements, transfers };
+    const journalLines = await t.journalLine.count({ where: { account: { moneyAccountId: id } } });
+    return { movements, transfers, journalLines };
   };
   const first = await blockers(db);
-  if (first.movements > 0 || first.transfers > 0) {
+  if (first.movements > 0 || first.transfers > 0 || first.journalLines > 0) {
     return fail(res, 'This account has transaction history and cannot be deleted. Deactivate it instead.', 'ACCOUNT_HAS_HISTORY', 409);
   }
   // Opening money is real value even without a single movement: never delete it
@@ -207,7 +253,7 @@ money.delete('/accounts/:id', async (req: Request, res: Response) => {
   try {
     await db.$transaction(async t => {
       const again = await blockers(t);
-      if (again.movements > 0 || again.transfers > 0) {
+      if (again.movements > 0 || again.transfers > 0 || again.journalLines > 0) {
         throw Object.assign(new Error('This account has transaction history and cannot be deleted. Deactivate it instead.'), { status: 409, code: 'ACCOUNT_HAS_HISTORY' });
       }
       const fresh = await t.moneyAccount.findUnique({ where: { id } });
@@ -236,38 +282,23 @@ money.delete('/accounts/:id', async (req: Request, res: Response) => {
 });
 
 /**
- * PUT /api/money/accounts/:id/opening — change an account's opening balance.
- * With no history yet the baseline is simply replaced. Once movements exist the
- * difference is written as a dated openingAdjust movement, so historical
- * balances are never silently rewritten.
+ * PUT /api/money/accounts/:id/opening — edit the account's single opening entry.
+ * The journal opening line is generated from this value. Older adjustment
+ * movements are retired so they do not appear as additional opening entries.
  */
 money.put('/accounts/:id/opening', async (req: Request, res: Response) => {
   const cur = await db.moneyAccount.findUnique({ where: { id: req.params.id } });
   if (!cur) return res.status(404).json({ error: 'Money account not found' });
   const value = round2(num((req.body ?? {}).openingBalance, NaN));
   if (!Number.isFinite(value)) return fail(res, 'Invalid amount', 'ACCOUNT_OPENING');
-  const day = typeof (req.body ?? {}).date === 'string' && DATE_RE.test((req.body as { date: string }).date)
-    ? (req.body as { date: string }).date : today();
-  const hasHistory = (await db.moneyMovement.count({ where: { moneyAccountId: cur.id } })) > 0;
-  // Before any movement exists the baseline is simply replaced. Afterwards the
-  // baseline stays immutable and the difference is booked as a dated
-  // openingAdjust movement, so past balances are never rewritten and the
-  // current balance moves by exactly the requested difference (once).
-  const delta = round2(value - cur.openingBalance);
+  const day = (req.body ?? {}).date;
+  if (!validDate(day)) return fail(res, 'A valid opening balance date is required (YYYY-MM-DD)', 'ACCOUNT_OPENING_DATE');
   await db.$transaction(async t => {
-    if (!hasHistory) {
-      await t.moneyAccount.update({ where: { id: cur.id }, data: { openingBalance: value, openingDate: cur.openingDate ?? day } });
-      return;
-    }
-    if (delta !== 0) {
-      await lockAccount(t, cur.id);
-      await recordMovement(t, {
-        accountId: cur.id, method: cur.type, direction: delta > 0 ? 'in' : 'out',
-        amount: Math.abs(delta), date: day, sourceType: 'openingAdjust',
-        sourceId: `open-${cur.id}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
-        note: 'Opening balance change',
-      });
-    }
+    await t.moneyAccount.update({ where: { id: cur.id }, data: { openingBalance: value, openingDate: day } });
+    await t.moneyMovement.updateMany({
+      where: { moneyAccountId: cur.id, sourceType: 'openingAdjust', active: true },
+      data: { active: false },
+    });
   });
   const accounts = await accountBalances();
   res.json({ id: cur.id, account: accounts.find(a => a.id === cur.id) ?? null, accounts });

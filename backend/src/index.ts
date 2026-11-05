@@ -16,6 +16,7 @@ import { money } from './routes/money';
 import { activity } from './routes/activity';
 import { activityLogger } from './activity';
 import { auth, users, requireAuth, requireAdmin } from './auth';
+import { accounting } from './routes/accounting';
 
 const app = express();
 const origins = (process.env.APP_ORIGINS ?? 'http://localhost:8081,http://127.0.0.1:8081,http://localhost:3001,http://127.0.0.1:3001').split(',');
@@ -41,6 +42,7 @@ app.use('/api/products', products);
 app.use('/api/customers', customers);
 app.use('/api/vendors', vendors);
 app.use('/api', tx);
+app.use('/api', accounting);
 app.use('/api', reports);
 app.use('/api/trash', trash);
 app.use('/api/expenses', expenses);

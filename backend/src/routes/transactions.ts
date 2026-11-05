@@ -41,6 +41,151 @@ export async function nextInvoiceNo(
 
 export const tx = Router();
 
+// An invoice edit replaces one posted transaction in-place. To keep AVCO
+// history reproducible, only edit when no later stock event touches any of
+// the invoice's old or replacement products. Returns are separate posted
+// documents and must be resolved before their source invoice can be edited.
+async function assertLastStockEvent(t: TxClient, productIds: string[], createdAt: Date, transactionId: string) {
+  const ids = [...new Set(productIds)];
+  if (!ids.length) return;
+  const later = await t.stockMovement.findFirst({
+    where: { productId: { in: ids }, createdAt: { gt: createdAt }, OR: [{ refId: null }, { refId: { not: transactionId } }] },
+    select: { id: true },
+  });
+  if (later) throw Object.assign(new Error('This invoice cannot be edited because later stock transactions use its inventory. Create a correcting entry instead.'), { status: 409, code: 'LATER_STOCK_ACTIVITY' });
+}
+
+async function editSale(req: Request, res: Response) {
+  try {
+    const { customerId, lines, discount, paid, accountId, next, date, payments } = req.body ?? {};
+    if (!Array.isArray(lines) || !lines.length) return res.status(400).json({ error: 'No items in sale' });
+    const day = transactionDay(date);
+    checkPromiseDay(next);
+    const pay = Math.max(0, num(paid));
+    const split = Array.isArray(payments) ? payments.filter((x: any) => x && num(x.amount) > 0) : null;
+    const result = await db.$transaction(async t => {
+      const old = await t.sale.findUnique({ where: { id: req.params.id }, include: { items: true, returns: true } });
+      if (!old) throw Object.assign(new Error('Sale not found'), { status: 404 });
+      if (old.returns.length) throw Object.assign(new Error('Invoices with posted returns cannot be edited.'), { status: 409 });
+      if (day !== old.date) throw Object.assign(new Error('The invoice date cannot be changed during edit; use the original date to preserve AVCO history.'), { status: 409 });
+      const ids = [...old.items.map(i => i.productId), ...lines.map((l: any) => String(l.productId ?? ''))];
+      await assertLastStockEvent(t, ids, old.createdAt, old.id);
+      const payAccounts = split ? await Promise.all(split.map((x: any) => resolveAccount(t, { accountId: x.accountId }))) : [];
+      const payAccount = !split && pay > 0 ? await resolveAccount(t, { accountId, method: accountId ? undefined : 'cash' }) : null;
+
+      // Undo the old sale into stock at its saved AVCO cost, then repost the
+      // edited lines at the AVCO that now applies at this point in history.
+      for (const item of old.items) await writeMovement(t, item.productId, { type: 'SALE_EDIT_REVERSAL', bucket: 'sellable', qtyKg: item.qtyKg, unitCost: item.unitCost, date: old.date, refId: old.id });
+      const customerPayments = await t.customerPayment.findMany({ where: { saleId: old.id, returnId: null, active: true }, select: { id: true } });
+      await t.moneyMovement.updateMany({ where: { sourceType: 'customerPayment', sourceId: { in: customerPayments.map(p => p.id) } }, data: { active: false } });
+      await t.customerPayment.updateMany({ where: { id: { in: customerPayments.map(p => p.id) } }, data: { active: false } });
+      await t.saleItem.deleteMany({ where: { saleId: old.id } });
+
+      const disc = Math.max(0, num(discount)); let subtotal = 0, cogs = 0;
+      const savedItems: any[] = [];
+      for (const line of lines) {
+        if (!isUnit(line?.unit)) throw Object.assign(new Error('Invalid unit'), { status: 400 });
+        const enteredQty = num(line.enteredQty);
+        if (!(enteredQty > 0)) throw Object.assign(new Error('Invoice edits cannot add return lines.'), { status: 400 });
+        const product = await t.product.findUnique({ where: { id: String(line.productId ?? '') } });
+        if (!product || product.deletedAt) throw Object.assign(new Error('Product not found'), { status: 400 });
+        const qtyKg = Math.round(toKg(product, line.unit, enteredQty) * 100) / 100;
+        const rate = num(line.rate, product.price);
+        if (!(rate > 0)) throw Object.assign(new Error('Invalid sale rate'), { status: 400 });
+        const unitCost = await currentAvgCost(t, product.id);
+        if (qtyKg > product.qtyKg) throw Object.assign(new Error(`Not enough stock: ${product.name}`), { status: 400 });
+        const lineCogs = round2(qtyKg * unitCost);
+        subtotal = round2(subtotal + qtyKg * rate); cogs = round2(cogs + lineCogs);
+        savedItems.push({ productId: product.id, unit: line.unit, enteredQty, qtyKg, rate, unitCost, cogs: lineCogs });
+        await writeMovement(t, product.id, { type: 'SALE', bucket: 'sellable', qtyKg: -qtyKg, unitCost, date: day, refId: old.id });
+      }
+      const total = Math.max(0, round2(subtotal - disc));
+      const cappedPay = Math.min(pay, total); const due = round2(total - cappedPay);
+      let validCustomerId: string | null = null;
+      if (customerId) {
+        const c = await t.customer.findUnique({ where: { id: String(customerId) } });
+        if (c && !c.deletedAt) validCustomerId = c.id;
+      }
+      if (due > 0 && !validCustomerId) throw Object.assign(new Error('Customer is required when there is a due'), { status: 400 });
+      await t.sale.update({ where: { id: old.id }, data: { customerId: validCustomerId, date: day, discount: disc, total, paid: cappedPay, due, profit: round2(total - cogs), nextDate: next || null, items: { create: savedItems } } });
+
+      const postPayment = async (amount: number, acc: any) => {
+        const payment = await t.customerPayment.create({ data: { customerId: validCustomerId, saleId: old.id, amount, date: day } });
+        await recordMovement(t, { accountId: acc.id, method: acc.type, direction: 'in', amount, date: day, sourceType: 'customerPayment', sourceId: payment.id, note: old.invoiceNo });
+      };
+      if (split) {
+        let remaining = cappedPay;
+        for (let i = 0; i < split.length && remaining > 0; i++) { const amount = round2(Math.min(remaining, num(split[i].amount))); if (amount > 0) { await postPayment(amount, payAccounts[i]); remaining = round2(remaining - amount); } }
+      } else if (payAccount && cappedPay > 0) await postPayment(cappedPay, payAccount);
+      if (old.customerId && old.customerId !== validCustomerId) await syncPartyInvoices('sale', old.customerId, t);
+      if (validCustomerId) await syncPartyInvoices('sale', validCustomerId, t);
+      return { id: old.id, invoiceNo: old.invoiceNo, total };
+    });
+    res.json(result);
+  } catch (e: unknown) { const err = e as { status?: number; message?: string; code?: string }; res.status(err.status ?? 500).json({ error: err.message ?? 'Failed to edit sale', code: err.code }); }
+}
+
+async function editPurchase(req: Request, res: Response) {
+  try {
+    const { vendorId, lines, paid, accountId, date, next, payments } = req.body ?? {};
+    if (!vendorId) return res.status(400).json({ error: 'Vendor is required' });
+    if (!Array.isArray(lines) || !lines.length) return res.status(400).json({ error: 'No items in purchase' });
+    const day = transactionDay(date); checkPromiseDay(next);
+    const pay = Math.max(0, num(paid));
+    const split = Array.isArray(payments) ? payments.filter((x: any) => x && num(x.amount) > 0) : null;
+    const result = await db.$transaction(async t => {
+      const old = await t.purchase.findUnique({ where: { id: req.params.id }, include: { items: true, returns: true } });
+      if (!old) throw Object.assign(new Error('Purchase not found'), { status: 404 });
+      if (old.returns.length) throw Object.assign(new Error('Invoices with posted returns cannot be edited.'), { status: 409 });
+      if (day !== old.date) throw Object.assign(new Error('The invoice date cannot be changed during edit; use the original date to preserve AVCO history.'), { status: 409 });
+      const ids = [...old.items.map(i => i.productId), ...lines.map((l: any) => String(l.productId ?? ''))];
+      await assertLastStockEvent(t, ids, old.createdAt, old.id);
+      const vendor = await t.vendor.findUnique({ where: { id: String(vendorId) } });
+      if (!vendor || vendor.deletedAt) throw Object.assign(new Error('Vendor not found'), { status: 400 });
+      const payAccounts = split ? await Promise.all(split.map((x: any) => resolveAccount(t, { accountId: x.accountId }))) : [];
+      const payAccount = !split && pay > 0 ? await resolveAccount(t, { accountId, method: accountId ? undefined : 'cash' }) : null;
+
+      // Remove the prior receipt from inventory at its saved landed unit cost.
+      for (const item of old.items) await writeMovement(t, item.productId, { type: 'PURCHASE_EDIT_REVERSAL', bucket: 'sellable', qtyKg: -item.qtyKg, unitCost: item.unitCost, date: old.date, forceUnitCost: true, refId: old.id });
+      const oldPayments = await t.vendorPayment.findMany({ where: { purchaseId: old.id, returnId: null, active: true }, select: { id: true } });
+      await t.moneyMovement.updateMany({ where: { sourceType: 'purchase', sourceId: { startsWith: old.id }, active: true }, data: { active: false } });
+      await t.vendorPayment.updateMany({ where: { id: { in: oldPayments.map(p => p.id) } }, data: { active: false } });
+      await t.purchaseItem.deleteMany({ where: { purchaseId: old.id } });
+
+      let total = 0; const savedItems: any[] = [];
+      for (const line of lines) {
+        if (!isUnit(line?.unit)) throw Object.assign(new Error('Invalid unit'), { status: 400 });
+        const enteredQty = num(line.enteredQty);
+        if (!(enteredQty > 0)) throw Object.assign(new Error('Invoice edits cannot add return lines.'), { status: 400 });
+        const product = await t.product.findUnique({ where: { id: String(line.productId ?? '') } });
+        if (!product || product.deletedAt) throw Object.assign(new Error('Product not found'), { status: 400 });
+        const qtyKg = Math.round(toKg(product, line.unit, enteredQty) * 100) / 100;
+        const rate = num(line.rate, product.cost);
+        if (!(rate >= 0)) throw Object.assign(new Error('Invalid purchase rate'), { status: 400 });
+        const otherCost = Math.max(0, num(line.otherCost ?? line.otherCostPerBag));
+        const unitCost = round2(rate + otherCost / (product.mediumBagKg || 50));
+        total = round2(total + qtyKg * rate);
+        savedItems.push({ productId: product.id, unit: line.unit, enteredQty, qtyKg, rate, unitCost, otherCost });
+        await writeMovement(t, product.id, { type: 'PURCHASE', bucket: 'sellable', qtyKg, unitCost, date: day, refId: old.id });
+      }
+      const cappedPay = Math.min(pay, total); const due = round2(total - cappedPay);
+      await t.purchase.update({ where: { id: old.id }, data: { vendorId: vendor.id, date: day, total, paid: cappedPay, due, nextDate: next || null, items: { create: savedItems } } });
+      const postPayment = async (amount: number, acc: any) => {
+        const payment = await t.vendorPayment.create({ data: { vendorId: vendor.id, purchaseId: old.id, amount, date: day } });
+        await recordMovement(t, { accountId: acc.id, method: acc.type, direction: 'out', amount, date: day, sourceType: 'purchase', sourceId: `${old.id}:${payment.id}`, note: old.invoiceNo });
+      };
+      if (split) {
+        let remaining = cappedPay;
+        for (let i = 0; i < split.length && remaining > 0; i++) { const amount = round2(Math.min(remaining, num(split[i].amount))); if (amount > 0) { await postPayment(amount, payAccounts[i]); remaining = round2(remaining - amount); } }
+      } else if (payAccount && cappedPay > 0) await postPayment(cappedPay, payAccount);
+      if (old.vendorId !== vendor.id) await syncPartyInvoices('purchase', old.vendorId, t);
+      await syncPartyInvoices('purchase', vendor.id, t);
+      return { id: old.id, invoiceNo: old.invoiceNo, total };
+    });
+    res.json(result);
+  } catch (e: unknown) { const err = e as { status?: number; message?: string; code?: string }; res.status(err.status ?? 500).json({ error: err.message ?? 'Failed to edit purchase', code: err.code }); }
+}
+
 // GET /api/sales (with items) — paid/due/status are derived from the
 // canonical settlement, never the stored columns.
 tx.get('/sales', async (_req: Request, res: Response) => {
@@ -71,7 +216,7 @@ tx.get('/sales/:id', async (req: Request, res: Response) => {
     where: { id: req.params.id },
     include: {
       items: { include: { product: { select: { name: true } } } },
-      customer: { select: { name: true, mobile: true } },
+      customer: { select: { id: true, name: true, mobile: true } },
       returns: {
         include: {
           items: { include: { product: { select: { name: true } } } },
@@ -85,6 +230,7 @@ tx.get('/sales/:id', async (req: Request, res: Response) => {
   const netTotal = Math.max(0, round2(s.total - returnTotal));
 
   const regularItems = s.items.map(it => ({
+    productId: it.productId,
     productName: it.product.name,
     unit: it.unit,
     enteredQty: it.enteredQty,
@@ -108,6 +254,9 @@ tx.get('/sales/:id', async (req: Request, res: Response) => {
 
   const displayPaid = Math.min(netTotal, Math.max(0, round2((st?.paid ?? s.paid) - returnTotal)));
   const displayDue = Math.max(0, round2(netTotal - displayPaid));
+  const savedPayments = await db.customerPayment.findMany({ where: { saleId: s.id, returnId: null, active: true }, orderBy: { createdAt: 'asc' } });
+  const paymentRows = await db.moneyMovement.findMany({ where: { sourceType: 'customerPayment', active: true, sourceId: { in: savedPayments.map(p => p.id) } }, orderBy: { createdAt: 'asc' }, select: { sourceId: true, moneyAccountId: true } });
+  const paymentAccount = new Map(paymentRows.map(p => [p.sourceId, p.moneyAccountId]));
 
   res.json({
     id: s.id, invoiceNo: s.invoiceNo, date: s.date, createdAt: s.createdAt,
@@ -117,12 +266,15 @@ tx.get('/sales/:id', async (req: Request, res: Response) => {
     due: returnTotal > 0 ? displayDue : (st?.due ?? s.due),
     status: st?.status,
     nextDate: s.nextDate ?? undefined,
-    customer: s.customer ? { name: s.customer.name, mobile: s.customer.mobile } : null,
+    customer: s.customer ? { id: s.customer.id, name: s.customer.name, mobile: s.customer.mobile } : null,
     items: [...regularItems, ...retItems],
     returns: s.returns.map(r => ({ id: r.id, returnNo: r.returnNo, date: r.date, amount: r.totalAmount })),
     payment: await paymentOf('sale', s.id),
+    payments: savedPayments.map(p => ({ accountId: paymentAccount.get(p.id), amount: p.amount })),
   });
 });
+
+tx.put('/sales/:id', editSale);
 
 // GET /api/sales/:id/returnable — original lines with remaining returnable KG
 tx.get('/sales/:id/returnable', async (req: Request, res: Response) => {
@@ -187,9 +339,10 @@ tx.post('/sales', async (req: Request, res: Response) => {
 
         const rate = l?.rate === undefined ? p.price : num(l.rate);
         if (!(rate > 0)) throw Object.assign(new Error('Invalid sale rate'), { status: 400, code: 'RATE_INVALID' });
-        const hasCustomCost = l.unitCost !== undefined && num(l.unitCost) > 0;
         const currentAvg = await currentAvgCost(t, p.id);
-        const unitCost = hasCustomCost ? round2(num(l.unitCost)) : currentAvg;
+        // COGS always uses the live AVCO immediately before this sale line.
+        // Client-supplied product.cost can be stale after purchases/landed cost.
+        const unitCost = currentAvg;
 
         if (entered > 0) {
           // Standard sale line
@@ -201,7 +354,7 @@ tx.post('/sales', async (req: Request, res: Response) => {
           items.push({ productId: p.id, unit: l.unit, enteredQty: entered, qtyKg, rate, unitCost, cogs: lineCogs });
           // Selling leaves quantity AND inventory value (AVCO out).
           await writeMovement(t, p.id, {
-            type: 'SALE', bucket: 'sellable', qtyKg: -qtyKg, unitCost, date: day, forceUnitCost: hasCustomCost,
+            type: 'SALE', bucket: 'sellable', qtyKg: -qtyKg, unitCost, date: day,
           });
         } else {
           // Negative quantity => SALES RETURN line
@@ -365,7 +518,7 @@ tx.get('/purchases/:id', async (req: Request, res: Response) => {
     where: { id: req.params.id },
     include: {
       items: { include: { product: { select: { name: true } } } },
-      vendor: { select: { name: true, mobile: true } },
+      vendor: { select: { id: true, name: true, mobile: true } },
       returns: {
         include: {
           items: { include: { product: { select: { name: true } } } },
@@ -379,6 +532,7 @@ tx.get('/purchases/:id', async (req: Request, res: Response) => {
   const netTotal = Math.max(0, round2(p.total - returnTotal));
 
   const regularItems = p.items.map(it => ({
+    productId: it.productId,
     productName: it.product.name,
     unit: it.unit,
     enteredQty: it.enteredQty,
@@ -400,6 +554,9 @@ tx.get('/purchases/:id', async (req: Request, res: Response) => {
 
   const displayPaid = Math.min(netTotal, Math.max(0, round2((st?.paid ?? p.paid) - returnTotal)));
   const displayDue = Math.max(0, round2(netTotal - displayPaid));
+  const savedPayments = await db.vendorPayment.findMany({ where: { purchaseId: p.id, returnId: null, active: true }, orderBy: { createdAt: 'asc' } });
+  const paymentRows = await db.moneyMovement.findMany({ where: { sourceType: 'purchase', active: true, OR: [{ sourceId: { startsWith: p.id } }, { sourceId: { in: savedPayments.map(payment => payment.id) } }] }, orderBy: { createdAt: 'asc' }, select: { sourceId: true, moneyAccountId: true } });
+  const paymentAccount = new Map(paymentRows.map(m => [m.sourceId, m.moneyAccountId]));
 
   res.json({
     id: p.id, invoiceNo: p.invoiceNo, date: p.date, createdAt: p.createdAt,
@@ -408,12 +565,15 @@ tx.get('/purchases/:id', async (req: Request, res: Response) => {
     due: returnTotal > 0 ? displayDue : (st?.due ?? p.due),
     status: st?.status,
     nextDate: p.nextDate ?? undefined,
-    vendor: { name: p.vendor.name, mobile: p.vendor.mobile },
+    vendor: { id: p.vendor.id, name: p.vendor.name, mobile: p.vendor.mobile },
     items: [...regularItems, ...retItems],
     payment: await paymentOf('purchase', p.id),
+    payments: savedPayments.map((payment, index) => ({ accountId: paymentAccount.get(`${p.id}:${payment.id}`) ?? paymentAccount.get(payment.id) ?? paymentAccount.get(`${p.id}:${index}`) ?? paymentAccount.get(p.id), amount: payment.amount })),
     returns: p.returns.map(r => ({ id: r.id, returnNo: r.returnNo, date: r.date, amount: r.totalAmount })),
   });
 });
+
+tx.put('/purchases/:id', editPurchase);
 
 // GET /api/purchases/:id/returnable — original lines with remaining returnable KG
 tx.get('/purchases/:id/returnable', async (req: Request, res: Response) => {
@@ -638,7 +798,7 @@ tx.post('/customer-payments', async (req: Request, res: Response) => {
       // transaction so the rejection is atomic with the future write.
       const [csales, cpays] = await Promise.all([
         t.sale.findMany({ where: { customerId: c.id } }),
-        t.customerPayment.findMany({ where: { customerId: c.id } }),
+        t.customerPayment.findMany({ where: { customerId: c.id, active: true } }),
       ]);
       const due = round2(c.openingDue + csales.reduce((s, x) => s + x.total, 0) - cpays.reduce((s, x) => s + x.amount, 0));
       if (round2(amt) > due) throw Object.assign(new Error('Amount exceeds current customer balance'), { status: 400, code: 'PAYMENT_OVERPAY' });
@@ -678,7 +838,7 @@ tx.post('/vendor-payments', async (req: Request, res: Response) => {
       await lockAccounts(t, [acc.id]);
       const [vpurs, vpays] = await Promise.all([
         t.purchase.findMany({ where: { vendorId: v.id } }),
-        t.vendorPayment.findMany({ where: { vendorId: v.id } }),
+        t.vendorPayment.findMany({ where: { vendorId: v.id, active: true } }),
       ]);
       const payable = round2(v.openingPayable + vpurs.reduce((s, x) => s + x.total, 0) - vpays.reduce((s, x) => s + x.amount, 0));
       if (round2(amt) > payable) throw Object.assign(new Error('Amount exceeds current vendor payable'), { status: 400, code: 'PAYMENT_OVERPAY' });
@@ -715,14 +875,14 @@ tx.get('/bootstrap', async (_req: Request, res: Response) => {
     db.vendor.findMany({ where: { deletedAt: null }, orderBy: { name: 'asc' } }),
     db.sale.findMany({ orderBy: [{ date: 'desc' }, { createdAt: 'desc' }] }),
     db.purchase.findMany({ orderBy: [{ date: 'desc' }, { createdAt: 'desc' }] }),
-    db.customerPayment.findMany({ orderBy: [{ date: 'desc' }, { createdAt: 'desc' }] }),
-    db.vendorPayment.findMany({ orderBy: [{ date: 'desc' }, { createdAt: 'desc' }] }),
+    db.customerPayment.findMany({ where: { active: true }, orderBy: [{ date: 'desc' }, { createdAt: 'desc' }] }),
+    db.vendorPayment.findMany({ where: { active: true }, orderBy: [{ date: 'desc' }, { createdAt: 'desc' }] }),
     db.stockMovement.findMany({ orderBy: [{ date: 'desc' }, { createdAt: 'desc' }], take: 500, include: { product: { select: { name: true, mediumBagKg: true } } } }),
     db.expense.findMany({ where: { deletedAt: null }, orderBy: [{ date: 'desc' }, { createdAt: 'desc' }] }),
     db.productReturn.findMany({ orderBy: [{ date: 'desc' }, { createdAt: 'desc' }] }),
     moneyBalances(),
     accountBalances(),
-    db.moneyMovement.findMany({ where: { sourceType: { in: ['expense', 'sale', 'customerPayment', 'vendorPayment'] } }, select: { sourceId: true, sourceType: true, method: true, moneyAccountId: true } }),
+    db.moneyMovement.findMany({ where: { active: true, sourceType: { in: ['expense', 'sale', 'customerPayment', 'vendorPayment', 'purchase'] } }, select: { sourceId: true, sourceType: true, method: true, moneyAccountId: true } }),
     db.moneyTransfer.findMany({ orderBy: [{ date: 'desc' }, { createdAt: 'desc' }], take: 50 }),
     periodFinance('day'),
     lifetimeFinance(),
@@ -777,8 +937,14 @@ tx.get('/bootstrap', async (_req: Request, res: Response) => {
     }),
     customerPayments: customerPayments.map(p => ({ id: p.id, customerId: p.customerId ?? 'cash', amount: p.amount, date: p.date, note: p.note ?? undefined, returnId: p.returnId ?? undefined, returnNo: p.returnId ? retNo.get(p.returnId) : undefined, createdAt: p.createdAt, saleId: p.saleId ?? undefined, method: p.returnId ? undefined : (inMethod.get(`p:${p.id}`) ?? (p.saleId ? inMethod.get(`s:${p.saleId}`) : undefined)), accountId: p.returnId ? undefined : inAccount.get(p.id)?.accountId, accountName: p.returnId ? undefined : inAccount.get(p.id)?.accountName })),
     vendorPayments: vendorPayments.map(p => ({ id: p.id, vendorId: p.vendorId, amount: p.amount, date: p.date, note: p.note ?? undefined, returnId: p.returnId ?? undefined, returnNo: p.returnId ? retNo.get(p.returnId) : undefined, createdAt: p.createdAt, purchaseId: p.purchaseId ?? undefined, accountId: p.returnId ? undefined : outAccount.get(p.id)?.accountId, accountName: p.returnId ? undefined : outAccount.get(p.id)?.accountName })),
-    movements: movements.map(mv => ({ id: mv.id, productId: mv.productId, productName: mv.product.name, type: mv.type, qty: mv.qtyKg, bags: mv.product.mediumBagKg > 0 ? round2(mv.qtyKg / mv.product.mediumBagKg) : 0, unitCost: mv.unitCost, bagUnitPrice: round2(mv.unitCost * (mv.product.mediumBagKg || 0)), amount: mv.value, date: mv.date })),
-    expenses: expenses.map(e => ({ id: e.id, voucherNo: e.voucherNo ?? undefined, category: e.category, customName: e.customName ?? undefined, amount: e.amount, date: e.date, note: e.note ?? undefined, method: expMethod.get(e.id)?.method, accountId: expMethod.get(e.id)?.moneyAccountId ?? undefined })),
+    movements: movements.map(mv => {
+      const sale = mv.refId ? sales.find(row => row.id === mv.refId) : undefined;
+      const purchase = mv.refId ? purchases.find(row => row.id === mv.refId) : undefined;
+      const transactionNo = sale?.invoiceNo ?? purchase?.invoiceNo ?? undefined;
+      const isEditReversal = mv.type === 'SALE_EDIT_REVERSAL' || mv.type === 'PURCHASE_EDIT_REVERSAL';
+      return { id: mv.id, productId: mv.productId, productName: mv.product.name, type: mv.type, qty: mv.qtyKg, bags: mv.product.mediumBagKg > 0 ? round2(mv.qtyKg / mv.product.mediumBagKg) : 0, unitCost: mv.unitCost, bagUnitPrice: round2(mv.unitCost * (mv.product.mediumBagKg || 0)), amount: mv.value, date: mv.date, transactionNo, note: transactionNo ? `${isEditReversal ? 'Correction reversal for' : 'Posted against'} ${transactionNo}` : undefined };
+    }),
+    expenses: expenses.map(e => ({ id: e.id, voucherNo: e.voucherNo ?? undefined, category: e.category, customName: e.customName ?? undefined, amount: e.amount, date: e.date, note: e.note ?? undefined, capitalized: e.capitalized, method: expMethod.get(e.id)?.method, accountId: expMethod.get(e.id)?.moneyAccountId ?? undefined })),
     returns: rets.map(r => ({ id: r.id, kind: r.kind, date: r.date, amount: r.totalAmount, profit: r.profitImpact, returnNo: r.returnNo ?? undefined })),
     money: balances,
     moneyAccounts: accountList,

@@ -15,7 +15,9 @@ function classify(method: string, path: string): Classification | null {
   if (/^\/api\/users\/[^/]+$/.test(path)) return { entity: 'user', action: method === 'DELETE' ? 'delete' : 'update' };
 
   if (path === '/api/sales' && method === 'POST') return { entity: 'sale', action: 'create' };
+  if (/^\/api\/sales\/[^/]+$/.test(path) && method === 'PUT') return { entity: 'sale', action: 'edit' };
   if (path === '/api/purchases' && method === 'POST') return { entity: 'purchase', action: 'create' };
+  if (/^\/api\/purchases\/[^/]+$/.test(path) && method === 'PUT') return { entity: 'purchase', action: 'edit' };
   if (path === '/api/customer-payments' && method === 'POST') return { entity: 'customerPayment', action: 'create' };
   if (path === '/api/vendor-payments' && method === 'POST') return { entity: 'vendorPayment', action: 'create' };
   if (path === '/api/returns' && method === 'POST') return { entity: 'return', action: 'create' };
@@ -40,6 +42,7 @@ function classify(method: string, path: string): Classification | null {
   if (path === '/api/settings' && method === 'PUT') return { entity: 'settings', action: 'update' };
 
   if (path === '/api/money/entries' && method === 'POST') return { entity: 'moneyEntry', action: 'create' };
+  if (/^\/api\/money\/entries\/[^/]+$/.test(path) && method === 'PUT') return { entity: 'moneyEntry', action: 'update' };
   if (path === '/api/money/accounts' && method === 'POST') return { entity: 'moneyAccount', action: 'create' };
   if (/^\/api\/money\/accounts\/[^/]+\/opening$/.test(path) && method === 'PUT') return { entity: 'moneyAccount', action: 'opening' };
   if (/^\/api\/money\/accounts\/[^/]+$/.test(path)) return { entity: 'moneyAccount', action: method === 'DELETE' ? 'delete' : 'update' };
@@ -65,7 +68,8 @@ function pathId(method: string, path: string): string | undefined {
   if (method !== 'PUT' && method !== 'DELETE' && !/restore|purge/.test(path)) return undefined;
   const p = path.split('/').filter(Boolean);
   if (p[0] !== 'api') return undefined;
-  if (['expenses', 'products', 'customers', 'vendors', 'users'].includes(p[1]) && p.length >= 3) return p[2];
+  if (['expenses', 'products', 'customers', 'vendors', 'users', 'sales', 'purchases'].includes(p[1]) && p.length >= 3) return p[2];
+  if (p[1] === 'money' && p[2] === 'entries' && p.length >= 4) return p[3];
   if (p[1] === 'money' && p[2] === 'accounts' && p.length >= 4) return p[3];
   if (p[1] === 'trash' && p.length >= 4) return p[3];
   return undefined;
@@ -118,7 +122,7 @@ async function build(req: Request, responseBody: any, actor: any) {
   const amount = number(b.total) ?? number(b.totalAmount) ?? number(b.amount)
     ?? number(body.amount) ?? number(body.paid) ?? number(body.openingBalance);
   const reference = text(
-    b.invoiceNo ?? b.transferNo ?? b.returnNo ?? b.voucherNo ?? b.code ?? b.email ?? b.name
+    b.invoiceNo ?? b.transferNo ?? b.returnNo ?? b.voucherNo ?? b.sourceId ?? b.code ?? b.email ?? b.name
     ?? body.invoiceNo ?? body.code ?? body.email ?? body.name,
   );
   const entityId = text(b.id ?? b.account?.id ?? pathId(req.method, path));
@@ -129,13 +133,26 @@ async function build(req: Request, responseBody: any, actor: any) {
   };
 
   put('date', body.date ?? b.date);
-  put('note', body.note ?? b.note);
+  put('note', action === 'edit' && (entity === 'sale' || entity === 'purchase')
+    ? 'Confirmed invoice edit reposted stock and payments under the original transaction number.'
+    : body.note ?? b.note);
   put('method', body.method ?? b.method);
   put('direction', body.direction ?? b.direction);
   put('role', b.role ?? body.role);
   put('active', typeof b.active === 'boolean' ? b.active : body.active);
   put('items', Array.isArray(body.lines) ? body.lines.length : Array.isArray(body.items) ? body.items.length : undefined);
   put('paid', number(body.paid));
+  if (entity === 'moneyEntry' && action === 'update') {
+    put('previousAmount', number(b.previousAmount));
+    put('note', b.note);
+    put('accountName', await accountName(b.moneyAccountId));
+  }
+  if (action === 'edit' && (entity === 'sale' || entity === 'purchase')) {
+    put('stage', 'posted');
+    put('inventory', 'reversed and reposted from confirmed invoice changes');
+    put('changedItems', Array.isArray(body.lines) ? body.lines.length : undefined);
+    put('editNote', 'Existing invoice and transaction number updated; stock and payment entries reposted on confirmation.');
+  }
 
   if (entity === 'sale' || entity === 'purchase') {
     const name = entity === 'sale' ? await customerName(body.customerId) : await vendorName(body.vendorId);

@@ -43,21 +43,24 @@ async function main() {
 
   for (const p of products) {
     const saleItems = await db.saleItem.findMany({ where: { productId: p.id }, include: { sale: { include: { items: true } } } });
-    const purchaseItems = await db.purchaseItem.findMany({ where: { productId: p.id }, include: { purchase: true } });
+    const purchaseItems = await db.purchaseItem.findMany({ where: { productId: p.id }, include: { purchase: true, product: { select: { mediumBagKg: true } } } });
     const returnItems = await db.productReturnItem.findMany({ where: { productId: p.id }, include: { ret: true } });
+    const existing = await db.stockMovement.findMany({ where: { productId: p.id } });
     type SaleItemRow = (typeof saleItems)[number];
 
     // ---------- 1. opening unit cost ----------
     const purchaseDates = purchaseItems
-      .map((i: (typeof purchaseItems)[number]) => ({ date: i.purchase.date, createdAt: i.purchase.createdAt, rate: i.rate }))
+      .map((i: (typeof purchaseItems)[number]) => ({ date: i.purchase.date, createdAt: i.purchase.createdAt, rate: r2(i.rate + i.otherCost / (i.product.mediumBagKg || 50)) }))
       .sort((a, b) => (a.date < b.date ? -1 : a.date > b.date ? 1 : a.createdAt.getTime() - b.createdAt.getTime()));
     const saleDates = saleItems
       .filter(i => i.sale.total !== i.sale.profit && i.qtyKg > 0)
       .map(i => ({ date: i.sale.date, createdAt: i.sale.createdAt, cost: (i.sale.total - i.sale.profit) / i.sale.items.reduce((a: number, x: { qtyKg: number }) => a + x.qtyKg, 0) }))
       .sort((a, b) => (a.date < b.date ? -1 : a.date > b.date ? 1 : a.createdAt.getTime() - b.createdAt.getTime()));
-    const openingUnitCost = round2(
-      purchaseDates[0]?.rate ?? saleDates[0]?.cost ?? p.cost,
-    );
+    const openingMovement = existing.find(m => m.type === 'OPENING' && m.bucket === 'sellable');
+    const hasRecordedOpening = openingMovement && Math.abs(openingMovement.qtyKg - p.openingQtyKg) < 0.005;
+    const openingUnitCost = round2(hasRecordedOpening && openingMovement!.qtyKg > 0
+      ? openingMovement!.value / openingMovement!.qtyKg
+      : (purchaseDates[0]?.rate ?? saleDates[0]?.cost ?? p.cost));
     const openingValue = round2(p.openingQtyKg * openingUnitCost);
     const openingQty = p.openingQtyKg;
     // Opening stock is the state BEFORE the product's first recorded movement.
@@ -106,7 +109,7 @@ async function main() {
     for (const i of purchaseItems) {
       evs.push({
         seq: i.purchase.createdAt.getTime(), type: 'PURCHASE', bucket: 'sellable', qtyKg: i.qtyKg,
-        unitCost: i.rate, date: i.purchase.date, refId: i.purchaseId, refKind: 'purchaseItem', refItemId: i.id,
+        unitCost: r2(i.rate + i.otherCost / (i.product.mediumBagKg || 50)), date: i.purchase.date, refId: i.purchaseId, refKind: 'purchaseItem', refItemId: i.id,
       });
     }
     for (const i of saleItems) {
@@ -128,13 +131,15 @@ async function main() {
       if (i.purchaseItemId && i.qtyKg > 0) {
         // Purchase return: value leaves at the ORIGINAL purchase rate, i.e. the
         // same figure as the supplier credit.
-        const credit = round2(i.qtyKg * (purchaseItems.find(x => x.id === i.purchaseItemId)?.rate ?? i.rate));
+        const original = purchaseItems.find(x => x.id === i.purchaseItemId);
+        const credit = round2(i.qtyKg * (original?.rate ?? i.rate));
         evs.push({ seq: i.ret.createdAt.getTime(), type: 'PRETURN', bucket: 'sellable', qtyKg: -i.qtyKg, unitCost: credit / i.qtyKg, date: i.ret.date, refId: i.ret.id, refKind: 'returnItem', refItemId: i.id });
       }
     }
     // purchase returns out of the damaged bucket
     for (const i of returnItems.filter(x => x.purchaseItemId && x.damagedKg > 0 && x.goodKg === 0 && x.qtyKg > 0)) {
-      const origUnitCost = round2(purchaseItems.find(x => x.id === i.purchaseItemId)?.rate ?? i.rate);
+      const original = purchaseItems.find(x => x.id === i.purchaseItemId);
+      const origUnitCost = r2(original?.rate ?? i.rate);
       const credit = round2(i.qtyKg * origUnitCost);
       evs.push({ seq: i.ret.createdAt.getTime(), type: 'PRETURN_DMG', bucket: 'damaged', qtyKg: -i.qtyKg, unitCost: credit / i.qtyKg, date: i.ret.date, refId: i.ret.id, refKind: 'returnItem', refItemId: i.id });
     }
@@ -151,7 +156,6 @@ async function main() {
     // Re-pair legacy movements with valuation data. Legacy rows are inconsistent
     // (some seeded movements carry refId, API-created ones do not), so matching
     // is by type + quantity + date, and only then by type + quantity.
-    const existing = await db.stockMovement.findMany({ where: { productId: p.id } });
     const used = new Set<string>();
     const pick = (type: string, qty: number, date: string) => {
       const free = existing.filter(m => !used.has(m.id) && m.type === type && Math.abs(m.qtyKg - qty) < 0.005);
@@ -224,7 +228,9 @@ async function main() {
       touched++;
     const snapDelta = round2([...lineCogs.values()].reduce((a, b2) => a + b2, 0) - [...legacyAllocCogs.values()].reduce((a, b2) => a + b2, 0));
     if (Math.abs(snapDelta) >= 1) legacyDelta.push(`${p.name}: AVCO ${r2([...lineCogs.values()].reduce((a, b2) => a + b2, 0))} vs legacy snapshot ${r2([...legacyAllocCogs.values()].reduce((a, b2) => a + b2, 0))}`);
-      console.log(`[dry] ${p.name}: opening=${openingQty}@${openingUnitCost}=${openingValue} dated ${openingDay} -> qty=${state.qtyKg} value=${state.stockValue} avg=${state.cost} unmatched=${createdCount}`);
+      const storedSaleCogs = round2(saleItems.reduce((s, i) => s + i.cogs, 0));
+      const replaySaleCogs = round2([...lineCogs.values()].reduce((s, c) => s + c, 0));
+      console.log(`[dry] ${p.name}: opening=${openingQty}@${openingUnitCost}=${openingValue} dated ${openingDay}; stock value ${p.stockValue} -> ${state.stockValue}; AVCO ${p.cost} -> ${state.cost}; sale COGS ${storedSaleCogs} -> ${replaySaleCogs}; unmatched=${createdCount}`);
       continue;
     }
     if (createdCount > 0) console.log(`  ${p.name}: created ${createdCount} missing movement row(s)`);
@@ -271,6 +277,13 @@ async function main() {
     for (const s of skipped) console.log('  - ' + s);
   }
   if (DRY) { await db.$disconnect(); return; }
+  const sales = await db.sale.findMany({ include: { items: { select: { cogs: true } } } });
+  for (const sale of sales) {
+    const actualProfit = round2(sale.total - sale.items.reduce((s, item) => s + item.cogs, 0));
+    if (Math.abs(sale.profit - actualProfit) >= 0.01) {
+      await db.sale.update({ where: { id: sale.id }, data: { profit: actualProfit } });
+    }
+  }
   const rets = await db.productReturn.findMany({ include: { items: true } });
   for (const r of rets) {
     if (r.kind !== 'sale') continue;

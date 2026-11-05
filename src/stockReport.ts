@@ -1,5 +1,29 @@
 import { toBnDigits } from './bn';
 import { Platform } from 'react-native';
+import { Lang } from './i18n';
+
+const englishReport = (html: string, lang: Lang) => {
+  if (lang !== 'en') return html;
+  const labels: Record<string, string> = {
+    'বিক্রয়': 'Sale', 'ক্রয়': 'Purchase', 'বিক্রয় ফেরত': 'Sales return', 'ক্রয় ফেরত': 'Purchase return',
+    'প্রারম্ভিক মজুদ': 'Opening stock', 'স্টক সমন্বয়': 'Stock adjustment', 'নষ্ট চাল': 'Damaged stock', 'মুভমেন্ট': 'Movement',
+    'চালের আড়ৎ': 'Chaler Arot', 'তারিখ:': 'Date:', 'পণ্য কোড': 'Product code', 'পণ্যের নাম': 'Product name',
+    'বস্তার সাইজ': 'Bag size', 'বস্তার সাইজ (কেজি)': 'Bag size (kg)', 'মজুদ (বস্তা)': 'Stock (bags)', 'মজুদ (কেজি)': 'Stock (kg)',
+    'ক্রয় দর': 'Purchase rate', 'বিক্রয় দর': 'Sale rate', 'স্টক মূল্য (৳)': 'Stock value (৳)', 'মুভমেন্ট টাইপ': 'Movement type',
+    'পরিমাণ (কেজি)': 'Quantity (kg)', 'সর্বমোট': 'Total', 'সর্বমোট:': 'Total:',
+    'প্রিন্টের তারিখ:': 'Printed on:', 'প্রিন্টের সময়:': 'Printed at:', 'মোট আইটেম সংখ্যা:': 'Total items:',
+    'মোট মজুদ (বস্তা)': 'Total stock (bags)', 'মোট মজুদ (কেজি)': 'Total stock (kg)', 'মোট স্টক মূল্যায়ন (৳)': 'Total stock value (৳)',
+    'ফিল্টার:': 'Filter:', 'মোট পণ্য সংখ্যা:': 'Products:', 'মোট বস্তা:': 'Bags:', 'মোট কেজি:': 'Kilograms:',
+    'মোট স্টক মূল্য (৳):': 'Stock value (৳):', 'চালের আড়ৎ - পাইকারি চালের মজুদ ও স্টক বিবরণী': 'Chaler Arot - Rice inventory report',
+    'চালের আড়ৎ - স্টক মুভমেন্ট বিবরণী': 'Chaler Arot - Stock movement report', 'মজুদ চাল ও স্টক বিবরণী রিপোর্ট': 'Rice inventory report',
+    'মজুদ চাল ও স্টক মূল্যায়ন বিবরণী রিপোর্ট': 'Rice inventory valuation report', 'স্টক মুভমেন্ট রিপোর্ট': 'Stock movement report',
+    'স্টক মুভমেন্ট বিবরণী রিপোর্ট': 'Stock movement report', 'প্রিন্ট / পিডিএফ হিসেবে সংরক্ষণ (Save as PDF)': 'Print / Save as PDF',
+    'বন্ধ করুন': 'Close', 'টি': '', 'এটি একটি কম্পিউটার জেনারেটেড রিপোর্ট • চালের আড়ৎ ম্যানেজমেন্ট সিস্টেম': 'This is a computer generated report • Chaler Arot Management System',
+  };
+  let result = html.replace(/[০-৯]/g, digit => String('০১২৩৪৫৬৭৮৯'.indexOf(digit))).replace(/ঢাকা/g, 'Dhaka');
+  for (const [bn, en] of Object.entries(labels).sort(([a], [b]) => b.length - a.length)) result = result.replaceAll(bn, en);
+  return result.replace('<html lang="bn">', '<html lang="en">');
+};
 
 const esc = (s: any) => String(s ?? '')
   .replace(/&/g, '&amp;')
@@ -7,16 +31,18 @@ const esc = (s: any) => String(s ?? '')
   .replace(/>/g, '&gt;')
   .replace(/"/g, '&quot;');
 
-export const movementTypeLabel = (type: string): string => {
+export const movementTypeLabel = (type: string, lang: Lang = 'bn'): string => {
+  const labels: Record<string, [string, string]> = {
+    SALE: ['বিক্রয়', 'Sale'], PURCHASE: ['ক্রয়', 'Purchase'], SRETURN: ['বিক্রয় ফেরত', 'Sales return'],
+    PRETURN: ['ক্রয় ফেরত', 'Purchase return'], OPENING: ['প্রারম্ভিক মজুদ', 'Opening stock'],
+    ADJUST: ['স্টক সমন্বয়', 'Stock adjustment'], DAMAGE: ['নষ্ট চাল', 'Damaged stock'],
+    SALE_EDIT_REVERSAL: ['বিক্রয় সংশোধন', 'Sale edit reversal'],
+    PURCHASE_EDIT_REVERSAL: ['ক্রয় সংশোধন', 'Purchase edit reversal'],
+  };
+  const key = type?.toUpperCase();
+  if (labels[key]) return labels[key][lang === 'bn' ? 0 : 1];
   switch (type?.toUpperCase()) {
-    case 'SALE': return 'বিক্রয়';
-    case 'PURCHASE': return 'ক্রয়';
-    case 'SRETURN': return 'বিক্রয় ফেরত';
-    case 'PRETURN': return 'ক্রয় ফেরত';
-    case 'OPENING': return 'প্রারম্ভিক মজুদ';
-    case 'ADJUST': return 'স্টক সমন্বয়';
-    case 'DAMAGE': return 'নষ্ট চাল';
-    default: return type || 'মুভমেন্ট';
+    default: return type || (lang === 'bn' ? 'মুভমেন্ট' : 'Movement');
   }
 };
 
@@ -47,6 +73,7 @@ export function exportStockExcel({
   totalBags,
   totalKg,
   totalValuation,
+  lang = 'bn',
 }: {
   activeTab: 'products' | 'movements';
   items: Array<{
@@ -72,6 +99,7 @@ export function exportStockExcel({
   totalBags: number;
   totalKg: number;
   totalValuation: number;
+  lang?: Lang;
 }): boolean {
   const dateStr = new Date().toISOString().slice(0, 10);
   const escapeCsv = (val: any) => {
@@ -117,7 +145,7 @@ export function exportStockExcel({
       Math.round(totalValuation),
     ].map(escapeCsv).join(','));
 
-    return downloadCSV(`chaler_stock_${dateStr}.csv`, lines.join('\r\n'));
+    return downloadCSV(`chaler_stock_${dateStr}.csv`, englishReport(lines.join('\r\n'), lang));
   } else {
     const lines: string[] = [
       ['চালের আড়ৎ - স্টক মুভমেন্ট বিবরণী'].map(escapeCsv).join(','),
@@ -136,7 +164,7 @@ export function exportStockExcel({
       ].map(escapeCsv).join(','));
     });
 
-    return downloadCSV(`chaler_stock_movements_${dateStr}.csv`, lines.join('\r\n'));
+    return downloadCSV(`chaler_stock_movements_${dateStr}.csv`, englishReport(lines.join('\r\n'), lang));
   }
 }
 
@@ -148,6 +176,7 @@ export function buildStockReportHTML({
   totalKg,
   totalValuation,
   searchQuery,
+  lang = 'bn',
 }: {
   activeTab: 'products' | 'movements';
   items: Array<{
@@ -174,6 +203,7 @@ export function buildStockReportHTML({
   totalKg: number;
   totalValuation: number;
   searchQuery?: string;
+  lang?: Lang;
 }): string {
   const isProducts = activeTab === 'products';
   const now = new Date();
@@ -244,7 +274,7 @@ export function buildStockReportHTML({
     `
     : '';
 
-  return `<!DOCTYPE html>
+  const html = `<!DOCTYPE html>
 <html lang="bn">
 <head>
   <meta charset="utf-8" />
@@ -468,6 +498,7 @@ export function buildStockReportHTML({
   </script>
 </body>
 </html>`;
+  return englishReport(html, lang);
 }
 
 export function exportStockPDF({
@@ -478,6 +509,7 @@ export function exportStockPDF({
   totalKg,
   totalValuation,
   searchQuery,
+  lang = 'bn',
 }: {
   activeTab: 'products' | 'movements';
   items: Array<{
@@ -504,6 +536,7 @@ export function exportStockPDF({
   totalKg: number;
   totalValuation: number;
   searchQuery?: string;
+  lang?: Lang;
 }): boolean {
   if (typeof window === 'undefined') return false;
   const html = buildStockReportHTML({
@@ -514,6 +547,7 @@ export function exportStockPDF({
     totalKg,
     totalValuation,
     searchQuery,
+    lang,
   });
 
   const w = window.open('', '_blank');
