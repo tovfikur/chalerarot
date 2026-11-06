@@ -36,9 +36,81 @@ export type InvoiceLike = {
 };
 export type ReturnLike = { invoiceId: string | null; amount: number; settlement?: 'credit' | 'refund'; refundAmount?: number };
 export type PayLike = {
-  partyId: string; invoiceId: string | null; returnId: string | null;
+  id?: string; partyId: string; invoiceId: string | null; returnId: string | null;
   date: string; amount: number; createdAt?: Date | string | null;
+  allocationLocked?: boolean;
+  allocations?: { invoiceId: string; amount: number }[];
 };
+
+export type PaymentAllocation = { paymentId: string; amount: number };
+
+/** Return the payment rows contributing to each invoice, using the same
+ * dedicated-then-oldest-first rules as buildSettlement. This keeps invoice
+ * details auditable when a party-level payment is shared across old invoices.
+ */
+export function buildPaymentAllocations(
+  invoices: InvoiceLike[],
+  returns: ReturnLike[],
+  pays: PayLike[],
+): Map<string, PaymentAllocation[]> {
+  const returnTotals = new Map<string, number>();
+  const refundOffsets = new Map<string, number>();
+  for (const r of returns) {
+    if (!r.invoiceId) continue;
+    returnTotals.set(r.invoiceId, round2((returnTotals.get(r.invoiceId) ?? 0) + r.amount));
+    if (r.settlement === 'refund') refundOffsets.set(r.invoiceId, round2((refundOffsets.get(r.invoiceId) ?? 0) + (r.refundAmount ?? r.amount)));
+  }
+  const byId = new Map(invoices.map(invoice => [invoice.id, invoice]));
+  const out = new Map<string, PaymentAllocation[]>();
+  const dedicated = new Map<string, number>();
+  const floating: PayLike[] = [];
+  for (const payment of pays) {
+    if (payment.returnId) continue;
+    if (payment.allocations?.length) {
+      for (const allocation of payment.allocations) {
+        if (!byId.has(allocation.invoiceId)) continue;
+        const list = out.get(allocation.invoiceId) ?? [];
+        if (payment.id) list.push({ paymentId: payment.id, amount: allocation.amount });
+        out.set(allocation.invoiceId, list);
+        dedicated.set(allocation.invoiceId, round2((dedicated.get(allocation.invoiceId) ?? 0) + allocation.amount));
+      }
+      if (payment.allocationLocked) continue;
+    }
+    if (payment.invoiceId && byId.has(payment.invoiceId)) {
+      const list = out.get(payment.invoiceId) ?? [];
+      if (payment.id) list.push({ paymentId: payment.id, amount: payment.amount });
+      out.set(payment.invoiceId, list);
+      dedicated.set(payment.invoiceId, round2((dedicated.get(payment.invoiceId) ?? 0) + payment.amount));
+    } else if (!payment.invoiceId && !payment.allocationLocked) floating.push(payment);
+  }
+  const byDate = (a: { date: string; createdAt?: Date | string | null; id?: string }, b: { date: string; createdAt?: Date | string | null; id?: string }) =>
+    a.date < b.date ? -1 : a.date > b.date ? 1
+    : stamp(a.createdAt) < stamp(b.createdAt) ? -1 : stamp(a.createdAt) > stamp(b.createdAt) ? 1
+    : (a.id ?? '') < (b.id ?? '') ? -1 : (a.id ?? '') > (b.id ?? '') ? 1 : 0;
+  const orderedInvoices = [...invoices].sort(byDate);
+  const orderedPayments = floating.sort(byDate);
+  let paymentIndex = 0;
+  let paymentLeft = orderedPayments.length ? Math.max(0, orderedPayments[0].amount) : 0;
+  for (const invoice of orderedInvoices) {
+    let need = round2(invoice.total - (returnTotals.get(invoice.id) ?? 0) - (dedicated.get(invoice.id) ?? 0) + (refundOffsets.get(invoice.id) ?? 0));
+    while (need > 0 && paymentIndex < orderedPayments.length) {
+      const payment = orderedPayments[paymentIndex];
+      const take = Math.min(need, paymentLeft);
+      if (payment.id && take > 0) {
+        const list = out.get(invoice.id) ?? [];
+        list.push({ paymentId: payment.id, amount: round2(take) });
+        out.set(invoice.id, list);
+      }
+      need = round2(need - take);
+      paymentLeft = round2(paymentLeft - take);
+      if (paymentLeft <= 0) {
+        paymentIndex++;
+        paymentLeft = paymentIndex < orderedPayments.length ? Math.max(0, orderedPayments[paymentIndex].amount) : 0;
+      }
+    }
+  }
+  return out;
+}
 
 const stamp = (d?: Date | string | null) =>
   d instanceof Date ? d.toISOString() : String(d ?? '');
@@ -111,10 +183,14 @@ export function buildSettlement(
     // single credit; only the return row is attributed, so memo rows must
     // never float into the pool (that would double-count them).
     if (p.returnId) continue;
+    if (p.allocations?.length) {
+      for (const allocation of p.allocations) slot(p.partyId).dedicated.push({ invoiceId: allocation.invoiceId, amount: allocation.amount });
+      if (p.allocationLocked) continue;
+    }
     if (p.invoiceId) {
       const inv = byId.get(p.invoiceId);
       slot(inv ? inv.partyId : p.partyId).dedicated.push({ invoiceId: p.invoiceId, amount: p.amount });
-    } else {
+    } else if (!p.allocationLocked) {
       slot(p.partyId).floating.push({ date: p.date, createdAt: p.createdAt, amount: p.amount });
     }
   }
@@ -142,8 +218,8 @@ export async function settleAll(
       select: { saleId: true, purchaseId: true, totalAmount: true, settlement: true, refundAmount: true },
     }),
     kind === 'sale'
-      ? client.customerPayment.findMany({ where: { active: true }, select: { customerId: true, saleId: true, returnId: true, date: true, amount: true, createdAt: true } })
-      : client.vendorPayment.findMany({ where: { active: true }, select: { vendorId: true, purchaseId: true, returnId: true, date: true, amount: true, createdAt: true } }),
+      ? client.customerPayment.findMany({ where: { active: true }, select: { id: true, customerId: true, saleId: true, returnId: true, date: true, amount: true, createdAt: true, allocationLocked: true, allocations: { select: { saleId: true, amount: true } } } })
+      : client.vendorPayment.findMany({ where: { active: true }, select: { id: true, vendorId: true, purchaseId: true, returnId: true, date: true, amount: true, createdAt: true, allocationLocked: true, allocations: { select: { purchaseId: true, amount: true } } } }),
   ]);
   return buildSettlement(
     invoices.map(inv => ({
@@ -164,6 +240,8 @@ export async function settleAll(
       invoiceId: (p as { saleId?: string | null }).saleId ?? (p as { purchaseId?: string | null }).purchaseId ?? null,
       returnId: p.returnId ?? null,
       date: p.date, amount: p.amount, createdAt: p.createdAt,
+      allocationLocked: p.allocationLocked,
+      allocations: p.allocations.map((allocation: any) => ({ invoiceId: allocation.saleId ?? allocation.purchaseId, amount: allocation.amount })),
     })),
   );
 }
@@ -193,11 +271,11 @@ export async function settleParty(
   const pays = kind === 'sale'
     ? await client.customerPayment.findMany({
         where: { customerId: partyId, active: true },
-        select: { saleId: true, returnId: true, date: true, amount: true, createdAt: true },
+        select: { saleId: true, returnId: true, date: true, amount: true, createdAt: true, allocationLocked: true, allocations: { select: { saleId: true, amount: true } } },
       })
     : await client.vendorPayment.findMany({
         where: { vendorId: partyId, active: true },
-        select: { purchaseId: true, returnId: true, date: true, amount: true, createdAt: true },
+        select: { purchaseId: true, returnId: true, date: true, amount: true, createdAt: true, allocationLocked: true, allocations: { select: { purchaseId: true, amount: true } } },
       });
   return buildSettlement(
     invoices.map(inv => ({ id: inv.id, partyId, date: inv.date, total: inv.total, createdAt: inv.createdAt })),
@@ -210,6 +288,8 @@ export async function settleParty(
       invoiceId: (p as { saleId?: string | null }).saleId ?? (p as { purchaseId?: string | null }).purchaseId ?? null,
       returnId: p.returnId ?? null,
       date: p.date, amount: p.amount, createdAt: p.createdAt,
+      allocationLocked: p.allocationLocked,
+      allocations: p.allocations.map((allocation: any) => ({ invoiceId: allocation.saleId ?? allocation.purchaseId, amount: allocation.amount })),
     })),
   );
 }

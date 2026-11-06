@@ -1,4 +1,5 @@
 import React, { useState, useMemo, useEffect, useRef } from 'react';
+import { localeDigits } from '../bn';
 import {
   View,
   Text,
@@ -50,6 +51,8 @@ import {
   JournalEntryModal,
   ChartOfAccountsModal,
   DateField,
+  MoneyTransferModal,
+  MoneyEntry,
 } from '../screens';
 
 interface AccountsDashboardProps {
@@ -96,6 +99,7 @@ export function AccountsDashboard({ go, focus, onFocusDone }: AccountsDashboardP
     sales = [],
     purchases = [],
     cTx = [],
+    vTx = [],
     returns = [],
     products = [],
     moneyAccounts = [],
@@ -104,6 +108,7 @@ export function AccountsDashboard({ go, focus, onFocusDone }: AccountsDashboardP
     deleteExpense,
     loadFinance,
     financePeriod,
+    refresh,
   } = useApp();
 
   const m = useMoney();
@@ -121,6 +126,9 @@ export function AccountsDashboard({ go, focus, onFocusDone }: AccountsDashboardP
   const [fltPreset, setFltPreset] = useState<'today' | 'last7' | 'thisMonth' | 'last3m' | 'thisYear' | 'custom'>('thisMonth');
   const [flt, setFlt] = useState<AcctFilter>(() => presetRange('thisMonth', today()));
   const [fltModalOpen, setFltModalOpen] = useState(false);
+  const [moneyEntry, setMoneyEntry] = useState<'in' | 'out' | null>(null);
+  const [transferModalOpen, setTransferModalOpen] = useState(false);
+  const [accountRefresh, setAccountRefresh] = useState(0);
 
   // Focus effect for navigation from outside
   useEffect(() => {
@@ -152,6 +160,16 @@ export function AccountsDashboard({ go, focus, onFocusDone }: AccountsDashboardP
       on = false;
     };
   }, [finKey]);
+
+  const [rangeAccounts, setRangeAccounts] = useState<MoneyAccountRow[]>([]);
+  const [accountsFor, setAccountsFor] = useState('');
+  useEffect(() => {
+    let on = true;
+    api.moneyAccountsAsOf(flt.to).then(result => {
+      if (on) { setRangeAccounts(result.accounts); setAccountsFor(flt.to); }
+    }).catch(() => { if (on) setAccountsFor(''); });
+    return () => { on = false; };
+  }, [flt.to, accountRefresh]);
 
   const f: PeriodFinance | null = finFor === finKey ? financePeriod : null;
 
@@ -223,6 +241,10 @@ export function AccountsDashboard({ go, focus, onFocusDone }: AccountsDashboardP
   const totalLiquidMoney = useMemo(() => {
     return moneyAccounts.reduce((sum, a) => sum + (a.balance || 0), 0);
   }, [moneyAccounts]);
+  const filteredAccountsReady = accountsFor === flt.to;
+  const filteredCashBalance = filteredAccountsReady ? rangeAccounts.filter(a => a.type === 'cash').reduce((sum, a) => sum + (a.balance || 0), 0) : 0;
+  const filteredBankBalance = filteredAccountsReady ? rangeAccounts.filter(a => a.type === 'bank').reduce((sum, a) => sum + (a.balance || 0), 0) : 0;
+  const fPayment = useMemo(() => vTx.filter(x => x.kind === 'payment' && inPeriod(x.date)).reduce((sum, x) => sum + x.amount, 0), [vTx, flt]);
 
   // Customer Receivables (পাওনা)
   const customerDues = useMemo(() => {
@@ -425,9 +447,9 @@ export function AccountsDashboard({ go, focus, onFocusDone }: AccountsDashboardP
     };
     const moneyRow = (label: string, value: number): ReportRow => ({ label, right: m(value) });
     const sections: ReportDoc['sections'] = activeTab === 'due'
-      ? [{ title: titles.due, rows: customerDues.map(x => ({ label: x.customer.name, sub: x.customer.mobile, right: m(x.balance) })) }]
+      ? [{ title: titles.due, rows: customerDues.map(x => ({ label: x.customer.name, sub: localeDigits(x.customer.mobile, lang), right: m(x.balance) })) }]
       : activeTab === 'pay'
-      ? [{ title: titles.pay, rows: vendorPayables.map(x => ({ label: x.vendor.name, sub: x.vendor.mobile, right: m(x.balance) })) }]
+      ? [{ title: titles.pay, rows: vendorPayables.map(x => ({ label: x.vendor.name, sub: localeDigits(x.vendor.mobile, lang), right: m(x.balance) })) }]
       : activeTab === 'expense'
       ? [{ title: titles.expense, rows: filteredExpensesList.map(x => ({ label: x.category === 'other' && x.customName ? x.customName : x.category, sub: `${x.capitalized ? (lang === 'bn' ? 'মজুদে অন্তর্ভুক্ত' : 'Capitalized to inventory') + ' · ' : ''}${x.date}${x.note ? ` · ${x.note}` : ''}`, right: m(x.amount) })) }]
       : [{ title: titles[activeTab], rows: [
@@ -818,6 +840,14 @@ export function AccountsDashboard({ go, focus, onFocusDone }: AccountsDashboardP
 
         {/* Quick Action Toolbar */}
         <View style={styles.headerRight}>
+          <TouchableOpacity style={styles.headerActionBtnWhite} onPress={() => setMoneyEntry('in')} activeOpacity={0.85}>
+            <AppIcon name={icons.moneyIn} size={16} iconColor="#168A64" />
+            <Text style={styles.headerActionBtnWhiteText}>{lang === 'bn' ? 'জমা' : 'Deposit'}</Text>
+          </TouchableOpacity>
+          <TouchableOpacity style={styles.headerActionBtnTranslucent} onPress={() => setMoneyEntry('out')} activeOpacity={0.85}>
+            <AppIcon name={icons.moneyOut} size={16} iconColor="#FFFFFF" />
+            <Text style={styles.headerActionBtnTranslucentText}>{lang === 'bn' ? 'উত্তোলন' : 'Withdraw'}</Text>
+          </TouchableOpacity>
           <TouchableOpacity
             style={styles.headerActionBtnWhite}
             onPress={() => go?.('collect')}
@@ -842,7 +872,7 @@ export function AccountsDashboard({ go, focus, onFocusDone }: AccountsDashboardP
 
           <TouchableOpacity
             style={styles.headerActionBtnTranslucent}
-            onPress={() => go?.('bank')}
+            onPress={() => setTransferModalOpen(true)}
             activeOpacity={0.85}
           >
             <AppIcon name={icons.transfer} size={16} iconColor="#FFFFFF" />
@@ -1609,18 +1639,19 @@ export function AccountsDashboard({ go, focus, onFocusDone }: AccountsDashboardP
           </View>
           <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 12, marginBottom: 18 }}>
             {([
-              { title: lang === 'bn' ? 'নগদ ও ব্যাংক' : 'Bank & cash', value: totalLiquidMoney, icon: icons.bankCash, color: '#167D68', bg: '#E7F5F0', tab: 'bank' },
-              { title: lang === 'bn' ? 'গ্রাহকের পাওনা' : 'Receivables', value: totalDueAmount, icon: icons.customers, color: '#2863C7', bg: '#EAF1FF', tab: 'due' },
-              { title: lang === 'bn' ? 'সরবরাহকারীর দেনা' : 'Payables', value: totalPayableAmount, icon: icons.vendors, color: '#BD5A37', bg: '#FFF0E9', tab: 'pay' },
               { title: lang === 'bn' ? 'বিক্রয়' : 'Sales', value: fSale, icon: icons.sale, color: '#168A64', bg: '#E8F7EF', tab: 'sale' },
               { title: lang === 'bn' ? 'ক্রয়' : 'Purchases', value: f?.netPurchase ?? 0, icon: icons.purchase, color: '#5B63B7', bg: '#EFF0FF', tab: 'purchase' },
               { title: lang === 'bn' ? 'খরচ' : 'Expenses', value: fExp, icon: icons.expense, color: '#C6811D', bg: '#FFF5E5', tab: 'expense' },
+              { title: t('collect'), value: fCollect, icon: icons.collect, color: '#087E8B', bg: '#E6F7F8', tab: 'collect' },
+              { title: t('pay'), value: fPayment, icon: icons.pay, color: '#B45309', bg: '#FFF4E5', tab: 'pay' },
+              { title: lang === 'bn' ? 'নগদ' : 'Cash', value: filteredCashBalance, icon: icons.cash, color: '#168A64', bg: '#E8F7EF', tab: 'bank' },
+              { title: lang === 'bn' ? 'ব্যাংক' : 'Bank', value: filteredBankBalance, icon: icons.bank, color: '#2863C7', bg: '#EAF1FF', tab: 'bank' },
             ] as const).map(card => (
-              <TouchableOpacity key={card.title} onPress={() => ['sale', 'purchase', 'bank', 'expense'].includes(card.tab) ? go?.(card.tab) : setActiveTab(card.tab as any)} activeOpacity={0.82}
+              <TouchableOpacity key={card.title} onPress={() => card.tab === 'expense' ? setActiveTab('expense') : card.tab === 'collect' ? go?.('collect') : card.tab === 'pay' ? go?.('pay') : go?.(card.tab)} activeOpacity={0.82}
                 style={{ flexGrow: 1, flexBasis: isMobile ? '45%' : 200, minWidth: isMobile ? 145 : 190, backgroundColor: '#FFFFFF', borderRadius: 18, padding: 17, borderWidth: 1, borderColor: '#E5EAF0', shadowColor: '#102A43', shadowOpacity: 0.04, shadowRadius: 8, elevation: 1 }}>
                 <View style={{ width: 40, height: 40, borderRadius: 13, backgroundColor: card.bg, alignItems: 'center', justifyContent: 'center', marginBottom: 13 }}><AppIcon name={card.icon} size={20} iconColor={card.color} /></View>
                 <Text style={{ color: '#64748B', fontSize: 13, fontWeight: '600' }}>{card.title}</Text>
-                <Text numberOfLines={1} adjustsFontSizeToFit style={{ color: '#102A43', fontSize: 22, fontWeight: '800', marginTop: 6 }}>{m(card.value)}</Text>
+                <Text numberOfLines={1} adjustsFontSizeToFit style={{ color: '#102A43', fontSize: 22, fontWeight: '800', marginTop: 6 }}>{!filteredAccountsReady && card.tab === 'bank' ? '…' : m(card.value)}</Text>
               </TouchableOpacity>
             ))}
             <TouchableOpacity onPress={() => setActiveTab('reports')} activeOpacity={0.82}
@@ -1693,7 +1724,7 @@ export function AccountsDashboard({ go, focus, onFocusDone }: AccountsDashboardP
                   <View style={{ flex: 1 }}>
                     <Text style={styles.partyName}>{item.customer.name}</Text>
                     <Text style={styles.partyDetails}>
-                      {item.customer.mobile || (lang === 'bn' ? 'মোবাইল নেই' : 'No mobile')}
+                      {localeDigits(item.customer.mobile, lang) || (lang === 'bn' ? 'মোবাইল নেই' : 'No mobile')}
                       {item.customer.address ? ` • ${item.customer.address}` : ''}
                       {item.customer.next ? ` • ${lang === 'bn' ? 'পরবর্তী তাগাদা:' : 'Follow-up:'} ${fd(item.customer.next)}` : ''}
                     </Text>
@@ -1772,7 +1803,7 @@ export function AccountsDashboard({ go, focus, onFocusDone }: AccountsDashboardP
                   <View style={{ flex: 1 }}>
                     <Text style={styles.partyName}>{item.vendor.name}</Text>
                     <Text style={styles.partyDetails}>
-                      {item.vendor.mobile || (lang === 'bn' ? 'মোবাইল নেই' : 'No mobile')}
+                      {localeDigits(item.vendor.mobile, lang) || (lang === 'bn' ? 'মোবাইল নেই' : 'No mobile')}
                       {item.vendor.address ? ` • ${item.vendor.address}` : ''}
                     </Text>
                   </View>
@@ -1914,6 +1945,8 @@ export function AccountsDashboard({ go, focus, onFocusDone }: AccountsDashboardP
         />
       )}
       {chartModalOpen ? <ChartOfAccountsModal onClose={() => setChartModalOpen(false)} onSaved={() => setChartModalOpen(false)} /> : null}
+      {moneyEntry ? <MoneyEntry direction={moneyEntry} onClose={() => setMoneyEntry(null)} onSaved={async () => { await refresh(); setAccountRefresh(v => v + 1); }} /> : null}
+      {transferModalOpen ? <MoneyTransferModal onClose={() => { setTransferModalOpen(false); setAccountRefresh(v => v + 1); }} /> : null}
     </ScrollView>
   );
 }

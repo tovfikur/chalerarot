@@ -130,7 +130,7 @@ async function build(req: Request, responseBody: any, actor: any) {
     : undefined) ?? number(b.totalAmount) ?? number(b.amount)
     ?? number(body.amount) ?? number(body.paid) ?? number(body.openingBalance);
   const reference = text(
-    b.invoiceNo ?? b.transferNo ?? b.returnNo ?? b.voucherNo ?? b.sourceId ?? b.code ?? b.email ?? b.name
+    b.paymentNo ?? b.invoiceNo ?? b.transferNo ?? b.returnNo ?? b.voucherNo ?? b.sourceId ?? b.code ?? b.email ?? b.name
     ?? body.invoiceNo ?? body.code ?? body.email ?? body.name,
   );
   const entityId = text(b.id ?? b.account?.id ?? pathId(req.method, path));
@@ -143,13 +143,15 @@ async function build(req: Request, responseBody: any, actor: any) {
   put('date', body.date ?? b.date);
   put('note', action === 'edit' && (entity === 'sale' || entity === 'purchase')
     ? 'Confirmed invoice edit reposted stock and payments under the original transaction number.'
-    : body.note ?? b.note);
+    : body.paymentNote ?? body.note ?? b.note);
   put('method', body.method ?? b.method);
   put('direction', body.direction ?? b.direction);
   put('role', b.role ?? body.role);
   put('active', typeof b.active === 'boolean' ? b.active : body.active);
   put('items', Array.isArray(body.lines) ? body.lines.length : Array.isArray(body.items) ? body.items.length : undefined);
   put('paid', number(body.paid));
+  put('advanceApplied', number(b.advanceApplied) ?? number(body.advanceToApply));
+  put('paymentNo', b.paymentNo);
   if (entity === 'moneyEntry' && action === 'update') {
     put('previousAmount', number(b.previousAmount));
     put('note', b.note);

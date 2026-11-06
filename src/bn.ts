@@ -14,6 +14,13 @@ export const toEnDigits = (s: string | number | null | undefined): string => {
   return String(s).replace(/[০-৯]/g, d => String(BN_DIGITS.indexOf(d)));
 };
 
+// Phone/contact values stay as stored; only the visible digit glyphs follow
+// the selected app language.
+export const localeDigits = (value: string | number | null | undefined, lang: 'bn' | 'en'): string => {
+  const english = toEnDigits(value);
+  return lang === 'bn' ? toBnDigits(english) : english;
+};
+
 // Removes thousands separators (`,`), leaving digits, `.` and `-` only.
 export const normalizeInput = (s: string) => toEnDigits(s).replace(/,/g, '');
 

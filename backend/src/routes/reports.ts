@@ -7,6 +7,7 @@ import { buildSettlement } from '../settlement';
 import { seedChart } from './accounting';
 
 const sum = (a: { amount: number }[]) => a.reduce((s, x) => s + x.amount, 0);
+const round2 = (n: number) => Math.round(n * 100) / 100;
 
 const moneyAccountLedgerName = (account?: { name: string; type: string } | null) => {
   if (!account) return 'Cash: Unassigned';
@@ -145,6 +146,133 @@ reports.get('/balance-sheet', async (req: Request, res: Response) => {
   res.json({ asOf, assets: { cash, bank, wallets, receivables, supplierAdvances, inventory, other: otherAssets, total: assets }, liabilities: { payables: payablesFinal, customerCredits, other: otherLiabilities, total: totalLiabilities }, equity, journalEquity, otherEquity, accounts: accountBreakdown, totalLiabilitiesAndEquity, balanced });
 });
 
+type AdvancePostings = {
+  customerPaymentApplied: Map<string, number>;
+  vendorPaymentApplied: Map<string, number>;
+  saleAdvanceApplied: Map<string, number>;
+  purchaseAdvanceApplied: Map<string, number>;
+  saleReturnReceivable: Map<string, number>;
+  purchaseReturnPayable: Map<string, number>;
+};
+
+/** Split party payments into receivable/payable settlement and advance
+ * balances in transaction order. These are the same customer credits and
+ * supplier advances that the balance sheet derives from the party ledgers.
+ */
+async function computeAdvancePostings(to: string): Promise<AdvancePostings> {
+  const [customers, vendors, sales, purchases, customerPayments, vendorPayments, returns] = await Promise.all([
+    db.customer.findMany({ where: { deletedAt: null }, select: { id: true, openingDue: true } }),
+    db.vendor.findMany({ where: { deletedAt: null }, select: { id: true, openingPayable: true } }),
+    db.sale.findMany({ where: { date: { lte: to }, customerId: { not: null } }, select: { id: true, customerId: true, date: true, total: true, createdAt: true, advanceAllocationControlled: true } }),
+    db.purchase.findMany({ where: { date: { lte: to } }, select: { id: true, vendorId: true, date: true, total: true, createdAt: true, advanceAllocationControlled: true } }),
+    db.customerPayment.findMany({ where: { active: true, date: { lte: to } }, select: { id: true, customerId: true, saleId: true, returnId: true, date: true, amount: true, createdAt: true, allocationLocked: true, allocations: { select: { saleId: true, amount: true } } } }),
+    db.vendorPayment.findMany({ where: { active: true, date: { lte: to } }, select: { id: true, vendorId: true, purchaseId: true, returnId: true, date: true, amount: true, createdAt: true, allocationLocked: true, allocations: { select: { purchaseId: true, amount: true } } } }),
+    db.productReturn.findMany({ where: { date: { lte: to } }, select: { id: true, kind: true, saleId: true, purchaseId: true, customerId: true, vendorId: true, date: true, totalAmount: true, refundAmount: true, createdAt: true } }),
+  ]);
+  type Event = { partyId: string; date: string; at: number; order: number; kind: 'invoice' | 'return' | 'payment' | 'apply'; id: string; amount: number; controlled?: boolean };
+  const customerEvents: Event[] = [];
+  const vendorEvents: Event[] = [];
+  const time = (value: Date) => value.getTime();
+  const grouped = <T,>(rows: T[], keyOf: (row: T) => string | null) => {
+    const out = new Map<string, T[]>();
+    for (const row of rows) {
+      const key = keyOf(row);
+      if (!key) continue;
+      const group = out.get(key) ?? [];
+      group.push(row);
+      out.set(key, group);
+    }
+    return out;
+  };
+  const saleReturnsByInvoice = grouped(returns, row => row.saleId);
+  const purchaseReturnsByInvoice = grouped(returns, row => row.purchaseId);
+  const salePaymentsByInvoice = grouped(customerPayments, row => row.saleId);
+  const purchasePaymentsByInvoice = grouped(vendorPayments, row => row.purchaseId);
+
+  for (const invoice of sales) {
+    const partyId = invoice.customerId;
+    if (!partyId) continue;
+    customerEvents.push({ partyId, date: invoice.date, at: time(invoice.createdAt), order: 0, kind: 'invoice', id: invoice.id, amount: invoice.total });
+    const linkedReturns = saleReturnsByInvoice.get(invoice.id) ?? [];
+    const linkedPayments = (salePaymentsByInvoice.get(invoice.id) ?? []).filter(p => !p.returnId);
+    for (const ret of linkedReturns) customerEvents.push({ partyId, date: ret.date, at: time(ret.createdAt), order: 1, kind: 'return', id: ret.id, amount: Math.max(0, ret.totalAmount - ret.refundAmount) });
+    for (const payment of linkedPayments) customerEvents.push({ partyId, date: payment.date, at: time(payment.createdAt), order: 2, kind: 'payment', id: payment.id, amount: payment.amount });
+    const applyAt = Math.max(time(invoice.createdAt), ...linkedReturns.map(r => time(r.createdAt)), ...linkedPayments.map(p => time(p.createdAt))) + 1;
+    const advanceAllocation = customerPayments.reduce((sum, p) => sum + p.allocations.filter(a => a.saleId === invoice.id).reduce((n, a) => n + a.amount, 0), 0);
+    customerEvents.push({ partyId, date: invoice.date, at: applyAt, order: 3, kind: 'apply', id: invoice.id, amount: advanceAllocation, controlled: invoice.advanceAllocationControlled });
+  }
+  for (const payment of customerPayments) {
+    if (payment.customerId && !payment.saleId && !payment.returnId) customerEvents.push({ partyId: payment.customerId, date: payment.date, at: time(payment.createdAt), order: 2, kind: 'payment', id: payment.id, amount: payment.amount });
+  }
+  for (const ret of returns) {
+    if (ret.kind === 'sale' && ret.customerId && !ret.saleId) customerEvents.push({ partyId: ret.customerId, date: ret.date, at: time(ret.createdAt), order: 1, kind: 'return', id: ret.id, amount: Math.max(0, ret.totalAmount - ret.refundAmount) });
+  }
+
+  for (const invoice of purchases) {
+    const partyId = invoice.vendorId;
+    vendorEvents.push({ partyId, date: invoice.date, at: time(invoice.createdAt), order: 0, kind: 'invoice', id: invoice.id, amount: invoice.total });
+    const linkedReturns = purchaseReturnsByInvoice.get(invoice.id) ?? [];
+    const linkedPayments = (purchasePaymentsByInvoice.get(invoice.id) ?? []).filter(p => !p.returnId);
+    for (const ret of linkedReturns) vendorEvents.push({ partyId, date: ret.date, at: time(ret.createdAt), order: 1, kind: 'return', id: ret.id, amount: Math.max(0, ret.totalAmount - ret.refundAmount) });
+    for (const payment of linkedPayments) vendorEvents.push({ partyId, date: payment.date, at: time(payment.createdAt), order: 2, kind: 'payment', id: payment.id, amount: payment.amount });
+    const applyAt = Math.max(time(invoice.createdAt), ...linkedReturns.map(r => time(r.createdAt)), ...linkedPayments.map(p => time(p.createdAt))) + 1;
+    const advanceAllocation = vendorPayments.reduce((sum, p) => sum + p.allocations.filter(a => a.purchaseId === invoice.id).reduce((n, a) => n + a.amount, 0), 0);
+    vendorEvents.push({ partyId, date: invoice.date, at: applyAt, order: 3, kind: 'apply', id: invoice.id, amount: advanceAllocation, controlled: invoice.advanceAllocationControlled });
+  }
+  for (const payment of vendorPayments) {
+    if (!payment.purchaseId && !payment.returnId) vendorEvents.push({ partyId: payment.vendorId, date: payment.date, at: time(payment.createdAt), order: 2, kind: 'payment', id: payment.id, amount: payment.amount });
+  }
+  for (const ret of returns) {
+    if (ret.kind === 'purchase' && ret.vendorId && !ret.purchaseId) vendorEvents.push({ partyId: ret.vendorId, date: ret.date, at: time(ret.createdAt), order: 1, kind: 'return', id: ret.id, amount: Math.max(0, ret.totalAmount - ret.refundAmount) });
+  }
+
+  const sortEvents = (a: Event, b: Event) => a.date.localeCompare(b.date) || a.at - b.at || a.order - b.order || a.id.localeCompare(b.id);
+  const customerState = new Map(customers.map(row => [row.id, { due: Math.max(0, row.openingDue), advance: Math.max(0, -row.openingDue) }]));
+  const vendorState = new Map(vendors.map(row => [row.id, { due: Math.max(0, row.openingPayable), advance: Math.max(0, -row.openingPayable) }]));
+  const result: AdvancePostings = {
+    customerPaymentApplied: new Map(), vendorPaymentApplied: new Map(),
+    saleAdvanceApplied: new Map(), purchaseAdvanceApplied: new Map(),
+    saleReturnReceivable: new Map(), purchaseReturnPayable: new Map(),
+  };
+  for (const event of customerEvents.sort(sortEvents)) {
+    const state = customerState.get(event.partyId);
+    if (!state) continue;
+    if (event.kind === 'invoice') state.due = round2(state.due + event.amount);
+    else if (event.kind === 'return') {
+      const applied = round2(Math.min(state.due, event.amount));
+      state.due = round2(state.due - applied); state.advance = round2(state.advance + event.amount - applied);
+      result.saleReturnReceivable.set(event.id, applied);
+    } else if (event.kind === 'payment') {
+      const applied = round2(Math.min(state.due, event.amount));
+      state.due = round2(state.due - applied); state.advance = round2(state.advance + event.amount - applied);
+      result.customerPaymentApplied.set(event.id, applied);
+    } else {
+      const applied = round2(Math.min(state.due, state.advance, event.controlled ? event.amount : Number.POSITIVE_INFINITY));
+      state.due = round2(state.due - applied); state.advance = round2(state.advance - applied);
+      result.saleAdvanceApplied.set(event.id, applied);
+    }
+  }
+  for (const event of vendorEvents.sort(sortEvents)) {
+    const state = vendorState.get(event.partyId);
+    if (!state) continue;
+    if (event.kind === 'invoice') state.due = round2(state.due + event.amount);
+    else if (event.kind === 'return') {
+      const applied = round2(Math.min(state.due, event.amount));
+      state.due = round2(state.due - applied); state.advance = round2(state.advance + event.amount - applied);
+      result.purchaseReturnPayable.set(event.id, applied);
+    } else if (event.kind === 'payment') {
+      const applied = round2(Math.min(state.due, event.amount));
+      state.due = round2(state.due - applied); state.advance = round2(state.advance + event.amount - applied);
+      result.vendorPaymentApplied.set(event.id, applied);
+    } else {
+      const applied = round2(Math.min(state.due, state.advance, event.controlled ? event.amount : Number.POSITIVE_INFINITY));
+      state.due = round2(state.due - applied); state.advance = round2(state.advance - applied);
+      result.purchaseAdvanceApplied.set(event.id, applied);
+    }
+  }
+  return result;
+}
+
 async function deriveJournalRows(from: string, to: string) {
   const [sales, purchases, expenses, returns, payments, accounts, customers, vendors, stockAdjustments, savedEntries, linkedCashAccounts] = await Promise.all([
     db.sale.findMany({ where: { date: { gte: from, lte: to } }, include: { items: true } }),
@@ -161,6 +289,7 @@ async function deriveJournalRows(from: string, to: string) {
   ]);
   const linkedName = new Map(linkedCashAccounts.map(a => [a.moneyAccountId!, a.name]));
   const cashLedgerName = (a?: { id?: string; name: string; type: string } | null) => a?.id ? linkedName.get(a.id) ?? moneyAccountLedgerName(a) : moneyAccountLedgerName(a);
+  const advancePostings = await computeAdvancePostings(to);
   const rows: { date: string; reference: string; account: string; accountId?: string; description: string; debit: number; credit: number; journalNo: string; sequence: number; entryId?: string; editable?: boolean; sourceType?: string; sourceId?: string | null; sourceRef?: string | null }[] = [];
   const add = (date: string, reference: string, account: string, description: string, debit: number, credit: number) => {
     if (date < from || date > to) return;
@@ -174,16 +303,37 @@ async function deriveJournalRows(from: string, to: string) {
       add(date, `OPEN-${a.id}`, a.openingBalance > 0 ? 'Owner equity' : moneyAccount, 'Account opening balance', 0, amount);
     }
   }
-  for (const c of customers) { add('0001-01-01', `OPEN-C-${c.id}`, 'Accounts receivable', 'Customer opening due', c.openingDue, 0); add('0001-01-01', `OPEN-C-${c.id}`, 'Owner equity', 'Customer opening due', 0, c.openingDue); }
-  for (const v of vendors) { add('0001-01-01', `OPEN-V-${v.id}`, 'Owner equity', 'Vendor opening payable', v.openingPayable, 0); add('0001-01-01', `OPEN-V-${v.id}`, 'Accounts payable', 'Vendor opening payable', 0, v.openingPayable); }
+  for (const c of customers) {
+    const amount = Math.abs(c.openingDue);
+    if (c.openingDue >= 0) { add('0001-01-01', `OPEN-C-${c.id}`, 'Accounts receivable', 'Customer opening due', amount, 0); add('0001-01-01', `OPEN-C-${c.id}`, 'Owner equity', 'Customer opening due', 0, amount); }
+    else { add('0001-01-01', `OPEN-C-${c.id}`, 'Owner equity', 'Customer opening advance', amount, 0); add('0001-01-01', `OPEN-C-${c.id}`, 'Customer credits', 'Customer opening advance', 0, amount); }
+  }
+  for (const v of vendors) {
+    const amount = Math.abs(v.openingPayable);
+    if (v.openingPayable >= 0) { add('0001-01-01', `OPEN-V-${v.id}`, 'Owner equity', 'Vendor opening payable', amount, 0); add('0001-01-01', `OPEN-V-${v.id}`, 'Accounts payable', 'Vendor opening payable', 0, amount); }
+    else { add('0001-01-01', `OPEN-V-${v.id}`, 'Supplier advances', 'Supplier opening advance', amount, 0); add('0001-01-01', `OPEN-V-${v.id}`, 'Owner equity', 'Supplier opening advance', 0, amount); }
+  }
   for (const s of stockAdjustments) {
     const isDebit = s.value >= 0; const amount = Math.abs(s.value); const counterpart = s.type === 'OPENING' ? 'Owner equity' : 'Inventory adjustments';
     const description = s.type === 'ADJUSTMENT' ? `Stock audit adjustment · ${s.refId ?? s.id}` : `${s.type.toLowerCase()} stock valuation`;
     add(s.date, s.refId ?? s.id, isDebit ? 'Inventory' : counterpart, description, isDebit ? amount : 0, isDebit ? 0 : amount);
     add(s.date, s.refId ?? s.id, isDebit ? counterpart : 'Inventory', description, isDebit ? 0 : amount, isDebit ? amount : 0);
   }
-  for (const s of sales) { const ref = s.invoiceNo ?? s.id; const cogs = s.items.reduce((n, i) => n + i.cogs, 0); add(s.date, ref, 'Accounts receivable', 'Credit sale', s.total, 0); add(s.date, ref, 'Sales revenue', 'Sale', 0, s.total); if (cogs) { add(s.date, ref, 'Cost of goods sold', 'AVCO cost at sale', cogs, 0); add(s.date, ref, 'Inventory', 'Stock issued', 0, cogs); } }
-  for (const p of purchases) { const ref = p.invoiceNo ?? p.id; add(p.date, ref, 'Inventory', 'Purchase at invoice cost', p.total, 0); add(p.date, ref, 'Accounts payable', 'Purchase invoice', 0, p.total); }
+  for (const s of sales) {
+    const ref = s.invoiceNo ?? s.id; const cogs = s.items.reduce((n, i) => n + i.cogs, 0);
+    add(s.date, ref, 'Accounts receivable', 'Credit sale', s.total, 0);
+    add(s.date, ref, 'Sales revenue', 'Sale', 0, s.total);
+    const advanceApplied = advancePostings.saleAdvanceApplied.get(s.id) ?? 0;
+    if (advanceApplied > 0) { add(s.date, ref, 'Customer credits', 'Apply customer advance to invoice', advanceApplied, 0); add(s.date, ref, 'Accounts receivable', 'Apply customer advance to invoice', 0, advanceApplied); }
+    if (cogs) { add(s.date, ref, 'Cost of goods sold', 'AVCO cost at sale', cogs, 0); add(s.date, ref, 'Inventory', 'Stock issued', 0, cogs); }
+  }
+  for (const p of purchases) {
+    const ref = p.invoiceNo ?? p.id;
+    add(p.date, ref, 'Inventory', 'Purchase at invoice cost', p.total, 0);
+    add(p.date, ref, 'Accounts payable', 'Purchase invoice', 0, p.total);
+    const advanceApplied = advancePostings.purchaseAdvanceApplied.get(p.id) ?? 0;
+    if (advanceApplied > 0) { add(p.date, ref, 'Accounts payable', 'Apply supplier advance to invoice', advanceApplied, 0); add(p.date, ref, 'Supplier advances', 'Apply supplier advance to invoice', 0, advanceApplied); }
+  }
   for (const e of expenses) {
     const movement = payments.find(m => m.sourceType === 'expense' && m.sourceId === e.id);
     add(e.date, e.voucherNo ?? e.id, e.capitalized ? 'Inventory' : 'Operating expenses', e.capitalized ? 'Capitalized landed cost' : `Expense · ${e.category}`, e.amount, 0);
@@ -197,12 +347,18 @@ async function deriveJournalRows(from: string, to: string) {
       const refund = Math.min(r.totalAmount, r.refundAmount);
       add(r.date, ref, 'Sales returns', 'Sales return / credit', r.totalAmount, 0);
       if (refund) add(r.date, ref, refundAccount, 'Customer refund', 0, refund);
-      if (r.totalAmount > refund) add(r.date, ref, 'Accounts receivable', 'Customer credit', 0, r.totalAmount - refund);
+      const netCredit = r.totalAmount - refund;
+      const receivableCredit = advancePostings.saleReturnReceivable.get(r.id) ?? netCredit;
+      if (receivableCredit > 0) add(r.date, ref, 'Accounts receivable', 'Customer credit', 0, receivableCredit);
+      if (netCredit - receivableCredit > 0) add(r.date, ref, 'Customer credits', 'Customer return credit', 0, netCredit - receivableCredit);
       const stockCost = r.items.reduce((n, i) => n + i.cogs, 0);
       if (stockCost) { add(r.date, ref, 'Inventory', 'Returned goods at original AVCO', stockCost, 0); add(r.date, ref, 'Cost of goods sold', 'Reverse returned goods cost', 0, stockCost); }
     } else {
       const refund = Math.min(r.totalAmount, r.refundAmount);
-      if (r.totalAmount > refund) add(r.date, ref, 'Accounts payable', 'Purchase return credit', r.totalAmount - refund, 0);
+      const netCredit = r.totalAmount - refund;
+      const payableDebit = advancePostings.purchaseReturnPayable.get(r.id) ?? netCredit;
+      if (payableDebit > 0) add(r.date, ref, 'Accounts payable', 'Purchase return credit', payableDebit, 0);
+      if (netCredit - payableDebit > 0) add(r.date, ref, 'Supplier advances', 'Supplier return credit', netCredit - payableDebit, 0);
       if (refund) add(r.date, ref, refundAccount, 'Supplier refund', refund, 0);
       add(r.date, ref, 'Inventory', 'Purchase return', 0, r.totalAmount);
     }
@@ -212,8 +368,18 @@ async function deriveJournalRows(from: string, to: string) {
     const cashAccount = cashLedgerName(m.moneyAccount ?? { name: m.method, type: m.method });
     if (m.sourceType === 'sale') { add(m.date, ref, cashAccount, 'Sale receipt', m.amount, 0); add(m.date, ref, 'Accounts receivable', 'Receipt applied', 0, m.amount); }
     else if (m.sourceType === 'purchase') { add(m.date, ref, 'Accounts payable', 'Supplier payment', m.amount, 0); add(m.date, ref, cashAccount, 'Purchase payment', 0, m.amount); }
-    else if (m.sourceType === 'customerPayment') { add(m.date, ref, cashAccount, 'Customer receipt', m.amount, 0); add(m.date, ref, 'Accounts receivable', 'Customer receipt applied', 0, m.amount); }
-    else if (m.sourceType === 'vendorPayment') { add(m.date, ref, 'Accounts payable', 'Vendor payment', m.amount, 0); add(m.date, ref, cashAccount, 'Vendor payment', 0, m.amount); }
+    else if (m.sourceType === 'customerPayment') {
+      const applied = advancePostings.customerPaymentApplied.get(m.sourceId) ?? m.amount;
+      add(m.date, ref, cashAccount, 'Customer receipt', m.amount, 0);
+      if (applied > 0) add(m.date, ref, 'Accounts receivable', 'Customer receipt applied', 0, applied);
+      if (m.amount - applied > 0) add(m.date, ref, 'Customer credits', 'Customer advance received', 0, m.amount - applied);
+    }
+    else if (m.sourceType === 'vendorPayment') {
+      const applied = advancePostings.vendorPaymentApplied.get(m.sourceId) ?? m.amount;
+      if (applied > 0) add(m.date, ref, 'Accounts payable', 'Vendor payment', applied, 0);
+      if (m.amount - applied > 0) add(m.date, ref, 'Supplier advances', 'Supplier advance paid', m.amount - applied, 0);
+      add(m.date, ref, cashAccount, 'Vendor payment', 0, m.amount);
+    }
     else if (m.sourceType === 'expense') continue; // expense document posts the matching cash line below
     else if (m.sourceType === 'saleReturn' || m.sourceType === 'purchaseReturn') continue; // return document owns the posting
     else if (m.sourceType === 'transferOut') add(m.date, ref, cashAccount, 'Account transfer out', 0, m.amount);
@@ -509,7 +675,8 @@ reports.get('/accounts/receivables/:id', async (req: Request, res: Response) => 
   );
   const pays = allPays.filter(p => !p.saleId);
   const saleTotal = sales.reduce((s, x) => s + x.total - saleRets.filter(r => r.saleId === x.id).reduce((total, r) => total + r.totalAmount, 0), 0);
-  const salePaid = [...st.values()].reduce((s, x) => s + x.paid, 0);
+  const salePaid = allPays.filter(p => !p.returnId).reduce((sum, payment) => sum + payment.amount, 0);
+  const saleRefunds = saleRets.reduce((sum, ret) => sum + ret.refundAmount, 0);
   res.json({
     party: { id: c.id, name: c.name, mobile: c.mobile, opening: c.openingDue, next: c.nextDate ?? undefined },
     opening: c.openingDue,
@@ -527,7 +694,7 @@ reports.get('/accounts/receivables/:id', async (req: Request, res: Response) => 
     payments: pays.map(p => ({ id: p.id, amount: p.amount, date: p.date, note: p.note ?? undefined })),
     totalSales: saleTotal,
     totalPaid: Math.round(salePaid * 100) / 100,
-      balance: Math.round((c.openingDue + saleTotal - salePaid) * 100) / 100,
+    balance: Math.round((c.openingDue + saleTotal + saleRefunds - salePaid) * 100) / 100,
   });
 });
 
@@ -556,7 +723,8 @@ reports.get('/accounts/payables/:id', async (req: Request, res: Response) => {
   );
   const pays = allPays.filter(p => !p.purchaseId);
   const purTotal = purs.reduce((s, x) => s + x.total - purRets.filter(r => r.purchaseId === x.id).reduce((total, r) => total + r.totalAmount, 0), 0);
-  const purPaid = [...st.values()].reduce((s, x) => s + x.paid, 0);
+  const purPaid = allPays.filter(p => !p.returnId).reduce((sum, payment) => sum + payment.amount, 0);
+  const purRefunds = purRets.reduce((sum, ret) => sum + ret.refundAmount, 0);
   res.json({
     party: { id: v.id, name: v.name, mobile: v.mobile, opening: v.openingPayable, next: v.nextDate ?? undefined },
     opening: v.openingPayable,
@@ -574,7 +742,7 @@ reports.get('/accounts/payables/:id', async (req: Request, res: Response) => {
     payments: pays.map(p => ({ id: p.id, amount: p.amount, date: p.date, note: p.note ?? undefined })),
     totalPurchase: purTotal,
     totalPaid: Math.round(purPaid * 100) / 100,
-    balance: Math.round((v.openingPayable + purTotal - purPaid) * 100) / 100,
+    balance: Math.round((v.openingPayable + purTotal + purRefunds - purPaid) * 100) / 100,
   });
 });
 // GET /api/accounts/receivables — customers with balance > 0

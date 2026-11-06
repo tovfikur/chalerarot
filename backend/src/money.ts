@@ -126,6 +126,12 @@ export async function lockAccount(t: TxClient, accountId: string): Promise<void>
   await t.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${accountId}))`;
 }
 
+/** One global trace code sequence for every money movement in the system. */
+export async function nextMoneyTransactionNo(t: TxClient): Promise<string> {
+  const rows = await t.$queryRaw<{ last: number }[]>`INSERT INTO "Sequence"("key", "last") VALUES ('TXN', 1) ON CONFLICT ("key") DO UPDATE SET "last" = "Sequence"."last" + 1 RETURNING "last"`;
+  return `TXN-${String(rows[0].last).padStart(6, '0')}`;
+}
+
 /**
  * Record one actual money movement. Called inside the same transaction as the
  * business document so the ledger can never drift from sales/due totals.
@@ -141,6 +147,7 @@ export async function recordMovement(
   if (!(m.amount > 0)) return;
   await t.moneyMovement.create({
     data: {
+      transactionNo: await nextMoneyTransactionNo(t),
       moneyAccountId: m.accountId,
       method: m.method,
       direction: m.direction,
@@ -163,9 +170,11 @@ export async function updateMovement(
 ): Promise<void> {
   // Upsert: expenses saved before this feature have no ledger row yet, so the
   // first edit after the upgrade creates it instead of failing.
+  const current = await t.moneyMovement.findUnique({ where: { sourceType_sourceId: { sourceType, sourceId } }, select: { transactionNo: true } });
   await t.moneyMovement.upsert({
     where: { sourceType_sourceId: { sourceType, sourceId } },
     create: {
+      transactionNo: current?.transactionNo ?? await nextMoneyTransactionNo(t),
       moneyAccountId: m.accountId, method: m.method, direction: m.direction,
       amount: round2(m.amount), date: m.date, sourceType, sourceId,
     },
@@ -201,19 +210,19 @@ export type AccountBalance = {
  * Canonical per-account balances: opening + active IN - active OUT.
  * Derived from the ledger every time; nothing is stored.
  */
-export async function accountBalances(client: typeof db | TxClient = db, today?: string): Promise<AccountBalance[]> {
+export async function accountBalances(client: typeof db | TxClient = db, today?: string, asOf?: string): Promise<AccountBalance[]> {
   const accounts = await client.moneyAccount.findMany({ orderBy: [{ active: 'desc' }, { createdAt: 'asc' }] });
   const grouped = await client.moneyMovement.groupBy({
     by: ['moneyAccountId', 'direction'],
-    where: { active: true },
+    where: { active: true, ...(asOf ? { date: { lte: asOf } } : {}) },
     _sum: { amount: true },
   });
   const openingAdjustments = await client.moneyMovement.groupBy({
     by: ['moneyAccountId', 'direction'],
-    where: { active: true, sourceType: 'openingAdjust' },
+    where: { active: true, sourceType: 'openingAdjust', ...(asOf ? { date: { lte: asOf } } : {}) },
     _sum: { amount: true },
   });
-  const savedJournalLines = await client.journalLine.findMany({ where: { entry: { active: true, sourceType: 'manual' }, account: { moneyAccountId: { not: null } } }, select: { debit: true, credit: true, account: { select: { moneyAccountId: true } } } });
+  const savedJournalLines = await client.journalLine.findMany({ where: { entry: { active: true, sourceType: 'manual', ...(asOf ? { date: { lte: asOf } } : {}) }, account: { moneyAccountId: { not: null } } }, select: { debit: true, credit: true, account: { select: { moneyAccountId: true } } } });
   const journalByAccount = new Map<string, { debit: number; credit: number }>();
   const journalHistory = new Set<string>();
   for (const line of savedJournalLines) { const id = line.account.moneyAccountId; if (!id) continue; journalHistory.add(id); const sums = journalByAccount.get(id) ?? { debit: 0, credit: 0 }; sums.debit += line.debit; sums.credit += line.credit; journalByAccount.set(id, sums); }
@@ -243,7 +252,7 @@ export async function accountBalances(client: typeof db | TxClient = db, today?:
       id: a.id, name: a.name, type: a.type,
       openingBalance: round2(a.openingBalance), openingDate: a.openingDate,
       openingAdjustments: netOpeningAdjustments,
-      adjustedOpeningBalance: round2(a.openingBalance + netOpeningAdjustments),
+      adjustedOpeningBalance: round2((!asOf || a.openingDate <= asOf ? a.openingBalance : 0) + netOpeningAdjustments),
       bankName: a.bankName ?? undefined, accountNumber: a.accountNumber ?? undefined,
       branch: a.branch ?? undefined, mobileNumber: a.mobileNumber ?? undefined, note: a.note ?? undefined,
       active: a.active,
@@ -253,7 +262,7 @@ export async function accountBalances(client: typeof db | TxClient = db, today?:
         || countOf(outCounts, 'fromAccountId', a.id) > 0
         || countOf(inCounts, 'toAccountId', a.id) > 0
         || journalHistory.has(a.id),
-      balance: round2(a.openingBalance + inflow - outflow + journal.debit - journal.credit),
+      balance: round2((!asOf || a.openingDate <= asOf ? a.openingBalance : 0) + inflow - outflow + journal.debit - journal.credit),
       todayIn: sumFor(todayRows, a.id, 'in'),
       todayOut: sumFor(todayRows, a.id, 'out'),
     };

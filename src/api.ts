@@ -48,8 +48,8 @@ export type ActivityRow = {
 export type ActivityQuery = { group?: string; q?: string; userId?: string; from?: string; to?: string; take?: number; skip?: number };
 let authExpired: (() => void) | undefined;
 export const onAuthExpired = (callback?: () => void) => { authExpired = callback; };
-export type MoneyMovementRow = { id: string; moneyAccountId: string; direction: string; amount: number; date: string; sourceType: string; transferId?: string | null; note?: string | null; moneyAccount?: { name: string; type: string } };
-export type BusinessSettings = { name: string; address: string; phone: string; currency: string; fiscalStartMonth: number; language: 'bn' | 'en' };
+export type MoneyMovementRow = { id: string; transactionNo: string; moneyAccountId: string; direction: string; amount: number; date: string; sourceType: string; transferId?: string | null; note?: string | null; moneyAccount?: { name: string; type: string } };
+export type BusinessSettings = { name: string; address: string; phone: string; currency: string; fiscalStartMonth: number; language: 'bn' | 'en'; allowNegativeStock: boolean };
 export type BulkImportRes = {
   total: number;
   successCount: number;
@@ -72,7 +72,7 @@ export type SettlementStatus = 'paid' | 'partial' | 'due';
 export type TxnItem = {
   productId?: string; productName: string; unit: string; enteredQty: number; qtyKg: number; rate: number; otherCost?: number; unitCost?: number;
 };
-export type InvoicePayment = { accountId?: string | null; amount: number };
+export type InvoicePayment = { id: string; paymentNo?: string; accountId?: string | null; accountName?: string; amount: number; date?: string; note?: string; advance?: boolean };
 /** Payment account recorded on the ledger row when the document was saved. */
 export type TxnPayment = { accountName: string | null; method: string; amount: number; date: string } | null;
 export type SaleDetail = {
@@ -125,7 +125,7 @@ export type MoneyAccountRow = {
 export type MoneyAccountList = { accounts: MoneyAccountRow[]; totalMoney: number };
 
 export type MoneyAccountMovement = {
-  id: string; date: string; direction: 'in' | 'out'; amount: number;
+  id: string; transactionNo: string; date: string; direction: 'in' | 'out'; amount: number;
   sourceType: string; sourceId: string; note?: string; transferNo?: string;
   counterpartyAccountId?: string; active: boolean; balance: number;
 };
@@ -190,9 +190,9 @@ export const api = {
     customers: import('./store').Party[];
     vendors: import('./store').Party[];
     sales: { id: string; customerId?: string; date: string; total: number; paid: number; due: number; status: SettlementStatus; profit: number; cogs: number; invoiceNo?: string; createdAt?: string; items?: { productId: string; productName: string; productCode?: string }[] }[];
-    purchases: { id: string; vendorId: string; date: string; total: number; paid: number; due: number; status: SettlementStatus; invoiceNo?: string; items?: { productId: string; productName: string; productCode?: string }[] }[];
-    customerPayments: { id: string; customerId: string; amount: number; date: string; note?: string; method?: string; returnId?: string; returnNo?: string; createdAt?: string; saleId?: string; accountId?: string; accountName?: string }[];
-    vendorPayments: { id: string; vendorId: string; amount: number; date: string; note?: string; returnId?: string; returnNo?: string; createdAt?: string; purchaseId?: string; accountId?: string; accountName?: string }[];
+    purchases: { id: string; vendorId: string; date: string; createdAt?: string; total: number; paid: number; due: number; status: SettlementStatus; invoiceNo?: string; items?: { productId: string; productName: string; productCode?: string }[] }[];
+    customerPayments: { id: string; paymentNo: string; transactionNo?: string; customerId: string; amount: number; date: string; note?: string; method?: string; returnId?: string; returnNo?: string; createdAt?: string; saleId?: string; accountId?: string; accountName?: string }[];
+    vendorPayments: { id: string; paymentNo: string; transactionNo?: string; vendorId: string; amount: number; date: string; note?: string; returnId?: string; returnNo?: string; createdAt?: string; purchaseId?: string; accountId?: string; accountName?: string }[];
     movements: { id: string; productId: string; productName: string; type: string; qty: number; bags: number; unitCost: number; bagUnitPrice: number; amount: number; date: string; transactionNo?: string; note?: string }[];
     expenses: Expense[];
     returns: ReturnSummary[];
@@ -226,6 +226,7 @@ export const api = {
   saleDetail: (id: string) => req<SaleDetail>(`/sales/${id}`),
   purchaseDetail: (id: string) => req<PurchaseDetail>(`/purchases/${id}`),
   customerPayment: (b: object) => req<IdRes>('/customer-payments', { method: 'POST', body: JSON.stringify(b) }),
+  partyPaymentSplit: (b: { kind: 'c' | 'v'; partyId: string; payments: { accountId: string; amount: number }[]; date: string; note?: string }) => req<{ payments: { id: string; paymentNo: string; amount: number; accountId: string }[] }>('/party-payments/split', { method: 'POST', body: JSON.stringify(b) }),
   vendorPayment: (b: object) => req<IdRes>('/vendor-payments', { method: 'POST', body: JSON.stringify(b) }),
 
   expenses: () => req<Expense[]>('/expenses'),
@@ -242,6 +243,7 @@ export const api = {
 
   moneyBalances: () => req<MoneyBalance[]>('/money/balances'),
   moneyAccounts: () => req<MoneyAccountList>('/money/accounts'),
+  moneyAccountsAsOf: (date: string) => req<MoneyAccountList>(`/money/accounts?asOf=${encodeURIComponent(date)}`),
   moneyAccountTypes: () => req<{ type: AccountType; bn: string; en: string }[]>('/money/types'),
   moneyAccountDetail: (id: string) => req<MoneyAccountDetail>(`/money/accounts/${id}`),
   createMoneyAccount: (b: Partial<MoneyAccountRow>) => req<IdRes>('/money/accounts', { method: 'POST', body: JSON.stringify(b) }),

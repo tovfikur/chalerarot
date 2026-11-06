@@ -7,7 +7,7 @@ import { DetailShell } from '../screens';
 import { parseNum, toEnDigits } from '../bn';
 
 export type MoneyMovementItem = {
-  id: string; amount: number; date: string; direction: 'in' | 'out'; sourceType: string;
+  id: string; transactionNo?: string; amount: number; date: string; direction: 'in' | 'out'; sourceType: string;
   sourceId?: string; note?: string; transferNo?: string; moneyAccount?: { name: string; type: string };
 };
 
@@ -33,6 +33,7 @@ export function MoneyMovementDetail({ movement, accountName, onClose, onSaved }:
   return <DetailShell title={l('লেনদেনের বিবরণ', 'Transaction details')} onClose={onClose}>
     <Card>
       <Row left={l('লেনদেনের তারিখ', 'Date')} right={fd(movement.date)} />
+      {movement.transactionNo ? <Row left={l('ট্রানজ্যাকশন কোড', 'Transaction code')} right={movement.transactionNo} /> : null}
       <Row left={l('ধরন', 'Direction')} right={movement.direction === 'in' ? l('জমা', 'Money in') : l('উত্তোলন', 'Money out')} />
       {accountName || movement.moneyAccount?.name ? <Row left={l('অ্যাকাউন্ট', 'Account')} right={accountName ?? movement.moneyAccount?.name ?? ''} /> : null}
       {!editing ? <>

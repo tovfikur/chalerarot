@@ -8,7 +8,7 @@ export type Product = { id: string; code?: string; name: string; description?: s
 export const UOMS = ['kg', 'বস্তা', 'ton', 'pcs'];
 export const uomLabel = (uom: string | undefined, kgLabel: string) => (!uom || uom === 'kg' ? kgLabel : uom);
 export type Party = { id: string; name: string; mobile: string; address?: string; opening: number; next?: string; code?: string };
-export type Tx = { id: string; partyId: string; kind: 'sale' | 'purchase' | 'payment' | 'sreturn' | 'preturn'; amount: number; date: string; note?: string; ref?: string; method?: string; returnId?: string; returnId2?: never; createdAt?: string; saleId?: string; purchaseId?: string; account?: string };
+export type Tx = { id: string; partyId: string; kind: 'sale' | 'purchase' | 'payment' | 'sreturn' | 'preturn'; amount: number; date: string; note?: string; ref?: string; transactionNo?: string; method?: string; returnId?: string; returnId2?: never; createdAt?: string; saleId?: string; purchaseId?: string; account?: string };
 export type Line = { productId: string; qty: number; rate: number };
 export type SaleLineIn = { productId: string; unit: string; enteredQty: number; rate: number; unitCost?: number };
 export type PurchaseLineIn = { productId: string; unit: string; enteredQty: number; rate: number; otherCost?: number; otherCostPerBag?: number; unitCost?: number };
@@ -36,6 +36,7 @@ export interface Service {
   sale(a: { customerId?: string; lines: SaleLineIn[]; discount: number; paid: number; accountId?: string; payments?: { accountId: string; amount: number }[]; next?: string; date?: string; memoNo?: string }): Promise<{ id: string; invoiceNo?: string; total: number }>;
   purchase(a: { vendorId: string; lines: PurchaseLineIn[]; paid: number; accountId?: string; payments?: { accountId: string; amount: number }[]; next?: string; date?: string; memoNo?: string }): Promise<{ id: string; invoiceNo?: string; total: number }>;
   money(kind: 'c' | 'v', a: { partyId: string; amount: number; accountId: string; date: string; note?: string; next?: string }): Promise<void>;
+  partyPaymentSplit(a: { kind: 'c' | 'v'; partyId: string; payments: { accountId: string; amount: number }[]; date: string; note?: string }): Promise<{ payments: { id: string; paymentNo: string; amount: number; accountId: string }[] }>;
   saveExpense(e: { id?: string; category: string; customName?: string; amount: number; accountId: string; date: string; note?: string; capitalized?: boolean }): Promise<void>;
   deleteExpense(id: string): Promise<void>;
   saveReturn(a: { kind: 'sale' | 'purchase'; saleId?: string; purchaseId?: string; lines: object[]; settlement: 'credit' | 'refund'; accountId?: string; date?: string; note?: string }): Promise<{ id: string; returnNo?: string; totalAmount: number }>;
@@ -69,7 +70,7 @@ const C = createContext<Ctx>(null as any);
 export const useApp = () => useContext(C);
 
 export function AppProvider({ children }: { children: ReactNode }) {
-  const [business, setBusiness] = useState<import('./api').BusinessSettings>({ name: 'চালের আড়ত', address: '', phone: '', currency: 'BDT', fiscalStartMonth: 7, language: 'bn' });
+  const [business, setBusiness] = useState<import('./api').BusinessSettings>({ name: 'চালের আড়ত', address: '', phone: '', currency: 'BDT', fiscalStartMonth: 7, language: 'bn', allowNegativeStock: false });
   const saveBusiness = async (value: import('./api').BusinessSettings) => {
     const saved = await api.saveSettings(value);
     setBusiness(saved);
@@ -106,16 +107,16 @@ export function AppProvider({ children }: { children: ReactNode }) {
     setCustomers(b.customers);
     setVendors(b.vendors);
     const ctx: Tx[] = [
-      ...b.sales.map(s => ({ id: s.id, partyId: s.customerId ?? 'cash', kind: 'sale' as const, amount: s.total, date: s.date, ref: s.invoiceNo })),
+      ...b.sales.map(s => ({ id: s.id, partyId: s.customerId ?? 'cash', kind: 'sale' as const, amount: s.total, date: s.date, createdAt: s.createdAt, ref: s.invoiceNo })),
       ...b.customerPayments.map(p => p.returnId
         ? ({ id: p.id, partyId: p.customerId, kind: 'sreturn' as const, amount: p.amount, date: p.date, note: p.note, createdAt: p.createdAt, ref: p.returnNo, returnId: p.returnId })
-        : ({ id: p.id, partyId: p.customerId, kind: 'payment' as const, amount: p.amount, date: p.date, note: p.note, method: p.method as MoneyMethod | undefined, account: p.accountName, createdAt: p.createdAt, saleId: p.saleId })),
+        : ({ id: p.id, partyId: p.customerId, kind: 'payment' as const, amount: p.amount, date: p.date, ref: p.paymentNo, transactionNo: p.transactionNo, note: p.note, method: p.method as MoneyMethod | undefined, account: p.accountName, createdAt: p.createdAt, saleId: p.saleId })),
     ];
     const vtx: Tx[] = [
-      ...b.purchases.map(p => ({ id: p.id, partyId: p.vendorId, kind: 'purchase' as const, amount: p.total, date: p.date, ref: p.invoiceNo })),
+      ...b.purchases.map(p => ({ id: p.id, partyId: p.vendorId, kind: 'purchase' as const, amount: p.total, date: p.date, createdAt: p.createdAt, ref: p.invoiceNo })),
       ...b.vendorPayments.map(p => p.returnId
         ? ({ id: p.id, partyId: p.vendorId, kind: 'preturn' as const, amount: p.amount, date: p.date, note: p.note, createdAt: p.createdAt, ref: p.returnNo, returnId: p.returnId })
-        : ({ id: p.id, partyId: p.vendorId, kind: 'payment' as const, amount: p.amount, date: p.date, note: p.note, account: p.accountName, createdAt: p.createdAt, purchaseId: p.purchaseId })),
+        : ({ id: p.id, partyId: p.vendorId, kind: 'payment' as const, amount: p.amount, date: p.date, ref: p.paymentNo, transactionNo: p.transactionNo, note: p.note, account: p.accountName, createdAt: p.createdAt, purchaseId: p.purchaseId })),
     ];
     setCTx(ctx);
     setVTx(vtx);
@@ -205,6 +206,11 @@ export function AppProvider({ children }: { children: ReactNode }) {
       else await api.vendorPayment({ vendorId: a.partyId, amount: a.amount, accountId: a.accountId, date: a.date, note: a.note, next: a.next });
       await refresh();
     },
+    partyPaymentSplit: async a => {
+      const result = await api.partyPaymentSplit(a);
+      await refresh();
+      return result;
+    },
     saveExpense: async e => {
       const body = { category: e.category, customName: e.customName, amount: e.amount, accountId: e.accountId, date: e.date, note: e.note, capitalized: e.capitalized };
       if (e.id && expenses.some(x => x.id === e.id)) await api.updateExpense(e.id, body);
@@ -269,8 +275,8 @@ export function AppProvider({ children }: { children: ReactNode }) {
       totalSale: life?.netSales ?? 0,
       totalProfit: life?.netProfit ?? 0,
       totalPurchase: life?.netPurchase ?? 0,
-      due: customers.reduce((s, c) => s + bal('c', c.id).balance, 0),
-      payable: vendors.reduce((s, v) => s + bal('v', v.id).balance, 0),
+      due: customers.reduce((s, c) => s + Math.max(0, bal('c', c.id).balance), 0),
+      payable: vendors.reduce((s, v) => s + Math.max(0, bal('v', v.id).balance), 0),
     };
   };
   return <C.Provider value={{ ...svc, business, saveBusiness, lang, setLang, t, ready, loadError, retry: load, products, customers, vendors, cTx, vTx, stockTx, sales, purchases, expenses, returns, moneyBalances: money, moneyTransfers: transfers, moneyAccounts: accounts, financeToday, financeLifetime, financePeriod, bal, stats }}>{children}</C.Provider>;

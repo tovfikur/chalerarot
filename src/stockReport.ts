@@ -39,6 +39,7 @@ export const movementTypeLabel = (type: string, lang: Lang = 'bn'): string => {
     SALE_EDIT_REVERSAL: ['বিক্রয় সংশোধন', 'Sale edit reversal'],
     PURCHASE_EDIT_REVERSAL: ['ক্রয় সংশোধন', 'Purchase edit reversal'],
   };
+  labels.NEGATIVE_STOCK_COGS_ADJUSTMENT = ['Negative stock COGS adjustment', 'Negative stock COGS adjustment'];
   const key = type?.toUpperCase();
   if (labels[key]) return labels[key][lang === 'bn' ? 0 : 1];
   switch (type?.toUpperCase()) {

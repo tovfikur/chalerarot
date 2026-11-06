@@ -32,6 +32,7 @@ model BusinessSettings {
   currency String @default("BDT")
   fiscalStartMonth Int @default(7)
   language String @default("bn")
+  allowNegativeStock Boolean @default(false)
 }
 
 datasource db {
@@ -127,8 +128,10 @@ model Sale {
   nextDate   String?
   invoiceNo  String?  @unique
   createdAt  DateTime @default(now())
+  advanceAllocationControlled Boolean @default(false)
 
   items SaleItem[]
+  paymentAllocations CustomerPaymentAllocation[]
   returns ProductReturn[]
 
   @@index([customerId])
@@ -149,6 +152,8 @@ model SaleItem {
   // the moment this line was sold. Never recomputed from Product.cost.
   unitCost   Float   @default(0) // per KG at sale time
   cogs       Float   @default(0) // qtyKg * unitCost
+  negativeStockQtyKg Float @default(0)
+  negativeStockCostAdjustedQtyKg Float @default(0)
 
   @@index([saleId])
   @@index([productId])
@@ -165,8 +170,10 @@ model Purchase {
   nextDate String?
   invoiceNo String? @unique
   createdAt DateTime @default(now())
+  advanceAllocationControlled Boolean @default(false)
 
   items PurchaseItem[]
+  paymentAllocations VendorPaymentAllocation[]
   returns ProductReturn[]
 
   @@index([vendorId])
@@ -192,6 +199,7 @@ model PurchaseItem {
 
 model CustomerPayment {
   id         String   @id @default(cuid())
+  paymentNo  String   @unique
   customerId String? // null = cash payment without customer
   customer   Customer? @relation(fields: [customerId], references: [id], onDelete: Restrict)
   saleId     String?
@@ -201,7 +209,10 @@ model CustomerPayment {
   note       String?
   nextDate   String?
   active     Boolean  @default(true)
+  allocationLocked Boolean @default(false)
   createdAt  DateTime @default(now())
+
+  allocations CustomerPaymentAllocation[]
 
   @@index([customerId])
   @@index([date])
@@ -209,6 +220,7 @@ model CustomerPayment {
 
 model VendorPayment {
   id         String   @id @default(cuid())
+  paymentNo  String   @unique
   vendorId   String
   vendor     Vendor   @relation(fields: [vendorId], references: [id], onDelete: Restrict)
   purchaseId String?
@@ -218,10 +230,39 @@ model VendorPayment {
   note       String?
   nextDate   String?
   active     Boolean  @default(true)
+  allocationLocked Boolean @default(false)
   createdAt  DateTime @default(now())
+
+  allocations VendorPaymentAllocation[]
 
   @@index([vendorId])
   @@index([date])
+}
+
+model CustomerPaymentAllocation {
+  id        String   @id @default(cuid())
+  paymentId String
+  payment   CustomerPayment @relation(fields: [paymentId], references: [id], onDelete: Cascade)
+  saleId    String
+  sale      Sale     @relation(fields: [saleId], references: [id], onDelete: Cascade)
+  amount    Float
+  createdAt DateTime @default(now())
+
+  @@unique([paymentId, saleId])
+  @@index([saleId])
+}
+
+model VendorPaymentAllocation {
+  id        String   @id @default(cuid())
+  paymentId String
+  payment   VendorPayment @relation(fields: [paymentId], references: [id], onDelete: Cascade)
+  purchaseId String
+  purchase  Purchase @relation(fields: [purchaseId], references: [id], onDelete: Cascade)
+  amount    Float
+  createdAt DateTime @default(now())
+
+  @@unique([paymentId, purchaseId])
+  @@index([purchaseId])
 }
 
 // Dated inventory audit trail. Every inventory change writes one immutable row
@@ -333,6 +374,7 @@ model MoneyTransfer {
 // `paid` field and its linked payment row describe the same single event).
 model MoneyMovement {
   id         String   @id @default(cuid())
+  transactionNo String @unique
   method     String // cash | bkash | nagad | bank
   direction  String // in | out
   amount     Float

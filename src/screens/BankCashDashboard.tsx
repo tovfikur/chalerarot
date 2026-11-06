@@ -1,12 +1,11 @@
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { View, Text, TouchableOpacity } from 'react-native';
 import { useApp, today } from '../store';
 import { api, MoneyMovementRow } from '../api';
-import { Screen, Card, Title, Btn, Field, AccountPicker, Row, Empty, useMoney, useDateStr, color } from '../ui';
+import { Screen, Card, Title, Btn, Row, Empty, useMoney, useDateStr, color } from '../ui';
 import { RGrid } from '../responsive';
 import { AppIcon, icons } from '../icons';
-import { parseNum, toEnDigits } from '../bn';
-import { AccountFormModal, MoneyTransferModal, DetailShell, DateField } from '../screens';
+import { AccountFormModal, MoneyTransferModal, MoneyEntry, DetailShell } from '../screens';
 import { AccountPage } from './AccountPage';
 import { downloadCSV } from '../stockReport';
 import { MoneyMovementDetail, MoneyMovementItem } from './MoneyMovementDetail';
@@ -96,7 +95,7 @@ export function BankCashDashboard() {
         const other = row.transferId ? rows.find(r => r.transferId === row.transferId && r.id !== row.id) : undefined;
         const from = row.direction === 'out' ? row : other, to = row.direction === 'in' ? row : other;
         const accountName = row.transferId ? `${from?.moneyAccount?.name ?? ''} → ${to?.moneyAccount?.name ?? ''}` : row.moneyAccount?.name ?? '';
-        return <TouchableOpacity key={row.id} onPress={() => setSelectedMovement(row)} accessibilityRole="button" accessibilityLabel={label(`লেনদেনের বিবরণ ${row.amount}`, `View transaction ${row.amount}`)} style={{ paddingVertical: 2 }}><Row left={`${names[row.sourceType] ?? row.sourceType} · ${accountName}`} sub={fd(row.date)} right={`${row.transferId ? '' : row.direction === 'in' ? '+' : '−'}${m(row.amount)}`} neg={!row.transferId && row.direction === 'out'} /></TouchableOpacity>;
+        return <TouchableOpacity key={row.id} onPress={() => setSelectedMovement(row)} accessibilityRole="button" accessibilityLabel={label(`লেনদেনের বিবরণ ${row.amount}`, `View transaction ${row.amount}`)} style={{ paddingVertical: 2 }}><Row left={`${row.transactionNo} · ${names[row.sourceType] ?? row.sourceType} · ${accountName}`} sub={fd(row.date)} right={`${row.transferId ? '' : row.direction === 'in' ? '+' : '−'}${m(row.amount)}`} neg={!row.transferId && row.direction === 'out'} /></TouchableOpacity>;
       }) : <Empty />}
     </Card></View>
     {add ? <AccountFormModal onClose={() => setAdd(false)} /> : null}
@@ -104,37 +103,4 @@ export function BankCashDashboard() {
     {entry ? <MoneyEntry direction={entry} onClose={() => setEntry(null)} onSaved={refresh} /> : null}
     {selectedMovement ? <MoneyMovementDetail movement={selectedMovement as MoneyMovementItem} accountName={selectedMovement.moneyAccount?.name} onClose={() => setSelectedMovement(null)} onSaved={async () => { await refresh(); setRows(await api.moneyMovements()); }} /> : null}
   </Screen>;
-}
-
-function MoneyEntry({ direction, onClose, onSaved }: { direction: 'in' | 'out'; onClose: () => void; onSaved: () => Promise<void> }) {
-  const { lang, moneyAccounts, t } = useApp();
-  const label = (bn: string, en: string) => lang === 'bn' ? bn : en;
-  const [accountId, setAccountId] = useState(moneyAccounts.find(a => a.active)?.id ?? '');
-  const [amount, setAmount] = useState(''), [date, setDate] = useState(today()), [note, setNote] = useState('');
-  const [busy, setBusy] = useState(false), [error, setError] = useState('');
-  const lock = useRef(false);
-  const [requestId] = useState(() => `entry-${Date.now()}-${Math.random().toString(36).slice(2)}`);
-  const [saved, setSaved] = useState(false);
-  const submit = async () => {
-    if (lock.current) return;
-    if (!accountId || !(parseNum(amount) > 0)) { setError(label('অ্যাকাউন্ট ও সঠিক পরিমাণ দিন', 'Select an account and enter a valid amount')); return; }
-    lock.current = true; setBusy(true); setError('');
-    try {
-      if (!saved) { await api.moneyEntry({ accountId, direction, amount: parseNum(amount), date: toEnDigits(date), note, requestId }); setSaved(true); }
-      await onSaved(); onClose();
-    } catch (e) { setError((e as { code?: string }).code === 'INSUFFICIENT_FUNDS' ? label('এই অ্যাকাউন্টে পর্যাপ্ত টাকা নেই', 'Insufficient account balance') : label('সংরক্ষণ বা হালনাগাদ করা যায়নি। আবার চেষ্টা করুন।', 'Could not save or refresh. Please try again.')); }
-    finally { lock.current = false; setBusy(false); }
-  };
-  return <DetailShell title={direction === 'in' ? label('টাকা জমা', 'Deposit') : label('টাকা উত্তোলন', 'Withdraw')} onClose={onClose}>
-    <Card>
-      <View pointerEvents={busy || saved ? 'none' : 'auto'}>
-        <AccountPicker accountId={accountId} onPick={setAccountId} required />
-        <Field label={label('পরিমাণ', 'Amount')} value={amount} onChange={setAmount} num />
-        <DateField label={label('তারিখ', 'Date')} value={date} onChange={setDate} allowPast />
-        <Field label={label('বিবরণ', 'Note')} value={note} onChange={setNote} />
-      </View>
-      {error ? <Text accessibilityRole="alert" style={{ color: color.red, marginBottom: 12 }}>{error}</Text> : null}
-      <Btn label={busy ? t('wait') : t('save')} onPress={submit} testID="save-money-entry" />
-    </Card>
-  </DetailShell>;
 }

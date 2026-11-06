@@ -78,6 +78,7 @@ function Shell() {
   const [inv, setInv] = useState<{ kind: 'sale' | 'purchase'; id: string } | null>(null);
   const [retView, setRetView] = useState<string | null>(null);
   const [partyFocus, setPartyFocus] = useState<{ kind: 'c' | 'v'; id: string } | null>(null);
+  const [transactionEdit, setTransactionEdit] = useState<{ kind: 'sale' | 'purchase'; id: string } | null>(null);
   const [returnFocus, setReturnFocus] = useState<{ kind: 'sale' | 'purchase'; id: string } | null>(null);
   const fd = useDateStr();
   const setRoute = (r: string) => {
@@ -92,6 +93,12 @@ function Shell() {
     }
   };
   const home = () => setRoute('home');
+  const editPartyTransaction = (kind: 'sale' | 'purchase', id: string) => { setTransactionEdit({ kind, id }); setRoute(kind); };
+  const finishPartyTransactionEdit = () => {
+    const returnRoute = transactionEdit?.kind === 'sale' ? 'customers' : 'vendors';
+    setTransactionEdit(null);
+    setRoute(returnRoute);
+  };
   useEffect(() => {
     if (!isWeb) return;
     const onHash = () => setRouteState(routeFromHash());
@@ -146,8 +153,8 @@ function Shell() {
     );
   }
   const body = {
-    home: <Home go={setRoute} />, sale: <Trade key="s" mode="sale" />, purchase: <Trade key="p" mode="purchase" />, accounts: <Accounts go={setRoute} focus={focus} onFocusDone={() => setFocus(null)} />, more: <Settings />, settings: <Settings />,
-    customers: <Parties kind="c" focus={partyFocus?.kind === 'c' ? partyFocus.id : null} onFocusDone={() => setPartyFocus(null)} onReturn={() => setRoute('home')} />, vendors: <Parties kind="v" focus={partyFocus?.kind === 'v' ? partyFocus.id : null} onFocusDone={() => setPartyFocus(null)} onReturn={() => setRoute('home')} />, stock: <StockDashboard />, expense: <ExpenseDashboard go={setRoute} />, collect: <Money key="c" kind="c" done={home} />, pay: <Money key="v" kind="v" done={home} />, trash: <Trash />,
+    home: <Home go={setRoute} />, sale: <Trade key="s" mode="sale" editId={transactionEdit?.kind === 'sale' ? transactionEdit.id : null} onEditDone={finishPartyTransactionEdit} />, purchase: <Trade key="p" mode="purchase" editId={transactionEdit?.kind === 'purchase' ? transactionEdit.id : null} onEditDone={finishPartyTransactionEdit} />, accounts: <Accounts go={setRoute} focus={focus} onFocusDone={() => setFocus(null)} />, more: <Settings />, settings: <Settings />,
+    customers: <Parties kind="c" focus={partyFocus?.kind === 'c' ? partyFocus.id : null} onFocusDone={() => setPartyFocus(null)} onReturn={() => setRoute('home')} onEditTransaction={editPartyTransaction} />, vendors: <Parties kind="v" focus={partyFocus?.kind === 'v' ? partyFocus.id : null} onFocusDone={() => setPartyFocus(null)} onReturn={() => setRoute('home')} onEditTransaction={editPartyTransaction} />, stock: <StockDashboard />, expense: <ExpenseDashboard go={setRoute} />, collect: <Money key="c" kind="c" done={home} />, pay: <Money key="v" kind="v" done={home} />, trash: <Trash />,
     bank: <BankCash />,
   }[route];
   const openInv = (kind: 'sale' | 'purchase', id: string) => { closeSearch(); setInv({ kind, id }); };

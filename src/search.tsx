@@ -7,17 +7,18 @@ import { AppIcon, icons } from './icons';
 
 // Bangla-safe case-insensitive normalize (toLowerCase is a no-op for Bengali script).
 export const norm = (s: string) => (s ?? '').toLowerCase().trim();
+export const exactCode = (code: string | undefined, q: string) => !!norm(code ?? '') && norm(code ?? '') === norm(q);
 
 export const matchProduct = (p: Product, q: string) => {
   const nq = norm(q);
   if (!nq) return true;
-  return norm(p.name).includes(nq) || norm(p.code ?? '').includes(nq) || norm(p.description ?? '').includes(nq) || norm(p.id).includes(nq);
+  return norm(p.name).includes(nq) || exactCode(p.code, nq) || norm(p.description ?? '').includes(nq) || norm(p.id).includes(nq);
 };
 
 export const matchParty = (p: Party, q: string) => {
   const nq = norm(q);
   if (!nq) return true;
-  return norm(p.name).includes(nq) || norm(p.mobile).includes(nq) || norm(p.code ?? '').includes(nq);
+  return norm(p.name).includes(nq) || norm(p.mobile).includes(nq) || exactCode(p.code, nq);
 };
 
 export function NoResult() {

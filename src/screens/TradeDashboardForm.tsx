@@ -12,8 +12,8 @@ import {
   Modal,
 } from 'react-native';
 import { useApp, today, Product, Party } from '../store';
-import { color, useMoney, useNum, toBnDigits, AccountPicker } from '../ui';
-import { parseNum } from '../bn';
+import { color, useMoney, useNum, toBnDigits, AccountPicker, Field } from '../ui';
+import { parseNum, localeDigits } from '../bn';
 import { AppIcon, icons } from '../icons';
 import { MonthCal } from '../screens';
 import { BagUnit, kgPerUnit } from '../bags';
@@ -293,6 +293,8 @@ export function TradeDashboardForm({ mode, onDone, onOpenHistory, editId }: Trad
   // Payments (Cash, Bank) & Discount (no default '0' strings)
   const [cashPaid, setCashPaid] = useState('');
   const [bankPaid, setBankPaid] = useState('');
+  const [paymentNote, setPaymentNote] = useState('');
+  const [advanceToApply, setAdvanceToApply] = useState(0);
   const [cashAccountId, setCashAccountId] = useState('');
   const [bankAccountId, setBankAccountId] = useState('');
   const [expenseAccountId, setExpenseAccountId] = useState('');
@@ -377,6 +379,8 @@ export function TradeDashboardForm({ mode, onDone, onOpenHistory, editId }: Trad
     return b ? b.balance : 0;
   }, [selectedPartyId, bal, isSale]);
 
+  useEffect(() => { setAdvanceToApply(0); }, [selectedPartyId]);
+
   // Calculations
   const totalProductValue = useMemo(() => {
     return items.reduce((sum, item) => {
@@ -434,7 +438,8 @@ export function TradeDashboardForm({ mode, onDone, onOpenHistory, editId }: Trad
   const netInvoiceBalance = totalProductValue - numTransport - totalPaid - numDiscount;
   const invoiceDue = Math.max(0, netInvoiceBalance);
   // Total due: invoice due + previous due (or reduced by net return credit)
-  const totalDue = Math.max(0, prevDue + netInvoiceBalance);
+  const selectedAdvance = Math.min(advanceToApply, Math.max(0, -prevDue), invoiceDue);
+  const totalDue = Math.max(0, Math.max(0, prevDue) + invoiceDue - selectedAdvance);
   const grandTotal = totalDue;
 
   // Copy helper
@@ -454,7 +459,7 @@ export function TradeDashboardForm({ mode, onDone, onOpenHistory, editId }: Trad
     return parties.filter(p => {
       const pCode = p.code?.trim().toLowerCase() ?? '';
       const matchesName = !q || p.name.toLowerCase().includes(q);
-      const matchesCode = !codeQ || pCode.includes(codeQ);
+      const matchesCode = !codeQ || pCode === codeQ;
       return matchesName || matchesCode;
     }).slice(0, 8);
   }, [parties, partyName, partyCode]);
@@ -633,7 +638,7 @@ export function TradeDashboardForm({ mode, onDone, onOpenHistory, editId }: Trad
     if (!normalized) return products;
     return products.filter(product =>
       product.name.toLowerCase().includes(normalized) ||
-      (product.code ?? '').toLowerCase().includes(normalized)
+      (product.code ?? '').trim().toLowerCase() === normalized
     );
   }, [products]);
 
@@ -736,6 +741,8 @@ export function TradeDashboardForm({ mode, onDone, onOpenHistory, editId }: Trad
     setItems([{ id: 'item_1', code: '', productId: '', name: '', unit: 'medium', qty: '', purchaseRate: '', rate: '', otherCost: '' }]);
     setCashPaid('');
     setBankPaid('');
+    setAdvanceToApply(0);
+    setPaymentNote('');
     setDiscount('');
     setTransportCost('');
     setFormError('');
@@ -948,6 +955,8 @@ export function TradeDashboardForm({ mode, onDone, onOpenHistory, editId }: Trad
             ...(numCash > 0 ? [{ accountId: cashAccountId, amount: numCash }] : []),
             ...(numBank > 0 ? [{ accountId: bankAccountId, amount: numBank }] : []),
           ],
+          paymentNote: paymentNote.trim() || undefined,
+          advanceToApply: selectedAdvance,
           date: isoDate,
           memoNo: memoNo.trim() || undefined,
         };
@@ -962,6 +971,8 @@ export function TradeDashboardForm({ mode, onDone, onOpenHistory, editId }: Trad
             ...(numCash > 0 ? [{ accountId: cashAccountId, amount: numCash }] : []),
             ...(numBank > 0 ? [{ accountId: bankAccountId, amount: numBank }] : []),
           ],
+          paymentNote: paymentNote.trim() || undefined,
+          advanceToApply: selectedAdvance,
           date: isoDate,
           memoNo: memoNo.trim() || undefined,
         };
@@ -1096,7 +1107,7 @@ export function TradeDashboardForm({ mode, onDone, onOpenHistory, editId }: Trad
     }
   }, [
     submitting, items, selectedPartyId, isSale, products, moneyAccounts, numBank, billDate, editPaymentUnsupported,
-    lang, sale, numDiscount, totalPaid, memoNo, purchase, numTransport, saveExpense, mode,
+    lang, sale, numDiscount, totalPaid, memoNo, purchase, numTransport, paymentNote, saveExpense, mode,
     printDoc, resetForm, sales, purchases, focusCustomerInput, editId, refresh, onDone
   ]);
 
@@ -1510,7 +1521,7 @@ export function TradeDashboardForm({ mode, onDone, onOpenHistory, editId }: Trad
                                   </View>
                                 )}
                               </View>
-                              <Text style={styles.dropdownItemSub}>{[p.mobile, pDisplayCode ? `${tx('কোড:', 'Code:')} ${pDisplayCode}` : ''].filter(Boolean).join(' • ')}</Text>
+                              <Text style={styles.dropdownItemSub}>{[localeDigits(p.mobile, lang), pDisplayCode ? `${tx('কোড:', 'Code:')} ${pDisplayCode}` : ''].filter(Boolean).join(' • ')}</Text>
                             </View>
                             <View style={{ alignItems: 'flex-end', gap: 2 }}>
                               <Text style={styles.dropdownItemDue}>{m(bal(isSale ? 'c' : 'v', p.id).balance)}</Text>
@@ -1576,7 +1587,7 @@ export function TradeDashboardForm({ mode, onDone, onOpenHistory, editId }: Trad
               <View style={[styles.inputDebossed, styles.inputReadOnly]}>
                 <TextInput
                   ref={el => (inputRefs.current['partyMobile'] = el)}
-                  value={partyMobile}
+                  value={localeDigits(partyMobile, lang)}
                   editable={false}
                   style={[styles.textInput, styles.textInputReadOnly]}
                   placeholder={tx('মোবাইল নম্বর', 'Mobile number')}
@@ -2449,7 +2460,7 @@ export function TradeDashboardForm({ mode, onDone, onOpenHistory, editId }: Trad
                       {partyMobile ? (
                         <View style={{ flexDirection: 'row', justifyContent: 'space-between' }}>
                     <Text style={{ fontSize: 13, color: '#64748B' }}>{tx('মোবাইল:', 'Mobile:')}</Text>
-                          <Text style={{ fontSize: 13, color: '#334155' }}>{partyMobile}</Text>
+                          <Text style={{ fontSize: 13, color: '#334155' }}>{localeDigits(partyMobile, lang)}</Text>
                         </View>
                       ) : null}
                       <View style={{ flexDirection: 'row', justifyContent: 'space-between' }}>
@@ -2553,6 +2564,7 @@ export function TradeDashboardForm({ mode, onDone, onOpenHistory, editId }: Trad
                     </View>
 
                     <AccountPicker accountId={bankAccountId} onPick={setBankAccountId} label={isSale ? 'Bank receiving account' : 'Bank payment account'} required={numBank > 0} accountType="bank" />
+                    <Field label={tx('পেমেন্টের নোট', 'Payment note')} value={paymentNote} onChange={setPaymentNote} />
 
                     {/* 4. DISCOUNT */}
                     <View style={{ marginBottom: 10 }}>
@@ -2614,11 +2626,28 @@ export function TradeDashboardForm({ mode, onDone, onOpenHistory, editId }: Trad
                       <Text style={{ fontSize: 16, fontWeight: '800', color: '#B45309' }}>৳{toBnDigits(String(Math.round(invoiceDue)))}</Text>
                     </View>
 
-                    {/* 6. TOTAL PREVIOUS DUE */}
-                    <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingVertical: 5 }}>
+                    {/* 6. Prior due or available party advance */}
+                    {prevDue < 0 ? <View style={{ padding: 9, backgroundColor: '#ECFDF5', borderRadius: 8, borderWidth: 1, borderColor: '#A7F3D0', marginVertical: 5 }}>
+                      <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingVertical: 3 }}>
+                        <Text style={{ fontSize: 13, fontWeight: '700', color: '#047857' }}>{tx('আগের অগ্রিম জমা:', 'Available party advance:')}</Text>
+                        <Text style={{ fontSize: 14, fontWeight: '800', color: '#047857' }}>৳{toBnDigits(String(Math.round(Math.abs(prevDue))))}</Text>
+                      </View>
+                      <Text style={{ fontSize: 11, color: '#047857', marginBottom: 4 }}>{tx('ইনভয়েসে অগ্রিম সমন্বয় করতে বাটনে চাপ দিন।', 'Press the button to apply advance to this invoice.')}</Text>
+                      <TouchableOpacity
+                        onPress={() => setAdvanceToApply(current => current > 0 ? 0 : Math.min(Math.abs(prevDue), invoiceDue))}
+                        disabled={invoiceDue <= 0}
+                        style={{ backgroundColor: selectedAdvance > 0 ? '#047857' : '#059669', paddingVertical: 8, paddingHorizontal: 12, borderRadius: 7, alignSelf: 'flex-start', marginVertical: 4, opacity: invoiceDue <= 0 ? 0.5 : 1 }}
+                      >
+                        <Text style={{ color: '#FFFFFF', fontSize: 12, fontWeight: '800' }}>{selectedAdvance > 0 ? tx('অগ্রিম সমন্বয় বাতিল', 'Remove advance adjustment') : tx('অগ্রিম সমন্বয় করুন', 'Apply advance')}</Text>
+                      </TouchableOpacity>
+                      <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingVertical: 3 }}>
+                        <Text style={{ fontSize: 12, fontWeight: '600', color: '#047857' }}>{tx('এই ইনভয়েসে সমন্বয়:', 'Applied to this invoice:')}</Text>
+                        <Text style={{ fontSize: 13, fontWeight: '800', color: '#047857' }}>৳{toBnDigits(String(Math.round(selectedAdvance)))}</Text>
+                      </View>
+                    </View> : <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingVertical: 5 }}>
                       <Text style={{ fontSize: 14, fontWeight: '700', color: '#64748B' }}>{tx('পূর্বের মোট বাকি:', 'Previous balance due:')}</Text>
                       <Text style={{ fontSize: 16, fontWeight: '800', color: '#DC2626' }}>৳{toBnDigits(String(Math.round(prevDue)))}</Text>
-                    </View>
+                    </View>}
 
                     {/* 7. A CLEAR SEPARATOR LINE */}
                     <View style={{ height: 2, backgroundColor: '#94A3B8', marginVertical: 8 }} />

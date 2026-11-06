@@ -40,6 +40,8 @@ type Movement = {
  *
  * IN  (purchase / opening / good return): value += qty * unitCost, avg re-blends.
  * OUT (sale / purchase return):           value -= qty * unitCost, avg stays.
+ * Negative sellable quantity and value are kept when negative-stock sales are
+ * enabled; later purchases resolve their provisional COGS in writeMovement.
  */
 export function applyMovement(
   p: ProductRow,
@@ -72,10 +74,7 @@ export function applyMovement(
     value = round2(-out * useCost);
     qtyKg = round2(p.qtyKg - out);
     stockValue = round2(p.stockValue + value);
-    if (qtyKg <= 0 || stockValue < 0) {
-      qtyKg = qtyKg < 0 ? 0 : qtyKg;
-      stockValue = 0;
-    }
+    if (qtyKg === 0 && Math.abs(stockValue) < 0.01) stockValue = 0;
   }
 
   const cost = round2(avgCost(qtyKg, stockValue, unitCost || p.cost));
@@ -126,12 +125,59 @@ export async function writeMovement(
       note: m.note ?? null,
     },
   });
+  let valueAfter = next.stockValue;
+  let avgAfter = next.cost;
+
+  // A receipt that covers previously sold negative stock changes the actual
+  // cost of those sales. Assign received units to the oldest unresolved sale
+  // lines first, update their COGS/profit, and write an auditable value change.
+  if (m.type === 'PURCHASE' && m.bucket === 'sellable' && m.qtyKg > 0 && p.qtyKg < 0) {
+    let left = Math.min(round2(m.qtyKg), round2(-p.qtyKg));
+    let totalCostDelta = 0;
+    const priorSaleItems = await t.saleItem.findMany({
+      where: { productId: p.id, negativeStockQtyKg: { gt: 0 } },
+      include: { sale: { select: { id: true, profit: true } } },
+      orderBy: [{ sale: { date: 'asc' } }, { sale: { createdAt: 'asc' } }, { id: 'asc' }],
+    });
+    const profitBySale = new Map<string, number>();
+    for (const item of priorSaleItems) {
+      if (left <= 0) break;
+      const openNegativeQty = round2(Math.max(0, item.negativeStockQtyKg - item.negativeStockCostAdjustedQtyKg));
+      const matchedQty = round2(Math.min(left, openNegativeQty));
+      if (matchedQty <= 0) continue;
+      const delta = round2(matchedQty * (m.unitCost - item.unitCost));
+      await t.saleItem.update({ where: { id: item.id }, data: {
+        cogs: round2(item.cogs + delta),
+        unitCost: item.qtyKg > 0 ? round2((item.cogs + delta) / item.qtyKg) : item.unitCost,
+        negativeStockCostAdjustedQtyKg: round2(item.negativeStockCostAdjustedQtyKg + matchedQty),
+      } });
+      const currentProfit = profitBySale.get(item.sale.id) ?? item.sale.profit;
+      const newProfit = round2(currentProfit - delta);
+      profitBySale.set(item.sale.id, newProfit);
+      await t.sale.update({ where: { id: item.sale.id }, data: { profit: newProfit } });
+      if (delta !== 0) {
+        await t.stockMovement.create({ data: {
+          productId: p.id, type: 'NEGATIVE_STOCK_COGS_ADJUSTMENT', bucket: 'sellable',
+          qtyKg: 0, unitCost: round2(m.unitCost), value: round2(-delta), date: m.date,
+          refId: m.refId ?? null,
+          note: `Negative stock COGS adjusted by ${delta.toFixed(2)} for ${matchedQty.toFixed(2)} kg at receipt cost ${m.unitCost.toFixed(2)}.`,
+        } });
+      }
+      totalCostDelta = round2(totalCostDelta + delta);
+      left = round2(left - matchedQty);
+    }
+    if (totalCostDelta !== 0) {
+      valueAfter = round2(next.stockValue - totalCostDelta);
+      avgAfter = next.qtyKg > 0 ? round2(valueAfter / next.qtyKg) : next.cost;
+      await t.product.update({ where: { id: p.id }, data: { stockValue: valueAfter, cost: avgAfter } });
+    }
+  }
   return {
     unitCost: round2(movement.unitCost),
     value: movement.value,
     qtyAfter: next.qtyKg,
-    valueAfter: next.stockValue,
-    avgAfter: next.cost,
+    valueAfter,
+    avgAfter,
   };
 }
 

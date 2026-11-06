@@ -4,7 +4,7 @@ import { toKg, isUnit, transactionDay } from '../units';
 import { recordMovement, resolveAccount } from '../money';
 import { currentAvgCost, round2 as r2, writeMovement } from '../valuation';
 import { syncPartyInvoices } from '../settlement';
-import { nextInvoiceNo, type TxClient } from './transactions';
+import { nextInvoiceNo, nextPaymentNo, type TxClient } from './transactions';
 
 export const returns = Router();
 
@@ -195,9 +195,10 @@ returns.post('/', async (req: Request, res: Response) => {
         //    reduction are the same figure and COGS is left undisturbed
         //  - 'others' line  -> no original line exists, so the stock's current
         //    weighted average cost is used (the one documented exception)
-        const origUnitCost = (orig as { unitCost?: number } | undefined)?.unitCost;
+        const saleOrig = orig as { unitCost?: number; cogs?: number; qtyKg: number; negativeStockQtyKg?: number; negativeStockCostAdjustedQtyKg?: number } | undefined;
+        const origUnitCost = saleOrig?.unitCost;
         const unitCost = orig
-          ? (kind === 'sale' ? r2(origUnitCost ?? 0) : r2(orig.rate))
+          ? (kind === 'sale' ? r2(saleOrig!.qtyKg > 0 ? ((saleOrig!.cogs ?? 0) / saleOrig!.qtyKg) : (origUnitCost ?? 0)) : r2(orig.rate))
           : r2(await currentAvgCost(t, p.id));
         const cogsReversed = r2(goodKg * unitCost);
         const damagedValue = r2(damagedKg * unitCost);
@@ -208,6 +209,16 @@ returns.post('/', async (req: Request, res: Response) => {
           // cost, so that part of the original COGS is genuinely reversed.
           if (goodKg > 0) {
             await writeMovement(t, p.id, { type: 'SRETURN', bucket: 'sellable', qtyKg: goodKg, unitCost, date: day, refId: lineKey || null });
+            if (orig && lineKey) {
+              const openNegativeQty = r2(Math.max(0, (saleOrig!.negativeStockQtyKg ?? 0) - (saleOrig!.negativeStockCostAdjustedQtyKg ?? 0)));
+              const returnedUnadjusted = r2(Math.min(goodKg, openNegativeQty));
+              const returnedAdjusted = r2(Math.min(Math.max(0, goodKg - returnedUnadjusted), saleOrig!.negativeStockCostAdjustedQtyKg ?? 0));
+              const returnedNegativeQty = r2(returnedUnadjusted + returnedAdjusted);
+              if (returnedNegativeQty > 0) await t.saleItem.update({ where: { id: orig.id }, data: {
+                negativeStockQtyKg: r2(Math.max(0, (saleOrig!.negativeStockQtyKg ?? 0) - returnedNegativeQty)),
+                negativeStockCostAdjustedQtyKg: r2(Math.max(0, (saleOrig!.negativeStockCostAdjustedQtyKg ?? 0) - returnedAdjusted)),
+              } });
+            }
           }
           // Damaged goods are NOT sellable stock. They are valued in the
           // damaged bucket at the same historical cost and excluded from
@@ -267,12 +278,12 @@ returns.post('/', async (req: Request, res: Response) => {
         if (kind === 'sale') {
           const s = parent as { customerId?: string | null };
           await t.customerPayment.create({
-            data: { customerId: s.customerId ?? null, saleId: null, returnId: created.id, amount: totalAmount, date: day, note: returnNo },
+            data: { paymentNo: await nextPaymentNo(t, 'received'), customerId: s.customerId ?? null, saleId: null, returnId: created.id, amount: totalAmount, date: day, note: returnNo },
           });
         } else {
           const v = parent as { vendorId: string };
           await t.vendorPayment.create({
-            data: { vendorId: v.vendorId, purchaseId: null, returnId: created.id, amount: totalAmount, date: day, note: returnNo },
+            data: { paymentNo: await nextPaymentNo(t), vendorId: v.vendorId, purchaseId: null, returnId: created.id, amount: totalAmount, date: day, note: returnNo },
           });
         }
       }

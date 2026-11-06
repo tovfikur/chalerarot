@@ -19,15 +19,16 @@ search.get('/', async (req: Request, res: Response) => {
   if (!q) return res.json({ invoices: [], returns: [], customers: [], vendors: [], more: { invoices: false, returns: false, customers: false, vendors: false } });
 
   const ci = { contains: q, mode: 'insensitive' } as const;
+  const exact = { equals: q, mode: 'insensitive' } as const;
   const [sales, purs, retList, custs, vends] = await Promise.all([
     db.sale.findMany({
-      where: { OR: [{ invoiceNo: ci }, { customer: { OR: [{ name: ci }, { mobile: ci }] } }] },
+      where: { OR: [{ invoiceNo: exact }, { customer: { OR: [{ name: ci }, { mobile: ci }, { code: exact }] } }] },
       orderBy: [{ date: 'desc' }, { createdAt: 'desc' }],
       take: lim + 1,
       include: { customer: { select: { name: true } } },
     }),
     db.purchase.findMany({
-      where: { OR: [{ invoiceNo: ci }, { vendor: { OR: [{ name: ci }, { mobile: ci }] } }] },
+      where: { OR: [{ invoiceNo: exact }, { vendor: { OR: [{ name: ci }, { mobile: ci }, { code: exact }] } }] },
       orderBy: [{ date: 'desc' }, { createdAt: 'desc' }],
       take: lim + 1,
       include: { vendor: { select: { name: true } } },
@@ -35,9 +36,9 @@ search.get('/', async (req: Request, res: Response) => {
     db.productReturn.findMany({
       where: {
         OR: [
-          { returnNo: ci },
-          { sale: { customer: { OR: [{ name: ci }, { mobile: ci }] } } },
-          { purchase: { vendor: { OR: [{ name: ci }, { mobile: ci }] } } },
+          { returnNo: exact },
+          { sale: { customer: { OR: [{ name: ci }, { mobile: ci }, { code: exact }] } } },
+          { purchase: { vendor: { OR: [{ name: ci }, { mobile: ci }, { code: exact }] } } },
         ],
       },
       orderBy: [{ date: 'desc' }, { createdAt: 'desc' }],
@@ -48,12 +49,12 @@ search.get('/', async (req: Request, res: Response) => {
       },
     }),
     db.customer.findMany({
-      where: { deletedAt: null, OR: [{ name: ci }, { mobile: ci }] },
+      where: { deletedAt: null, OR: [{ name: ci }, { mobile: ci }, { code: exact }] },
       orderBy: { name: 'asc' },
       take: lim + 1,
     }),
     db.vendor.findMany({
-      where: { deletedAt: null, OR: [{ name: ci }, { mobile: ci }] },
+      where: { deletedAt: null, OR: [{ name: ci }, { mobile: ci }, { code: exact }] },
       orderBy: { name: 'asc' },
       take: lim + 1,
     }),

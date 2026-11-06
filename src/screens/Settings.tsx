@@ -12,7 +12,7 @@ export function Settings() {
   const { user } = useAuth();
   const { business, saveBusiness, lang } = useApp();
   const [draft, setDraft] = useState(business);
-  const [section, setSection] = useState<'business' | 'language' | 'profile' | 'users' | 'log' | 'trash' | null>(null);
+  const [section, setSection] = useState<'business' | 'language' | 'inventory' | 'profile' | 'users' | 'log' | 'trash' | null>(null);
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState('');
   const [failed, setFailed] = useState(false);
@@ -31,6 +31,7 @@ export function Settings() {
   const back = <Btn kind="ghost" label={label('সেটিংসে ফিরুন', 'Back to Settings')} icon={icons.back} onPress={() => open(null)} testID="settings-back" />;
   const menus: { id: NonNullable<typeof section>; title: string; icon: IconName; admin?: boolean }[] = [
     { id: 'business', title: label('ব্যবসার তথ্য', 'Business settings'), icon: icons.office, admin: true },
+    { id: 'inventory', title: label('Inventory settings', 'Inventory settings'), icon: icons.stock, admin: true },
     { id: 'language', title: label('ভাষা', 'Language'), icon: icons.language, admin: true },
     { id: 'profile', title: label('আমার প্রোফাইল', 'My profile'), icon: icons.customers },
     { id: 'users', title: label('ব্যবহারকারী', 'Users'), icon: icons.customers, admin: true },
@@ -49,6 +50,19 @@ export function Settings() {
     )}</View> : null}
     {section === 'profile' || section === 'users' ? <UserSettings key={section} section={section} /> : null}
     {section === 'log' ? <ActivityLog /> : null}
+    {user.role === 'admin' && section === 'inventory' ? <>
+      <Card>
+        <Title>Inventory settings</Title>
+        <Text style={{ color: '#475569', fontSize: 14, lineHeight: 20, marginBottom: 12 }}>When enabled, sales can make stock negative. The next purchase will match those sold units at its actual landed average cost and update COGS.</Text>
+        <TouchableOpacity onPress={() => { setDraft({ ...draft, allowNegativeStock: !draft.allowNegativeStock }); setMessage(''); }} accessibilityRole="switch" accessibilityState={{ checked: draft.allowNegativeStock }}
+          style={{ minHeight: 56, paddingHorizontal: 14, borderRadius: 12, borderWidth: 1.5, borderColor: draft.allowNegativeStock ? '#059669' : '#CBD5E1', backgroundColor: draft.allowNegativeStock ? '#ECFDF5' : '#F8FAFC', flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }}>
+          <Text style={{ color: draft.allowNegativeStock ? '#047857' : '#334155', fontSize: 15, fontWeight: '800' }}>Allow negative stock sales</Text>
+          <View style={{ minWidth: 88, minHeight: 36, borderRadius: 18, alignItems: 'center', justifyContent: 'center', backgroundColor: draft.allowNegativeStock ? '#059669' : '#64748B' }}><Text style={{ color: '#FFFFFF', fontWeight: '900' }}>{draft.allowNegativeStock ? 'ON' : 'OFF'}</Text></View>
+        </TouchableOpacity>
+      </Card>
+      {message ? <Text accessibilityRole="alert" style={{ color: failed ? '#DC2626' : '#15803D' }}>{message}</Text> : null}
+      <Btn label={busy ? 'Saving…' : 'Save inventory settings'} onPress={save} testID="save-settings" />
+    </> : null}
     {user.role === 'admin' && (section === 'business' || section === 'language') ? <>
     {section === 'business' ?
     <Card>

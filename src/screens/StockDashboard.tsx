@@ -24,7 +24,9 @@ export function StockDashboard() {
   const [activeTab, setActiveTab] = useState<'products' | 'movements' | 'audit'>('products');
 
   // Search & filter
-  const [searchQuery, setSearchQuery] = useState('');
+  const [codeQuery, setCodeQuery] = useState('');
+  const [nameQuery, setNameQuery] = useState('');
+  const searchQuery = [codeQuery.trim() ? `Code: ${codeQuery.trim()}` : '', nameQuery.trim() ? `Name: ${nameQuery.trim()}` : ''].filter(Boolean).join(' | ');
 
   // Pagination
   const [page, setPage] = useState(1);
@@ -113,12 +115,10 @@ export function StockDashboard() {
 
   // Filtered rows for Product list
   const filteredRows = useMemo(() => {
-    const q = searchQuery.trim().toLowerCase();
-    if (!q) return stockData;
-    return stockData.filter(
-      r => r.code.toLowerCase().includes(q) || r.name.toLowerCase().includes(q)
-    );
-  }, [stockData, searchQuery]);
+    const code = codeQuery.trim().toLowerCase();
+    const name = nameQuery.trim().toLowerCase();
+    return stockData.filter(r => (!code || r.code.trim().toLowerCase() === code) && (!name || r.name.toLowerCase().includes(name)));
+  }, [stockData, codeQuery, nameQuery]);
 
   // Audit rows computation
   const auditRows = useMemo<AuditRow[]>(() => {
@@ -218,16 +218,15 @@ export function StockDashboard() {
 
   // Filtered audit rows
   const filteredAuditRows = useMemo(() => {
-    const q = searchQuery.trim().toLowerCase();
+    const code = codeQuery.trim().toLowerCase();
+    const name = nameQuery.trim().toLowerCase();
     let list = auditRows;
     if (showOnlyDiscrepancies) {
       list = list.filter(r => r.physicalKg !== null && Math.abs(r.deltaKg) >= 0.01);
     }
-    if (q) {
-      list = list.filter(r => r.code.toLowerCase().includes(q) || r.name.toLowerCase().includes(q));
-    }
+    if (code || name) list = list.filter(r => (!code || r.code.trim().toLowerCase() === code) && (!name || r.name.toLowerCase().includes(name)));
     return list;
-  }, [auditRows, showOnlyDiscrepancies, searchQuery]);
+  }, [auditRows, showOnlyDiscrepancies, codeQuery, nameQuery]);
 
   // Pagination for current view
   const currentTotalRows = activeTab === 'audit' ? filteredAuditRows.length : filteredRows.length;
@@ -667,17 +666,17 @@ export function StockDashboard() {
 
       {/* Filter and Search Bar */}
       <View style={styles.filterCard}>
-        <View style={styles.searchInputWrap}>
-          <AppIcon name={icons.search} size={18} iconColor="#94A3B8" />
-          <TextInput
-            value={searchQuery}
-            onChangeText={v => {
-              setSearchQuery(v);
-              setPage(1);
-            }}
-            style={styles.filterTextInput}
-            placeholder={activeTab === 'audit' ? label('অডিট তালিকায় পণ্য কোড বা নাম দিয়ে খুঁজুন...', 'Search audit by product code or name...') : label('পণ্য কোড বা পণ্যের নাম দিয়ে খুঁজুন...', 'Search by product code or name...')}
-          />
+        <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 10 }}>
+          <View style={[styles.searchInputWrap, { flex: 1, minWidth: 220 }]}>
+            <AppIcon name={icons.search} size={18} iconColor="#94A3B8" />
+            <TextInput value={codeQuery} onChangeText={v => { setCodeQuery(v); setPage(1); }} style={styles.filterTextInput}
+              placeholder={label('সঠিক পণ্য কোড', 'Exact product code')} accessibilityLabel="Exact product code" />
+          </View>
+          <View style={[styles.searchInputWrap, { flex: 1, minWidth: 220 }]}>
+            <AppIcon name={icons.search} size={18} iconColor="#94A3B8" />
+            <TextInput value={nameQuery} onChangeText={v => { setNameQuery(v); setPage(1); }} style={styles.filterTextInput}
+              placeholder={label('পণ্যের নাম খুঁজুন', 'Search product name')} accessibilityLabel="Search product name" />
+          </View>
         </View>
 
         {activeTab === 'audit' ? (
@@ -735,11 +734,11 @@ export function StockDashboard() {
                 </View>
 
                 <View style={[styles.td, { flex: 1.5, alignItems: 'flex-end' }]}>
-                  <Text style={[styles.cellBold, { color: '#0F172A' }]}>{digits(row.bags.toLocaleString(lang === 'bn' ? 'en-IN' : 'en-US'))}</Text>
+                  <Text style={[styles.cellBold, { color: row.bags < 0 ? '#DC2626' : '#0F172A' }]}>{digits(row.bags.toLocaleString(lang === 'bn' ? 'en-IN' : 'en-US'))}</Text>
                 </View>
 
                 <View style={[styles.td, { flex: 1.5, alignItems: 'flex-end' }]}>
-                  <Text style={styles.cellText}>{digits(Math.round(row.totalKg).toLocaleString(lang === 'bn' ? 'en-IN' : 'en-US'))}</Text>
+                  <Text style={[styles.cellText, { color: row.totalKg < 0 ? '#DC2626' : undefined, fontWeight: row.totalKg < 0 ? '800' : undefined }]}>{digits(Math.round(row.totalKg).toLocaleString(lang === 'bn' ? 'en-IN' : 'en-US'))}</Text>
                 </View>
 
                 <View style={[styles.td, { flex: 1.5, alignItems: 'flex-end' }]}>
@@ -751,7 +750,7 @@ export function StockDashboard() {
                 </View>
 
                 <View style={[styles.td, { flex: 1.5, alignItems: 'flex-end' }]}>
-                  <Text style={[styles.cellBold, { color: '#1c70b9' }]}>
+                  <Text style={[styles.cellBold, { color: row.stockVal < 0 ? '#DC2626' : '#1c70b9' }]}>
                     ৳{digits(Math.round(row.stockVal).toLocaleString(lang === 'bn' ? 'en-IN' : 'en-US'))}
                   </Text>
                 </View>
@@ -1240,7 +1239,7 @@ export function StockDashboard() {
                 {viewProduct.code ? <Text style={{ fontSize: 14, color: '#334155' }}>Code: {viewProduct.code}</Text> : null}
                 {viewProduct.description ? <Text testID="product-details-description" style={{ fontSize: 14, color: '#334155' }}>{viewProduct.description}</Text> : null}
                 <Text style={{ fontSize: 14, color: '#334155' }}>
-                  {label('বর্তমান মজুদ:', 'Current stock:')} <Text style={{ fontWeight: '700' }}>{n(viewProduct.qty)} {label('কেজি', 'kg')}</Text>
+                  {label('বর্তমান মজুদ:', 'Current stock:')} <Text style={{ fontWeight: '700', color: viewProduct.qty < 0 ? '#DC2626' : '#334155' }}>{n(viewProduct.qty)} {label('কেজি', 'kg')}</Text>
                 </Text>
                 <Text style={{ fontSize: 14, color: '#334155' }}>
                   {label('বস্তার ওজন:', 'Bag weight:')} <Text style={{ fontWeight: '700' }}>{viewProduct.mediumBagKg || 50} {label('কেজি', 'kg')}</Text>

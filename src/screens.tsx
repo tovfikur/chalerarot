@@ -5,11 +5,11 @@ import { BagUnit, CartLine, kgPerUnit, toKg, lineTotal } from './bags';
 import { Card, Title, Muted, Btn, Field, Chips, Row, Empty, Screen, SectionHead, PageHeader, ListPageHeader, ListTable, type TableColumn, type TableSort, AccountPicker, ACCOUNT_TYPES, methodIcon, methodName, useMoney, useNum, useDateStr, color } from './ui';
 import { AppIcon, icons } from './icons';
 import { RGrid, TwoPanel, FormGrid, useFs, useBreakpoint } from './responsive';
-import { SearchToggle, SearchableSelect, SearchDropdown, NoResult, matchProduct, matchParty } from './search';
+import { SearchToggle, SearchableSelect, SearchDropdown, NoResult, matchProduct, matchParty, exactCode } from './search';
 import { api, ApiError, type TxnPayment, type SettlementStatus, DetailItem, RecvDetail, PayDetail, TrashItem, SaleDetail, PurchaseDetail, ReturnDetail, ReturnableTxn, type AccountType, type Expense, type MoneyBalance, type MoneyMethod, type ChartAccountRow, type SavedJournalEntry, type JournalWrite } from './api';
 import { unitDetail, fmtTime, buildInvoiceText, buildInvoiceHTML, InvData, UnitNames } from './invoice';
 import { tp, Key } from './i18n';
-import { toEnDigits, toBnDigits, parseNum } from './bn';
+import { toEnDigits, toBnDigits, parseNum, localeDigits } from './bn';
 import { printReport, printedAtStamp, type ReportDoc, type ReportRow } from './report';
 import { downloadCSV } from './stockReport';
 import { TradeDashboardForm } from './screens/TradeDashboardForm';
@@ -402,7 +402,7 @@ export const ProductCard = React.memo(function ProductCard({
 
 // Product grid itself is the simple POS: tap to add, +/- quantity, multi-product cart.
 export function QuickSale({ done }: { done?: () => void }) {
-  const { t, products, customers, bal, sale } = useApp(); const m = useMoney(); const n = useNum();
+  const { t, lang, products, customers, bal, sale, business } = useApp(); const m = useMoney(); const n = useNum();
   const { kg, label } = useUnitLabel();
   const { isMobile } = useBreakpoint();
   const [sheetOpen, setSheetOpen] = useState(false);
@@ -429,7 +429,7 @@ export function QuickSale({ done }: { done?: () => void }) {
     const sum = (i === -1 ? 0 : qs[i].enteredQty) + enteredQty;
     const qtyKg = toKg(p, unit, sum);
     const othersKg = qs.reduce((s, l, j) => (l.productId === p.id && j !== i ? s + l.qtyKg : s), 0);
-    if (othersKg + qtyKg > p.qty) { Alert.alert(t('outOfStock'), `${p.name}: ${n(p.qty)} ${kg}`); return false; }
+    if (!business.allowNegativeStock && othersKg + qtyKg > p.qty) { Alert.alert(t('outOfStock'), `${p.name}: ${n(p.qty)} ${kg}`); return false; }
     // Keep the rate captured when the line was first added; only a brand new
     // line takes today's price.
     const line: CartLine = { productId: p.id, unit, enteredQty: sum, qtyKg, rate: i === -1 ? p.price : qs[i].rate };
@@ -437,7 +437,7 @@ export function QuickSale({ done }: { done?: () => void }) {
     cartRef.current = next;
     setCart(next);
     return true;
-  }, [t, n, kg]);
+  }, [t, n, kg, business.allowNegativeStock]);
 
   // Total KG already in the (unsaved) cart per product. Local cart state only -
   // no Products refetch, so the grid never reloads while a sale is being built.
@@ -458,7 +458,7 @@ export function QuickSale({ done }: { done?: () => void }) {
     for (const l of cart) need[l.productId] = (need[l.productId] ?? 0) + l.qtyKg;
     for (const pid of Object.keys(need)) {
       const p = products.find(x => x.id === pid)!;
-      if (need[pid] > p.qty) return Alert.alert(t('outOfStock'), p.name);
+      if (!business.allowNegativeStock && need[pid] > p.qty) return Alert.alert(t('outOfStock'), p.name);
     }
     (async () => {
       try {
@@ -474,16 +474,8 @@ export function QuickSale({ done }: { done?: () => void }) {
   };
 
   const searchBar = (
-    <SearchDropdown
-      items={products}
-      query={query}
-      setQuery={setQuery}
-      placeholder={t('searchProducts')}
-      match={matchProduct}
-      subOf={p => `${m(p.price)} / ${kg} • ${t('currentStock')}: ${n(p.qty)} ${kg}`}
-      emptyText={t('noProduct')}
-      onSelect={p => setQuery(p.name)}
-    />
+    <SearchDropdown items={products} query={query} setQuery={setQuery} placeholder={t('searchProducts')} match={matchProduct}
+      subOf={p => `${m(p.price)} / ${kg} · ${t('currentStock')}: ${n(p.qty)} ${kg}`} emptyText={t('noProduct')} onSelect={p => setQuery(p.name)} />
   );
   const productGrid = (
     <View>
@@ -531,7 +523,7 @@ export function QuickSale({ done }: { done?: () => void }) {
         onPick={id => setParty(id)}
         placeholder={t('searchCustomers')}
         match={matchParty}
-        subOf={c => c.mobile}
+        subOf={c => localeDigits(c.mobile, lang)}
         rightOf={c => ({ text: m(bal('c', c.id).balance), sub: t('receivable'), neg: bal('c', c.id).balance > 0 })}
         emptyText={t('noCustomer')}
       />
@@ -615,11 +607,11 @@ export function QuickSale({ done }: { done?: () => void }) {
  * any way to see the records they produce, so the module is now list-first:
  * the completed document list, with the existing New form one tap away.
  */
-export function Trade({ mode }: { mode: 'sale' | 'purchase' }) {
+export function Trade({ mode, editId, onEditDone }: { mode: 'sale' | 'purchase'; editId?: string | null; onEditDone?: () => void }) {
   const [view, setView] = useState<'list' | 'new'>('new');
   const [focusId, setFocusId] = useState<string | null>(null);
   if (view === 'new') {
-    return <TradeDashboardForm mode={mode} onDone={() => setView('list')} onOpenHistory={() => setView('list')} />;
+    return <TradeDashboardForm mode={mode} editId={editId} onDone={() => { if (editId) onEditDone?.(); setView('list'); }} onOpenHistory={() => setView('list')} />;
   }
   return <TxnHistory kind={mode} onNew={() => setView('new')} focus={focusId} onFocusDone={() => setFocusId(null)} />;
 }
@@ -632,7 +624,7 @@ export function Trade({ mode }: { mode: 'sale' | 'purchase' }) {
  * here without any extra fetch and without a reload. Desktop gets the shared
  * Odoo-style table; mobile keeps the card pattern.
  */
-type TxnRow = { id: string; no: string; date: string; partyId?: string; partyName: string; partyCode?: string; productNames: string[]; total: number; paid: number; due: number; status: SettlementStatus };
+type TxnRow = { id: string; no: string; date: string; partyId?: string; partyName: string; partyCode?: string; productNames: string[]; productCodes: string[]; total: number; paid: number; due: number; status: SettlementStatus };
 // Canonical status label: paid (due 0) / partial (some paid, due remains) / due.
 const statusLabel = (t: (k: Key) => string, r: { due: number; status?: SettlementStatus }) => {
   const st: SettlementStatus = r.status ?? (r.due > 0 ? 'due' : 'paid');
@@ -684,8 +676,8 @@ function TxnHistory({ kind, onNew, focus, onFocusDone }: {
     ? customers.find(c => c.id === id)?.code
     : vendors.find(v => v.id === id)?.code) ?? '';
   const rowsAll: TxnRow[] = useMemo(() => (isSale
-    ? sales.map(s => ({ id: s.id, no: s.invoiceNo ?? s.id, date: s.date, partyId: s.customerId, partyName: nameOf(s.customerId), partyCode: codeOf(s.customerId), productNames: (s.items ?? []).flatMap(it => [it.productName, it.productCode ?? '']), total: s.total, paid: s.paid, due: s.due, status: s.status }))
-    : purchases.map(p => ({ id: p.id, no: p.invoiceNo ?? p.id, date: p.date, partyId: p.vendorId, partyName: nameOf(p.vendorId), partyCode: codeOf(p.vendorId), productNames: (p.items ?? []).flatMap(it => [it.productName, it.productCode ?? '']), total: p.total, paid: p.paid, due: p.due, status: p.status }))),
+    ? sales.map(s => ({ id: s.id, no: s.invoiceNo ?? s.id, date: s.date, partyId: s.customerId, partyName: nameOf(s.customerId), partyCode: codeOf(s.customerId), productNames: (s.items ?? []).map(it => it.productName), productCodes: (s.items ?? []).map(it => it.productCode ?? '').filter(Boolean), total: s.total, paid: s.paid, due: s.due, status: s.status }))
+    : purchases.map(p => ({ id: p.id, no: p.invoiceNo ?? p.id, date: p.date, partyId: p.vendorId, partyName: nameOf(p.vendorId), partyCode: codeOf(p.vendorId), productNames: (p.items ?? []).map(it => it.productName), productCodes: (p.items ?? []).map(it => it.productCode ?? '').filter(Boolean), total: p.total, paid: p.paid, due: p.due, status: p.status }))),
   // Newest first by default: a transaction just completed is the first row.
   [sales, purchases, customers, vendors, isSale, t]);
 
@@ -714,11 +706,11 @@ function TxnHistory({ kind, onNew, focus, onFocusDone }: {
   const partyNameNeedle = partyNameQuery.trim().toLowerCase();
   const partyCodeNeedle = partyCodeQuery.trim().toLowerCase();
   const shown = base.filter(r =>
-    (!needle || r.no.toLowerCase().includes(needle) || r.partyName.toLowerCase().includes(needle) || r.partyCode?.toLowerCase().includes(needle) || r.productNames.some(name => name.toLowerCase().includes(needle)))
-    && (!memoNeedle || r.no.toLowerCase().includes(memoNeedle))
+    (!needle || r.no.toLowerCase() === needle || r.partyName.toLowerCase().includes(needle) || exactCode(r.partyCode, needle) || r.productNames.some(name => name.toLowerCase().includes(needle)) || r.productCodes.some(code => exactCode(code, needle)))
+    && (!memoNeedle || r.no.toLowerCase() === memoNeedle)
     && (!partyNameNeedle || r.partyName.toLowerCase().includes(partyNameNeedle))
-    && (!partyCodeNeedle || (r.partyCode ?? '').toLowerCase().includes(partyCodeNeedle))
-    && (!productNeedle || r.productNames.some(name => name.toLowerCase().includes(productNeedle)))
+    && (!partyCodeNeedle || exactCode(r.partyCode, partyCodeNeedle))
+    && (!productNeedle || r.productNames.some(name => name.toLowerCase().includes(productNeedle)) || r.productCodes.some(code => exactCode(code, productNeedle)))
   );
   const rows = useMemo(() => [...shown].sort((a, b) => (a.date < b.date ? 1 : a.date > b.date ? -1 : 0)), [shown]);
 
@@ -894,7 +886,7 @@ function TxnHistory({ kind, onNew, focus, onFocusDone }: {
 
 /** New Purchase form (existing behaviour, unchanged). */
 function NewPurchase({ onDone }: { onDone: () => void }) {
-  const { t, products, vendors, bal, purchase } = useApp(); const m = useMoney(); const n = useNum();
+  const { t, lang, products, vendors, bal, purchase } = useApp(); const m = useMoney(); const n = useNum();
   const { kg, label } = useUnitLabel();
   const [party, setParty] = useState<string>(); const [pid, setPid] = useState<string>();
   const [unit, setUnit] = useState<BagUnit>('kg'); const [qv, setQv] = useState(''); const [rate, setRate] = useState('');
@@ -938,7 +930,7 @@ function NewPurchase({ onDone }: { onDone: () => void }) {
               onPick={id => setParty(id)}
               placeholder={t('searchVendors')}
               match={matchParty}
-              subOf={v => v.mobile}
+              subOf={v => localeDigits(v.mobile, lang)}
               rightOf={v => ({ text: m(bal('v', v.id).balance), sub: t('payable'), neg: bal('v', v.id).balance > 0 })}
               emptyText={t('noVendor')}
             />
@@ -1003,8 +995,12 @@ export function Products() {
   const [f, setF] = useState<Product | null>(null);
   const [bulkOpen, setBulkOpen] = useState(false);
   const [v, setV] = useState({ code: '', name: '', description: '', cost: '', price: '', opening: '', sb: '25', mb: '40', lb: '50' });
-  const [pq, setPq] = useState('');
-  const listed = products.filter(p => matchProduct(p, pq));
+  const [productCodeQuery, setProductCodeQuery] = useState('');
+  const [productNameQuery, setProductNameQuery] = useState('');
+  const listed = products.filter(p =>
+    (!productCodeQuery.trim() || exactCode(p.code, productCodeQuery)) &&
+    (!productNameQuery.trim() || p.name.toLowerCase().includes(productNameQuery.trim().toLowerCase()))
+  );
   const open = (p?: Product) => {
     setF(p ?? { id: '', name: '', cost: 0, price: 0, opening: 0, qty: 0, uom: 'kg', smallBagKg: 25, mediumBagKg: 40, largeBagKg: 50 });
     setV(p
@@ -1086,16 +1082,10 @@ export function Products() {
         </TouchableOpacity>
       }
     />
-    <SearchDropdown
-      items={products}
-      query={pq}
-      setQuery={setPq}
-      placeholder={t('searchProducts')}
-      match={matchProduct}
-      subOf={p => `${m(p.price)} / ${kg} • ${t('currentStock')}: ${n(p.qty)} ${kg}`}
-      emptyText={t('noProduct')}
-      onSelect={p => setPq(p.name)}
-    />
+    <FormGrid>
+      <Field label={lang === 'bn' ? 'সঠিক পণ্য কোড' : 'Exact product code'} accessibilityLabel="Exact product code" value={productCodeQuery} onChange={setProductCodeQuery} />
+      <Field label={lang === 'bn' ? 'পণ্যের নাম খুঁজুন' : 'Search product name'} accessibilityLabel="Search product name" value={productNameQuery} onChange={setProductNameQuery} />
+    </FormGrid>
     <RGrid mobile={1} tablet={2} desktop={3}>
       {listed.length ? listed.map(p => <Card key={p.id}><Title>{p.name}</Title>
         {p.code ? <Row left={t('code')} right={p.code} /> : null}<Row icon={icons.stock} left={t('currentStock')} right={`${n(p.qty)} ${kg}`} neg={p.qty <= 0} /><Row left={t('cost')} right={m(p.cost)} /><Row left={t('price')} right={m(p.price)} />
@@ -1103,7 +1093,7 @@ export function Products() {
         {(p.damagedQty ?? 0) > 0 ? <Row left={t('damagedStock')} right={`${n(p.damagedQty ?? 0)} ${kg}`} neg /> : null}
         <Muted>{t('bagWeight')}: {n(p.smallBagKg)} / {n(p.mediumBagKg)} / {n(p.largeBagKg)} {kg}</Muted>
         <View style={{ flexDirection: 'row', gap: 8 }}><View style={{ flex: 1 }}><Btn kind="ghost" icon={icons.edit} label={t('edit')} onPress={() => open(p)} /></View>
-          <View style={{ flex: 1 }}><Btn kind="danger" icon={icons.del} label={t('del')} onPress={() => remove(p.id)} /></View></View></Card>) : <Card>{pq.trim() ? <NoResult /> : <Empty />}</Card>}
+          <View style={{ flex: 1 }}><Btn kind="danger" icon={icons.del} label={t('del')} onPress={() => remove(p.id)} /></View></View></Card>) : <Card>{productCodeQuery.trim() || productNameQuery.trim() ? <NoResult /> : <Empty />}</Card>}
     </RGrid>
     {confirmDel ? (
       <DetailShell title={t('del')} onClose={() => setConfirmDel(null)}>
@@ -1129,7 +1119,7 @@ export function Products() {
 }
 
 // Shared Customers / Vendors screen
-export function Parties({ kind, focus, onFocusDone, onReturn }: { kind: 'c' | 'v'; focus?: string | null; onFocusDone?: () => void; onReturn?: (kind: 'sale' | 'purchase', id: string) => void }) {
+export function Parties({ kind, focus, onFocusDone, onReturn, onEditTransaction }: { kind: 'c' | 'v'; focus?: string | null; onFocusDone?: () => void; onReturn?: (kind: 'sale' | 'purchase', id: string) => void; onEditTransaction?: (kind: 'sale' | 'purchase', id: string) => void }) {
   const { t, lang, customers, vendors, saveParty, deleteParty, bal, cTx, vTx } = useApp(); const m = useMoney(); const isC = kind === 'c';
   const fd = useDateStr();
   // Desktop gets the Odoo-style table; mobile/tablet keep the existing cards.
@@ -1142,15 +1132,18 @@ export function Parties({ kind, focus, onFocusDone, onReturn }: { kind: 'c' | 'v
   const [inv, setInv] = useState<{ kind: 'sale' | 'purchase'; id: string } | null>(null);
   const [retId, setRetId] = useState<string | null>(null);
   const [payOpen, setPayOpen] = useState(false);
+  const [txSearch, setTxSearch] = useState('');
+  const [txFrom, setTxFrom] = useState('');
+  const [txTo, setTxTo] = useState('');
+  const [txKind, setTxKind] = useState<'all' | 'invoice' | 'payment' | 'return'>('all');
   const [v, setV] = useState({ name: '', mobile: '', address: '', opening: '', code: '' });
   const [pq, setPq] = useState('');
-  const balFs = useFs(30, 24);
   const getPartyCode = useCallback((p: Party) => {
     return p.code?.trim() ?? '';
   }, []);
   const listed = list.filter(p => {
     const code = getPartyCode(p);
-    const codeMatch = pq.trim() ? code.includes(pq.trim()) : false;
+    const codeMatch = exactCode(code, pq);
     return matchParty(p, pq) || codeMatch;
   });
   // Newest transaction date per party, from the same local ledger that backs
@@ -1295,7 +1288,7 @@ export function Parties({ kind, focus, onFocusDone, onReturn }: { kind: 'c' | 'v
         </View>
       ),
     },
-    { key: 'mobile', label: t('mobile'), flex: 1.3, sort: p => p.mobile, render: (p, fs) => <Text style={{ fontSize: fs, color: color.text }}>{p.mobile || '-'}</Text> },
+    { key: 'mobile', label: t('mobile'), flex: 1.3, sort: p => p.mobile, render: (p, fs) => <Text style={{ fontSize: fs, color: color.text }}>{p.mobile ? localeDigits(p.mobile, lang) : '-'}</Text> },
     { key: 'total', label: isC ? t('totalSales') : t('totalPurchase'), flex: 1.1, align: 'right', sort: p => bal(kind, p.id).total, render: p => money(bal(kind, p.id).total) },
     { key: 'paid', label: t('totalPaid'), flex: 1.1, align: 'right', sort: p => bal(kind, p.id).paid, render: p => money(bal(kind, p.id).paid) },
     {
@@ -1303,18 +1296,21 @@ export function Parties({ kind, focus, onFocusDone, onReturn }: { kind: 'c' | 'v
       sort: p => bal(kind, p.id).balance,
       render: (p, fs) => {
         const b2 = bal(kind, p.id).balance;
-        return <Text style={{ fontSize: fs, fontWeight: '700', color: b2 > 0 ? color.red : color.primary }}>{m(b2)}</Text>;
+        return <View style={{ alignItems: 'flex-end' }}>
+          <Text style={{ fontSize: fs, fontWeight: '700', color: b2 > 0 ? color.red : b2 < 0 ? '#047857' : color.primary }}>{m(Math.abs(b2))}</Text>
+          {b2 < 0 ? <Text style={{ fontSize: 10, color: '#047857' }}>{lang === 'bn' ? 'অগ্রিম' : 'Advance'}</Text> : null}
+        </View>;
       },
     },
     { key: 'last', label: t('lastTransaction'), flex: 1.1, align: 'right', sort: p => lastDateOf[p.id] ?? '', render: p => <Text style={{ fontSize: 14, color: color.muted }}>{fd(lastDateOf[p.id])}</Text> },
-  ], [isC, kind, t, m, fd, bal, lastDateOf, list, getPartyCode]);
+  ], [isC, kind, lang, t, m, fd, bal, lastDateOf, list, getPartyCode]);
 
   if (f) return <Screen scrollRef={scrollRef} onScrollY={onScrollY}><BackLink label={sel ? t('back') : backLabel} onPress={back} />
     <Card>
     <FormGrid>
       <Field label={t('code')} accessibilityLabel="Party code" value={v.code} onChange={x => setV({ ...v, code: x })} />
       <Field label={t('name')} accessibilityLabel="Party name" value={v.name} onChange={x => setV({ ...v, name: x })} />
-      <Field label={t('mobile')} value={v.mobile} onChange={x => setV({ ...v, mobile: x })} num />
+      <Field label={t('mobile')} value={localeDigits(v.mobile, lang)} onChange={x => setV({ ...v, mobile: x })} num />
       <Field label={t('address')} value={v.address} onChange={x => setV({ ...v, address: x })} />
       <Field label={isC ? t('opening') : t('currentPayable')} value={v.opening} onChange={x => setV({ ...v, opening: x })} num />
     </FormGrid>
@@ -1322,7 +1318,7 @@ export function Parties({ kind, focus, onFocusDone, onReturn }: { kind: 'c' | 'v
       if (!v.name.trim()) return Alert.alert(t('invalid'));
       (async () => {
         try {
-          await saveParty(kind, { ...f, id: f.id || kind + Date.now(), code: v.code.trim(), name: v.name, mobile: v.mobile, address: v.address, opening: num(v.opening) });
+          await saveParty(kind, { ...f, id: f.id || kind + Date.now(), code: v.code.trim(), name: v.name, mobile: toEnDigits(v.mobile), address: v.address, opening: num(v.opening) });
           setF(null); setSel(null);
         } catch (e) {
           Alert.alert(e instanceof Error ? e.message : t('invalid'));
@@ -1333,6 +1329,23 @@ export function Parties({ kind, focus, onFocusDone, onReturn }: { kind: 'c' | 'v
   if (sel) {
     const b = bal(kind, sel.id), txs = (isC ? cTx : vTx).filter(x => x.partyId === sel.id);
     const lbl = (k: string) => (k === 'payment' ? t('payment') : k === 'sreturn' ? t('saleReturn') : k === 'preturn' ? t('purchaseReturn') : isC ? t('sale') : t('purchase'));
+    const matchingTxs = txs.filter(x => {
+      if (txFrom && x.date < txFrom) return false;
+      if (txTo && x.date > txTo) return false;
+      if (txKind === 'invoice' && x.kind !== 'sale' && x.kind !== 'purchase') return false;
+      if (txKind === 'payment' && x.kind !== 'payment') return false;
+      if (txKind === 'return' && x.kind !== 'sreturn' && x.kind !== 'preturn') return false;
+      const paymentCode = x.kind === 'payment' ? `${isC ? 'REC' : 'PAY'}-${refNo(x.id)}` : '';
+      const q = txSearch.trim().toLowerCase();
+      return !q || [x.ref, x.note, paymentCode, x.id].some(value => String(value ?? '').toLowerCase().includes(q));
+    }).sort((a, b2) => b2.date.localeCompare(a.date) || String(a.createdAt ?? '').localeCompare(String(b2.createdAt ?? '')) || a.id.localeCompare(b2.id));
+    const latestTx = [...txs].sort((a, b2) => b2.date.localeCompare(a.date) || String(b2.createdAt ?? '').localeCompare(String(a.createdAt ?? '')))[0];
+    const setFilter = (value: typeof txKind, label: string) => (
+      <TouchableOpacity key={value} onPress={() => setTxKind(value)} accessibilityRole="button"
+        style={{ minHeight: 42, paddingHorizontal: 14, borderRadius: 22, alignItems: 'center', justifyContent: 'center', backgroundColor: txKind === value ? '#173F35' : '#F1F5F9', borderWidth: 1, borderColor: txKind === value ? '#173F35' : '#E2E8F0' }}>
+        <Text style={{ color: txKind === value ? '#FFFFFF' : '#475569', fontSize: 13, fontWeight: '700' }}>{label}</Text>
+      </TouchableOpacity>
+    );
     return <Screen scrollRef={scrollRef} onScrollY={onScrollY}><BackLink label={backLabel} onPress={back} />
       <Card>
         <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 4 }}>
@@ -1346,36 +1359,84 @@ export function Parties({ kind, focus, onFocusDone, onReturn }: { kind: 'c' | 'v
             ) : null;
           })()}
         </View>
-        <Muted>{sel.mobile}</Muted>
-      <Text style={{ fontSize: balFs, fontWeight: '700', color: b.balance > 0 ? '#C62828' : '#1B7F4B' }}>{m(b.balance)}</Text><Muted>{isC ? t('currentDue') : t('currentPayable')}</Muted>
-      <Row left={isC ? t('totalSales') : t('totalPurchase')} right={m(b.total)} /><Row left={t('totalPaid')} right={m(b.paid)} /><Row left={t('nextDate')} right={fd(sel.next)} />
-      <Btn icon={isC ? icons.collect : icons.pay} label={t(isC ? 'receivePayment' : 'payPayment')} onPress={() => setPayOpen(true)} />
-      <View style={{ flexDirection: 'row', gap: 10 }}><View style={{ flex: 1 }}><Btn kind="ghost" icon={icons.edit} label={t('edit')} testID="edit-party" onPress={() => open(sel)} /></View><View style={{ flex: 1 }}><Btn kind="danger" icon={icons.del} label={t('del')} onPress={() => setConfirmDel(true)} /></View></View></Card>
-      <Card><SectionHead icon={icons.history}>{t('history')}</SectionHead><Row left={t('prevDue')} right={m(sel.opening)} />{txs.map(x => {
-        const row = <Row key={x.id} left={x.kind === 'payment' ? lbl(x.kind) : (x.ref ?? lbl(x.kind))} sub={fd(x.date)} right={m(x.amount)} neg={x.kind !== 'payment'} />;
-        const payRow = x.kind === 'payment' && (x.account || x.note)
-          ? <Row key={x.id} left={lbl(x.kind)} sub={[fd(x.date), x.account, x.note].filter(Boolean).join(' • ')} right={m(x.amount)} />
-          : null;
-        if (x.kind === 'payment') return payRow ?? row;
-        if ((x.kind === 'sreturn' || x.kind === 'preturn') && x.returnId) {
-          return (
-            <TouchableOpacity key={`${x.id}:ret`} onPress={() => setRetId(x.returnId!)}>
-              <View pointerEvents="none">{row}</View>
+        <Muted>{localeDigits(sel.mobile, lang)}</Muted>
+        <View style={{ flexDirection: 'row', flexWrap: 'wrap', alignItems: 'stretch', gap: 10, marginTop: 14 }}>
+          {[{ label: isC ? 'Total sales' : 'Total purchases', value: b.total, tone: '#1D4ED8' }, { label: 'Payments', value: b.paid, tone: '#047857' }, { label: b.balance < 0 ? 'Advance' : isC ? 'Receivable' : 'Payable', value: Math.abs(b.balance), tone: b.balance > 0 ? '#B91C1C' : '#047857' }].map(tile => (
+            <View key={tile.label} style={{ flexGrow: 1, flexBasis: 145, minWidth: 125, padding: 12, borderRadius: 12, backgroundColor: '#F8FAFC', borderWidth: 1, borderColor: '#E2E8F0' }}>
+              <Text style={{ color: '#64748B', fontSize: 12, fontWeight: '700' }}>{tile.label}</Text>
+              <Text style={{ color: tile.tone, fontSize: 19, fontWeight: '900', marginTop: 5 }}>{m(tile.value)}</Text>
+            </View>
+          ))}
+        </View>
+        <View style={{ marginTop: 10, flexDirection: 'row', flexWrap: 'wrap', justifyContent: 'space-between', gap: 8 }}>
+          <Muted>{t('nextDate')}: {fd(sel.next)}</Muted>
+          <Muted>Last activity: {latestTx ? fd(latestTx.date) : 'No transactions yet'}</Muted>
+        </View>
+        <View style={{ marginTop: 14, gap: 10 }}>
+          <TouchableOpacity onPress={() => setPayOpen(true)} accessibilityRole="button" style={{ minHeight: 54, borderRadius: 12, backgroundColor: '#173F35', flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 10, paddingHorizontal: 16 }}>
+            <AppIcon name={isC ? icons.collect : icons.pay} size={21} iconColor="#FFFFFF" />
+            <Text style={{ color: '#FFFFFF', fontSize: 16, fontWeight: '800' }}>{t(isC ? 'receivePayment' : 'payPayment')}</Text>
+          </TouchableOpacity>
+          <View style={{ flexDirection: 'row', gap: 10 }}>
+            <TouchableOpacity onPress={() => open(sel)} testID="edit-party" accessibilityRole="button" style={{ flex: 1, minHeight: 50, borderRadius: 11, borderWidth: 1.5, borderColor: '#CBD5E1', backgroundColor: '#FFFFFF', flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8 }}>
+              <AppIcon name={icons.edit} size={19} iconColor="#334155" /><Text style={{ color: '#334155', fontSize: 15, fontWeight: '800' }}>{t('edit')}</Text>
             </TouchableOpacity>
-          );
-        }
-        return (
-          <View key={`${x.id}:inv`} style={{ flexDirection: 'row', alignItems: 'center' }}>
-            <View style={{ flex: 1 }}>{row}</View>
-            <TouchableOpacity onPress={() => setInv({ kind: isC ? 'sale' : 'purchase', id: x.id })} style={{ minHeight: 48, minWidth: 48, alignItems: 'center', justifyContent: 'center' }}>
-              <AppIcon name={icons.print} size={22} iconColor={color.primary} />
+            <TouchableOpacity onPress={() => setConfirmDel(true)} accessibilityRole="button" style={{ flex: 1, minHeight: 50, borderRadius: 11, borderWidth: 1, borderColor: '#FECACA', backgroundColor: '#FFF7F7', flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8 }}>
+              <AppIcon name={icons.del} size={19} iconColor="#B91C1C" /><Text style={{ color: '#B91C1C', fontSize: 15, fontWeight: '800' }}>{t('del')}</Text>
             </TouchableOpacity>
           </View>
-        );
-      })}</Card>
+        </View>
+      </Card>
+      <Card>
+        <SectionHead icon={icons.history}>{t('history')}</SectionHead>
+        <Row left={t('prevDue')} right={m(sel.opening)} />
+        <TextInput value={txSearch} onChangeText={setTxSearch} placeholder="Search invoice no. or payment code (e.g. REC-001 / PAY-001)" placeholderTextColor="#94A3B8" style={{ minHeight: 48, borderWidth: 1, borderColor: '#CBD5E1', borderRadius: 10, paddingHorizontal: 13, fontSize: 14, color: '#0F172A', backgroundColor: '#FFFFFF', marginTop: 12 }} />
+        <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 7, marginTop: 10 }}>{setFilter('all', 'All')}{setFilter('invoice', 'Invoices')}{setFilter('payment', 'Payments')}{setFilter('return', 'Returns')}</View>
+        <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 10, marginTop: 12 }}>
+          <View style={{ flex: 1, minWidth: 150 }}><DateField label="From date" value={txFrom} onChange={setTxFrom} clearable /></View>
+          <View style={{ flex: 1, minWidth: 150 }}><DateField label="To date" value={txTo} onChange={setTxTo} clearable /></View>
+        </View>
+        <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingVertical: 10 }}>
+          <Text style={{ color: '#334155', fontSize: 13, fontWeight: '800' }}>{matchingTxs.length} transactions</Text>
+          <TouchableOpacity onPress={() => { setTxSearch(''); setTxFrom(''); setTxTo(''); setTxKind('all'); }} style={{ minHeight: 40, justifyContent: 'center', paddingHorizontal: 10 }}><Text style={{ color: '#1D4ED8', fontSize: 13, fontWeight: '800' }}>Clear filters</Text></TouchableOpacity>
+        </View>
+        {isDesktop ? <View style={{ width: '100%', alignSelf: 'stretch', borderWidth: 1, borderColor: '#E2E8F0', borderRadius: 10, overflow: 'hidden' }}>
+            <View style={{ flexDirection: 'row', backgroundColor: '#F1F5F9', minHeight: 42, alignItems: 'center', paddingHorizontal: 10 }}>
+              {[['Date', 0.9], ['Type', 0.85], ['Invoice / payment code', 1.45], ['Details', 1.65], ['Amount', 1], ['Action', 0.75]].map(([h, weight]) => <Text key={String(h)} numberOfLines={1} style={{ flex: Number(weight), minWidth: 0, color: '#475569', fontSize: 11, fontWeight: '900', paddingHorizontal: 4 }}>{String(h)}</Text>)}
+            </View>
+            {matchingTxs.length ? matchingTxs.map(x => {
+              const isPayment = x.kind === 'payment';
+              const isReturn = x.kind === 'sreturn' || x.kind === 'preturn';
+              const ref = isPayment ? x.ref ?? `${isC ? 'REC' : 'PAY'}-${refNo(x.id)}` : x.ref ?? `${isC ? 'INV' : 'PUR'}-${refNo(x.id)}`;
+              const open = () => isPayment ? null : isReturn && x.returnId ? setRetId(x.returnId) : setInv({ kind: isC ? 'sale' : 'purchase', id: x.id });
+              return <View key={x.id} style={{ flexDirection: 'row', alignItems: 'center', minHeight: 56, paddingHorizontal: 10, borderTopWidth: 1, borderTopColor: '#E2E8F0', backgroundColor: '#FFFFFF' }}>
+                <Text numberOfLines={1} style={{ flex: 0.9, minWidth: 0, color: '#334155', fontSize: 12, paddingHorizontal: 4 }}>{fd(x.date)}</Text>
+                <Text numberOfLines={1} style={{ flex: 0.85, minWidth: 0, color: isPayment ? '#047857' : isReturn ? '#B45309' : '#1D4ED8', fontSize: 12, fontWeight: '800', paddingHorizontal: 4 }}>{lbl(x.kind)}</Text>
+                <Text numberOfLines={1} style={{ flex: 1.45, minWidth: 0, color: '#0F172A', fontSize: 12, fontWeight: '700', paddingHorizontal: 4 }}>{ref}</Text>
+                <Text numberOfLines={2} style={{ flex: 1.65, minWidth: 0, color: '#64748B', fontSize: 11, paddingHorizontal: 4 }}>{[x.account, x.method, x.note].filter(Boolean).join(' · ') || (isPayment ? 'Party payment' : 'Invoice transaction')}</Text>
+                <Text numberOfLines={1} style={{ flex: 1, minWidth: 0, color: isPayment ? '#047857' : '#0F172A', fontSize: 12, fontWeight: '800', paddingHorizontal: 4 }}>{m(x.amount)}</Text>
+                <View style={{ flex: 0.75, minWidth: 0, paddingHorizontal: 3 }}>
+                  {!isPayment ? <TouchableOpacity onPress={open} accessibilityRole="button" style={{ minHeight: 40, borderRadius: 8, backgroundColor: '#EFF6FF', borderWidth: 1, borderColor: '#BFDBFE', alignItems: 'center', justifyContent: 'center' }}><Text style={{ color: '#1D4ED8', fontSize: 12, fontWeight: '800' }}>View</Text></TouchableOpacity> : <Text style={{ color: '#94A3B8', fontSize: 12, textAlign: 'center' }}>—</Text>}
+                </View>
+              </View>;
+            }) : <Text style={{ padding: 18, color: '#64748B', textAlign: 'center' }}>No transactions match these filters.</Text>}
+          </View> : <View style={{ gap: 8 }}>
+            {matchingTxs.length ? matchingTxs.map(x => {
+              const isPayment = x.kind === 'payment';
+              const isReturn = x.kind === 'sreturn' || x.kind === 'preturn';
+              const ref = isPayment ? x.ref ?? `${isC ? 'REC' : 'PAY'}-${refNo(x.id)}` : x.ref ?? `${isC ? 'INV' : 'PUR'}-${refNo(x.id)}`;
+              const open = () => isPayment ? null : isReturn && x.returnId ? setRetId(x.returnId) : setInv({ kind: isC ? 'sale' : 'purchase', id: x.id });
+              return <TouchableOpacity key={x.id} onPress={open} activeOpacity={isPayment ? 1 : 0.75} style={{ padding: 12, borderWidth: 1, borderColor: '#E2E8F0', borderRadius: 10, backgroundColor: '#FFFFFF' }}>
+                <View style={{ flexDirection: 'row', justifyContent: 'space-between', gap: 8 }}><Text style={{ color: '#334155', fontSize: 12 }}>{fd(x.date)} · {lbl(x.kind)}</Text><Text style={{ color: isPayment ? '#047857' : '#0F172A', fontSize: 14, fontWeight: '900' }}>{m(x.amount)}</Text></View>
+                <Text style={{ color: '#0F172A', fontSize: 13, fontWeight: '800', marginTop: 5 }}>{ref}</Text>
+                <Text numberOfLines={1} style={{ color: '#64748B', fontSize: 11, marginTop: 3 }}>{[x.account, x.method, x.note].filter(Boolean).join(' · ') || (isPayment ? 'Party payment' : 'Invoice transaction')}</Text>
+              </TouchableOpacity>;
+            }) : <Text style={{ padding: 18, color: '#64748B', textAlign: 'center' }}>No transactions match these filters.</Text>}
+          </View>}
+      </Card>
       {retId ? <ReturnModal id={retId} onClose={() => setRetId(null)} /> : null}
       {payOpen && sel ? <QuickPaymentModal kind={kind} partyId={sel.id} partyName={sel.name} onClose={() => setPayOpen(false)} /> : null}
-      {inv ? <InvoiceModal kind={inv.kind} id={inv.id} onClose={() => setInv(null)} onReturn={onReturn ? () => { const v = inv; setInv(null); onReturn!(v.kind, v.id); } : undefined} /> : null}
+      {inv ? <InvoiceModal kind={inv.kind} id={inv.id} onClose={() => setInv(null)} onEdit={onEditTransaction ? () => { const v2 = inv; setInv(null); onEditTransaction(v2.kind, v2.id); } : undefined} onReturn={onReturn ? () => { const v = inv; setInv(null); onReturn!(v.kind, v.id); } : undefined} /> : null}
       {confirmDel ? (
         <DetailShell title={sel.name} onClose={() => setConfirmDel(false)}>
           <Card>
@@ -1479,7 +1540,7 @@ export function Parties({ kind, focus, onFocusDone, onReturn }: { kind: 'c' | 'v
       match={matchParty}
       subOf={p => {
         const code = getPartyCode(p);
-        return (code ? `[কোড: ${code}] ` : '') + (p.mobile || '');
+        return (code ? `[কোড: ${code}] ` : '') + (p.mobile ? localeDigits(p.mobile, lang) : '');
       }}
       rightOf={p => ({ text: m(bal(kind, p.id).balance), neg: bal(kind, p.id).balance > 0 })}
       emptyText={isC ? t('noCustomer') : t('noVendor')}
@@ -1501,6 +1562,7 @@ export function Parties({ kind, focus, onFocusDone, onReturn }: { kind: 'c' | 'v
       <RGrid mobile={1} tablet={2} desktop={3}>
         {listed.length ? listed.map(p => {
           const code = getPartyCode(p);
+          const partyBalance = bal(kind, p.id).balance;
           return (
             <Card key={p.id}>
               <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 6 }}>
@@ -1508,7 +1570,8 @@ export function Parties({ kind, focus, onFocusDone, onReturn }: { kind: 'c' | 'v
                   <Text style={{ fontSize: 12, fontWeight: '700', color: '#1D4ED8' }}>কোড: {code}</Text>
                 </View> : null}
               </View>
-              <Row icon={isC ? icons.customers : icons.vendors} left={p.name} sub={p.mobile} right={m(bal(kind, p.id).balance)} neg={bal(kind, p.id).balance > 0} />
+              <Row icon={isC ? icons.customers : icons.vendors} left={p.name} sub={partyBalance < 0 ? `${p.mobile ? localeDigits(p.mobile, lang) : ''}${p.mobile ? ' · ' : ''}${lang === 'bn' ? 'অগ্রিম' : 'Advance'}` : localeDigits(p.mobile, lang)}
+                right={m(Math.abs(partyBalance))} neg={partyBalance > 0} />
               <Btn kind="ghost" icon={icons.history} label={t('history')} onPress={() => openDetail(p)} />
             </Card>
           );
@@ -1519,47 +1582,131 @@ export function Parties({ kind, focus, onFocusDone, onReturn }: { kind: 'c' | 'v
   </Screen>;
 }
 
-// Shared Collection / Vendor Payment screen
+// Shared date-locked, keyboard-first Cash/Bank collection and supplier payment.
 export function Money({ kind, done }: { kind: 'c' | 'v'; done: () => void }) {
-  const { t, lang, money, moneyBalances, bal, customers, vendors, moneyAccounts } = useApp(); const isC = kind === 'c';
-  const m = useMoney();
-  const [id, setId] = useState<string>(); const [amt, setAmt] = useState(''); const [date, setDate] = useState(dhakaToday()); const [note, setNote] = useState(''); const [next, setNext] = useState('');
-  const [accountId, setAccountId] = useState<string>();
-  const party = id ? (isC ? customers : vendors).find(p => p.id === id) : undefined;
-  const due = id ? Math.max(0, Math.round(bal(kind, id).balance * 100) / 100) : 0;
+  const { t, lang, moneyBalances, bal, customers, vendors, cTx, vTx, moneyAccounts, partyPaymentSplit } = useApp();
+  const isC = kind === 'c';
+  const m = useMoney(), fd = useDateStr();
+  const parties = isC ? customers : vendors;
+  const codeOf = (p: Party) => p.code?.trim() ?? '';
+  const cashAccounts = moneyAccounts.filter(a => a.active && a.type === 'cash');
+  const bankAccounts = moneyAccounts.filter(a => a.active && a.type === 'bank');
+  const [date, setDate] = useState(dhakaToday());
+  const [dateLocked, setDateLocked] = useState(false);
+  const [codeQuery, setCodeQuery] = useState('');
+  const [partyId, setPartyId] = useState<string>();
+  const [cashAccountId, setCashAccountId] = useState(cashAccounts[0]?.id ?? '');
+  const [bankAccountId, setBankAccountId] = useState(bankAccounts[0]?.id ?? '');
+  const [cashAmount, setCashAmount] = useState('');
+  const [bankAmount, setBankAmount] = useState('');
+  const [note, setNote] = useState('');
+  const [message, setMessage] = useState('');
+  const [busy, setBusy] = useState(false);
+  const codeRef = useRef<TextInput>(null), cashRef = useRef<TextInput>(null), bankRef = useRef<TextInput>(null), noteRef = useRef<TextInput>(null);
+  const party = parties.find(p => p.id === partyId);
+  const recentPayments = (isC ? cTx : vTx).filter(x => x.kind === 'payment')
+    .sort((a, b) => b.date.localeCompare(a.date) || String(b.createdAt ?? '').localeCompare(String(a.createdAt ?? '')))
+    .slice(0, 12);
+  const matches = codeQuery.trim() ? parties.filter(p => {
+    const q = codeQuery.trim().toLocaleLowerCase();
+    return codeOf(p).toLocaleLowerCase().includes(q) || p.name.toLocaleLowerCase().includes(q);
+  }).slice(0, 8) : [];
+  const setParty = (p: Party) => {
+    setPartyId(p.id); setCodeQuery(codeOf(p)); setMessage('');
+    requestAnimationFrame(() => cashRef.current?.focus());
+  };
+  const selectByEnter = () => {
+    const q = codeQuery.trim().toLocaleLowerCase();
+    if (party && codeQuery === codeOf(party)) { cashRef.current?.focus(); return; }
+    const exact = parties.find(p => codeOf(p).toLocaleLowerCase() === q || p.name.toLocaleLowerCase() === q);
+    if (exact) { setParty(exact); return; }
+    if (matches.length === 1) { setParty(matches[0]); return; }
+    setMessage(lang === 'bn' ? 'কোড বা নাম থেকে একজনকে নির্বাচন করুন।' : 'Select one customer or supplier by code or name.');
+  };
+  useEffect(() => {
+    if (!cashAccounts.some(a => a.id === cashAccountId)) setCashAccountId(cashAccounts[0]?.id ?? '');
+    if (!bankAccounts.some(a => a.id === bankAccountId)) setBankAccountId(bankAccounts[0]?.id ?? '');
+  }, [moneyAccounts]);
+  const submit = async () => {
+    if (busy) return;
+    const cash = parseNum(cashAmount), bank = parseNum(bankAmount);
+    if (!party) { setMessage(lang === 'bn' ? 'কাস্টমার বা সাপ্লায়ার নির্বাচন করুন।' : `Select a ${isC ? 'customer' : 'supplier'}.`); codeRef.current?.focus(); return; }
+    if (!(cash > 0 || bank > 0)) { setMessage(lang === 'bn' ? 'ক্যাশ বা ব্যাংকের পরিমাণ লিখুন।' : 'Enter a cash amount, a bank amount, or both.'); cashRef.current?.focus(); return; }
+    if (cash > 0 && !cashAccountId) { setMessage(lang === 'bn' ? 'সক্রিয় ক্যাশ অ্যাকাউন্ট নেই।' : 'Choose an active cash account.'); return; }
+    if (bank > 0 && !bankAccountId) { setMessage(lang === 'bn' ? 'সক্রিয় ব্যাংক অ্যাকাউন্ট নেই।' : 'Choose an active bank account.'); return; }
+    const payments = [
+      ...(cash > 0 ? [{ accountId: cashAccountId, amount: cash }] : []),
+      ...(bank > 0 ? [{ accountId: bankAccountId, amount: bank }] : []),
+    ];
+    setBusy(true); setMessage('');
+    try {
+      const result = await partyPaymentSplit({ kind, partyId: party.id, payments, date, note: note.trim() || undefined });
+      const refs = result.payments.map(p => p.paymentNo).join(' / ');
+      setCashAmount(''); setBankAmount(''); setNote(''); setCodeQuery(''); setPartyId(undefined);
+      setMessage(lang === 'bn' ? `সংরক্ষিত: ${refs} · পরের এন্ট্রির জন্য কোড লিখুন` : `Saved ${refs}. Enter the next code.`);
+      requestAnimationFrame(() => codeRef.current?.focus());
+    } catch (e) {
+      const err = e as { code?: string; message?: string };
+      setMessage(err.code === 'PAYMENT_FUNDS'
+        ? (lang === 'bn' ? 'নির্বাচিত অ্যাকাউন্টে পর্যাপ্ত ব্যালেন্স নেই।' : 'Insufficient balance in the selected account.')
+        : (err.message || (lang === 'bn' ? 'পেমেন্ট সংরক্ষণ করা যায়নি।' : 'Could not save payment.')));
+    } finally { setBusy(false); }
+  };
+  const accountPicker = (type: 'cash' | 'bank', accountId: string, onPick: (id: string) => void) => {
+    const count = type === 'cash' ? cashAccounts.length : bankAccounts.length;
+    return count > 1 ? <AccountPicker accountId={accountId} onPick={onPick} accountType={type} label={lang === 'bn' ? (type === 'cash' ? 'ক্যাশ অ্যাকাউন্ট' : 'ব্যাংক অ্যাকাউন্ট') : `${type === 'cash' ? 'Cash' : 'Bank'} account`} required /> : null;
+  };
+  const fieldStyle = { borderWidth: 1, borderColor: color.line, borderRadius: 12, minHeight: 48, paddingHorizontal: 12, backgroundColor: '#FFFFFF', color: color.text, fontSize: 17 } as const;
   return <Screen>
-    <MoneyBalanceCard balances={moneyBalances} />
-    {!isC && id ? <Card>
-      <Muted>{t('vendor')}</Muted>
-      <Title>{party?.name ?? id}</Title>
-      <Text style={{ fontSize: 26, fontWeight: '700', color: due > 0 ? '#C62828' : '#1B7F4B' }}>{m(due)}</Text>
-      <Muted>{t('currentPayable')}</Muted>
-    </Card> : null}
+    <MoneyBalanceCard balances={moneyBalances.filter(b => b.method === 'cash' || b.method === 'bank')} />
     <Card>
-    <PartyPicker kind={kind} value={id} onPick={setId} />
-    <FormGrid>
-      <Field label={t(isC ? 'amount' : 'payAmountQ')} value={amt} onChange={setAmt} num /><DateField label={t('date')} value={date} onChange={setDate} allowPast={false} />
-      <Field label={t('note')} value={note} onChange={setNote} /><DateField label={t('nextDate')} value={next} onChange={setNext} clearable allowPast={false} />
-    </FormGrid>
-    <AccountPicker accountId={accountId} onPick={setAccountId} label={t('paymentAccount')} required />
-    <Btn icon={isC ? icons.save : icons.pay} label={t(isC ? 'save' : 'payNow')} onPress={() => {
-      const a = num(amt);
-      if (!id || !(a > 0)) return Alert.alert(t('invalid'));
-      if (!accountId) return Alert.alert(t('needAccount'));
-      if (!isC) {
-        if (a > due) return Alert.alert(t('overpayV'));
-        const acc = moneyAccounts.find(x => x.id === accountId);
-        if (acc && acc.balance < a) return Alert.alert(tp(lang, 'notEnoughInAcc', { account: acc.name }));
-      }
-      (async () => {
-        try {
-          await money(kind, { partyId: id, amount: a, accountId, date, note, next: next || undefined });
-          Alert.alert(t('done')); done();
-        } catch (e) {
-          Alert.alert(e instanceof Error ? e.message : t('invalid'));
-        }
-      })();
-    }} /></Card></Screen>;
+      <SectionHead icon={isC ? icons.collect : icons.pay}>{t(isC ? 'receivePayment' : 'payPayment')}</SectionHead>
+      <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10 }}>
+        <View style={{ flex: 1 }}>{!dateLocked ? <DateField label={t('date')} value={date} onChange={setDate} allowPast /> : <><Muted>{t('date')}</Muted><Text style={{ minHeight: 48, paddingTop: 12, color: color.text, fontSize: 16 }}>{fd(date)}</Text></>}</View>
+        <TouchableOpacity onPress={() => { if (dateLocked && (party || codeQuery || cashAmount || bankAmount || note)) { setMessage(lang === 'bn' ? 'চলমান এন্ট্রি বাতিল করে তারিখ আনলক করুন।' : 'Clear the current entry before unlocking the date.'); return; } setDateLocked(v => !v); setMessage(''); if (!dateLocked) requestAnimationFrame(() => codeRef.current?.focus()); }} accessibilityRole="button" style={{ marginTop: 18, minHeight: 44, paddingHorizontal: 14, borderRadius: 10, justifyContent: 'center', backgroundColor: dateLocked ? '#DCFCE7' : '#EFF6FF', borderWidth: 1, borderColor: dateLocked ? '#86EFAC' : '#BFDBFE' }}>
+          <Text style={{ color: dateLocked ? '#166534' : '#1D4ED8', fontWeight: '800' }}>{dateLocked ? (lang === 'bn' ? 'তারিখ লকড · আনলক' : 'Date locked · Unlock') : (lang === 'bn' ? 'তারিখ লক করুন' : 'Lock date')}</Text>
+        </TouchableOpacity>
+      </View>
+      <View style={{ marginTop: 8 }}>
+        <Muted>{lang === 'bn' ? (isC ? 'কাস্টমার কোড / নাম' : 'সাপ্লায়ার কোড / নাম') : `${isC ? 'Customer' : 'Supplier'} code / name`}</Muted>
+        <TextInput ref={codeRef} value={codeQuery} onChangeText={v => { setCodeQuery(v); setPartyId(undefined); setMessage(''); }} onSubmitEditing={selectByEnter} returnKeyType="next" editable={!busy} placeholder={lang === 'bn' ? 'কোড লিখে Enter চাপুন' : 'Enter code, then press Enter'} style={fieldStyle} />
+        {party ? <Text style={{ color: '#166534', fontWeight: '700', marginTop: 6 }}>{party.name}{party.code ? ` · ${codeOf(party)}` : ''}</Text> : null}
+        {!party && matches.length > 0 ? <View style={{ marginTop: 4, borderWidth: 1, borderColor: color.line, borderRadius: 10, overflow: 'hidden' }}>{matches.map(p => <TouchableOpacity key={p.id} onPress={() => setParty(p)} style={{ minHeight: 46, paddingHorizontal: 12, justifyContent: 'center', borderBottomWidth: 1, borderBottomColor: color.line, backgroundColor: '#FFFFFF' }}><Text style={{ color: color.text, fontWeight: '700' }}>{codeOf(p) ? `${codeOf(p)} · ` : ''}{p.name}</Text></TouchableOpacity>)}</View> : null}
+      </View>
+      {party ? <View style={{ backgroundColor: '#F8FAFC', borderRadius: 12, padding: 12, marginTop: 10 }}><Text style={{ color: color.muted }}>{isC ? t('currentDue') : t('currentPayable')}</Text><Text style={{ color: bal(kind, party.id).balance < 0 ? '#047857' : color.red, fontSize: 20, fontWeight: '800' }}>{m(Math.abs(bal(kind, party.id).balance))}</Text></View> : null}
+      <View style={{ marginTop: 12 }}>
+        <Muted>{lang === 'bn' ? 'ক্যাশের পরিমাণ' : 'Cash amount'}</Muted>
+        <TextInput ref={cashRef} value={cashAmount} onChangeText={setCashAmount} keyboardType="decimal-pad" returnKeyType="next" onSubmitEditing={() => bankRef.current?.focus()} editable={!!party && !busy} placeholder="0" style={fieldStyle} />
+        {accountPicker('cash', cashAccountId, setCashAccountId)}
+        <View style={{ height: 10 }} />
+        <Muted>{lang === 'bn' ? 'ব্যাংকের পরিমাণ' : 'Bank amount'}</Muted>
+        <TextInput ref={bankRef} value={bankAmount} onChangeText={setBankAmount} keyboardType="decimal-pad" returnKeyType="next" onSubmitEditing={() => noteRef.current?.focus()} editable={!!party && !busy} placeholder="0" style={fieldStyle} />
+        {accountPicker('bank', bankAccountId, setBankAccountId)}
+        <View style={{ height: 10 }} />
+        <Muted>{t('note')}</Muted>
+        <TextInput ref={noteRef} value={note} onChangeText={setNote} returnKeyType="done" onSubmitEditing={submit} editable={!!party && !busy} placeholder={lang === 'bn' ? 'ঐচ্ছিক বিবরণ' : 'Optional note'} style={fieldStyle} />
+      </View>
+      {message ? <Text accessibilityRole="alert" style={{ color: message.startsWith('Saved') || message.startsWith('সংরক্ষিত') ? '#15803D' : color.red, marginTop: 10 }}>{message}</Text> : null}
+      <View style={{ flexDirection: 'row', gap: 10, marginTop: 14 }}>
+        <View style={{ flex: 1 }}><Btn kind="ghost" label={t('cancel')} onPress={done} /></View>
+        <View style={{ flex: 1 }}><Btn icon={isC ? icons.collect : icons.pay} label={busy ? t('wait') : t('save')} onPress={submit} /></View>
+      </View>
+    </Card>
+    <Card>
+      <SectionHead icon={isC ? icons.collect : icons.pay}>{lang === 'bn' ? (isC ? 'সাম্প্রতিক কালেকশন' : 'সাম্প্রতিক পেমেন্ট') : (isC ? 'Recent collections' : 'Recent payments')}</SectionHead>
+      {recentPayments.length ? recentPayments.map(tx => {
+        const txParty = parties.find(p => p.id === tx.partyId);
+        return <View key={tx.id} style={{ paddingVertical: 10, borderBottomWidth: 1, borderBottomColor: color.line }}>
+          <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 12 }}>
+            <Text style={{ flex: 1, color: color.text, fontWeight: '800' }}>{tx.transactionNo ? `${tx.transactionNo} · ` : ''}{tx.ref || (isC ? t('collect') : t('pay'))} · {txParty?.name ?? ''}</Text>
+            <Text style={{ color: isC ? '#047857' : '#B45309', fontWeight: '800' }}>{m(tx.amount)}</Text>
+          </View>
+          <Text style={{ color: color.muted, fontSize: 12, marginTop: 3 }}>{fd(tx.date)}{tx.account ? ` · ${tx.account}` : ''}</Text>
+          {tx.note ? <Text style={{ color: color.muted, fontSize: 12, marginTop: 2 }}>{tx.note}</Text> : null}
+        </View>;
+      }) : <Empty />}
+    </Card>
+  </Screen>;
 }
 
 /**
@@ -1572,7 +1719,9 @@ export function Money({ kind, done }: { kind: 'c' | 'v'; done: () => void }) {
 function QuickPaymentModal({ kind, partyId, partyName, onClose }: { kind: 'c' | 'v'; partyId: string; partyName: string; onClose: () => void }) {
   const { t, lang, money, bal, moneyAccounts } = useApp(); const m = useMoney();
   const isC = kind === 'c';
-  const due = Math.max(0, Math.round(bal(kind, partyId).balance * 100) / 100);
+  const balance = Math.round(bal(kind, partyId).balance * 100) / 100;
+  const due = Math.max(0, balance);
+  const advance = Math.max(0, -balance);
   const [amt, setAmt] = useState('');
   const [date, setDate] = useState(dhakaToday());
   const [note, setNote] = useState('');
@@ -1583,7 +1732,6 @@ function QuickPaymentModal({ kind, partyId, partyName, onClose }: { kind: 'c' | 
     const a = num(amt);
     if (!(a > 0)) return Alert.alert(t('invalidAmount'));
     if (!accountId) return Alert.alert(t('needAccount'));
-    if (a > due) return Alert.alert(t(isC ? 'overpayC' : 'overpayV'));
     if (!isC) {
       const acc = moneyAccounts.find(x => x.id === accountId);
       if (acc && acc.balance < a) return Alert.alert(tp(lang, 'notEnoughInAcc', { account: acc.name }));
@@ -1607,8 +1755,8 @@ function QuickPaymentModal({ kind, partyId, partyName, onClose }: { kind: 'c' | 
       <Card>
         <Muted>{isC ? t('customer') : t('vendor')}</Muted>
         <Title>{partyName}</Title>
-        <Text style={{ fontSize: 26, fontWeight: '700', color: due > 0 ? '#C62828' : '#1B7F4B' }}>{m(due)}</Text>
-        <Muted>{isC ? t('currentDue') : t('currentPayable')}</Muted>
+        <Text style={{ fontSize: 26, fontWeight: '700', color: due > 0 ? '#C62828' : '#1B7F4B' }}>{m(due > 0 ? due : advance)}</Text>
+        <Muted>{balance < 0 ? (lang === 'bn' ? 'অগ্রিম জমা' : 'Advance balance') : (isC ? t('currentDue') : t('currentPayable'))}</Muted>
       </Card>
       <Card>
         <FormGrid>
@@ -1659,7 +1807,7 @@ export function MoneyBalanceCard({ balances, onPress }: { balances: MoneyBalance
 // Searchable customer/vendor autocomplete: opens the full list on focus,
 // filters while typing, tap a row to select. One component for both kinds.
 function PartyPicker({ kind, value, onPick }: { kind: 'c' | 'v'; value?: string; onPick: (id: string | undefined) => void }) {
-  const { t, customers, vendors, bal } = useApp(); const m = useMoney(); const isC = kind === 'c';
+  const { t, lang, customers, vendors, bal } = useApp(); const m = useMoney(); const isC = kind === 'c';
   const list = isC ? customers : vendors;
   const [q, setQ] = useState('');
   const [open, setOpen] = useState(false);
@@ -1719,7 +1867,7 @@ function PartyPicker({ kind, value, onPick }: { kind: 'c' | 'v'; value?: string;
                 >
                   <View style={{ flex: 1 }}>
                     <Text style={{ fontSize: 16, fontWeight: '600', color: color.text }}>{p.name}</Text>
-                    <Muted>{p.mobile}</Muted>
+                    <Muted>{localeDigits(p.mobile, lang)}</Muted>
                   </View>
                   <View style={{ alignItems: 'flex-end' }}>
                     <Text style={{ fontSize: 16, fontWeight: '700', color: b > 0 ? color.red : color.primary }}>{m(b)}</Text>
@@ -2191,6 +2339,40 @@ export function MoneyTransferModal({ onClose }: { onClose: () => void }) {
 }
 
 /** Transfers shown as ONE business event (name -> name), never two rows. */
+export function MoneyEntry({ direction, onClose, onSaved }: { direction: 'in' | 'out'; onClose: () => void; onSaved: () => Promise<void> }) {
+  const { lang, moneyAccounts, t } = useApp();
+  const label = (bn: string, en: string) => lang === 'bn' ? bn : en;
+  const [accountId, setAccountId] = useState(moneyAccounts.find(a => a.active)?.id ?? '');
+  const [amount, setAmount] = useState(''), [date, setDate] = useState(today()), [note, setNote] = useState('');
+  const [busy, setBusy] = useState(false), [error, setError] = useState('');
+  const lock = useRef(false);
+  const [requestId] = useState(() => `entry-${Date.now()}-${Math.random().toString(36).slice(2)}`);
+  const [saved, setSaved] = useState(false);
+  const submit = async () => {
+    if (lock.current) return;
+    if (!accountId || !(parseNum(amount) > 0)) { setError(label('একাউন্ট ও সঠিক পরিমাণ দিন', 'Select an account and enter a valid amount')); return; }
+    lock.current = true; setBusy(true); setError('');
+    try {
+      if (!saved) { await api.moneyEntry({ accountId, direction, amount: parseNum(amount), date: toEnDigits(date), note, requestId }); setSaved(true); }
+      await onSaved(); onClose();
+    } catch (e) {
+      setError((e as { code?: string }).code === 'INSUFFICIENT_FUNDS' ? label('এই একাউন্টে পর্যাপ্ত টাকা নেই', 'Insufficient account balance') : label('সংরক্ষণ বা হালনাগাদ করা যায়নি। আবার চেষ্টা করুন।', 'Could not save or refresh. Please try again.'));
+    } finally { lock.current = false; setBusy(false); }
+  };
+  return <DetailShell title={direction === 'in' ? label('টাকা জমা', 'Deposit') : label('টাকা উত্তোলন', 'Withdraw')} onClose={onClose}>
+    <Card>
+      <View pointerEvents={busy || saved ? 'none' : 'auto'}>
+        <AccountPicker accountId={accountId} onPick={setAccountId} required />
+        <Field label={label('পরিমাণ', 'Amount')} value={amount} onChange={setAmount} num />
+        <DateField label={label('তারিখ', 'Date')} value={date} onChange={setDate} allowPast />
+        <Field label={label('বিবরণ', 'Note')} value={note} onChange={setNote} />
+      </View>
+      {error ? <Text accessibilityRole="alert" style={{ color: color.red, marginBottom: 12 }}>{error}</Text> : null}
+      <Btn label={busy ? t('wait') : t('save')} onPress={submit} testID="save-money-entry" />
+    </Card>
+  </DetailShell>;
+}
+
 function TransferHistory({ limit = 8 }: { limit?: number }) {
   const { t, moneyTransfers, moneyAccounts } = useApp();
   const m = useMoney(); const fd = useDateStr();
@@ -2598,7 +2780,7 @@ function useInvoice() {
       date: fd(d.date),
       time: fmtTime(d.createdAt, lang === 'bn'),
       partyName: party?.name ?? t('cashSale'),
-      partyMobile: party?.mobile ?? '',
+      partyMobile: localeDigits(party?.mobile, lang),
       lines: d.items.map(it => ({
         name: it.productName,
         detail: `${unitDetail(it.unit, it.enteredQty, it.qtyKg, un, n)} • ${m(it.rate)}/${kg}`,
@@ -2674,7 +2856,7 @@ function useInvoice() {
       date: fd(d.date),
       time: fmtTime(d.createdAt, lang === 'bn'),
       partyName: d.party?.name ?? (isSale ? t('cashSale') : ''),
-      partyMobile: d.party?.mobile ?? '',
+      partyMobile: localeDigits(d.party?.mobile, lang),
       lines: d.items.map(it => {
         const bits = [unitDetail(it.unit, it.enteredQty, it.qtyKg, un, n), condLabel(it.condition)];
         if (it.condition === 'partial') bits.push(`${t('goodQty')}: ${n(it.goodKg)} ${kg}, ${t('dmgQty')}: ${n(it.damagedKg)} ${kg}`);
@@ -2728,20 +2910,20 @@ export function InvoiceModal({ kind, id, onClose, onReturn, onBack, onEdit }: {
   /** Set when the document was opened from its module list: shows Back to list. */
   onBack?: () => void;
 }) {
-  const { t } = useApp(); const m = useMoney(); const fd = useDateStr();
+  const { t, lang } = useApp(); const m = useMoney(); const fd = useDateStr();
   const { fetchDoc, printTxn, previewTxn, shareTxn } = useInvoice();
   const [doc, setDoc] = useState<InvData | null>(null);
   const [rets, setRets] = useState<{ id: string; returnNo?: string; date: string; amount: number }[]>([]);
-  const [extra, setExtra] = useState<{ discount?: number; payment?: TxnPayment }>({});
+  const [extra, setExtra] = useState<{ discount?: number; payment?: TxnPayment; payments?: import('./api').InvoicePayment[] }>({});
   useEffect(() => {
     let on = true;
     fetchDoc(kind, id).then(d => { if (on) setDoc(d); }).catch(() => {});
     (kind === 'sale' ? api.saleDetail(id) : api.purchaseDetail(id)).then(
       d => {
         if (!on) return;
-        const x = d as { returns?: typeof rets; discount?: number; payment?: TxnPayment };
+        const x = d as { returns?: typeof rets; discount?: number; payment?: TxnPayment; payments?: import('./api').InvoicePayment[] };
         setRets(x.returns ?? []);
-        setExtra({ discount: x.discount, payment: x.payment ?? null });
+        setExtra({ discount: x.discount, payment: x.payment ?? null, payments: x.payments ?? [] });
       },
       () => {},
     );
@@ -2768,7 +2950,7 @@ export function InvoiceModal({ kind, id, onClose, onReturn, onBack, onEdit }: {
             <Row left={doc.labels.date} right={doc.date} />
             <Row left={doc.labels.time} right={doc.time} />
             <Row left={doc.labels.partyLabel} right={doc.partyName} />
-            {doc.partyMobile ? <Row left={doc.labels.mobile} right={doc.partyMobile} /> : null}
+            {doc.partyMobile ? <Row left={doc.labels.mobile} right={localeDigits(doc.partyMobile, lang)} /> : null}
           </Card>
           <Card>
             {doc.lines.map((l, i) => <Row key={i} left={l.name} sub={l.detail} right={l.total} />)}
@@ -2777,9 +2959,10 @@ export function InvoiceModal({ kind, id, onClose, onReturn, onBack, onEdit }: {
             <Row left={doc.labels.paid} right={doc.paid} />
             <Row left={doc.labels.due} right={doc.due} neg />
             {doc.next ? <Row left={doc.labels.payDate} right={doc.next} /> : null}
-            {extra.payment && extra.payment.amount > 0 ? (
-              <Row left={t('paymentAccount')} right={`${extra.payment.accountName ?? methodName(extra.payment.method as AccountType, t)} • ${m(extra.payment.amount)}`} />
-            ) : null}
+            {extra.payments?.map(p => (
+              <Row key={p.id} left={p.advance ? (lang === 'bn' ? 'পার্টি পেমেন্ট সমন্বয়' : 'Party payment applied') : t('payment')}
+                sub={[p.date ? fd(p.date) : '', p.accountName ?? '', p.note ?? ''].filter(Boolean).join(' · ')} right={m(p.amount)} />
+            ))}
           </Card>
           <Btn icon={icons.print} label={t('printInvoice')} onPress={() => printTxn(kind, id)} />
           <Btn kind="ghost" icon={icons.print} label={t('preview')} onPress={() => previewTxn(kind, id)} />
@@ -2827,7 +3010,7 @@ export function SuccessModal({ kind, invoiceNo, total, txnId, onClose }: {
 const refNo = (id: string) => id.slice(-4).toUpperCase();
 
 export function ReceivableModal({ id, onClose }: { id: string; onClose: () => void }) {
-  const { t } = useApp(); const m = useMoney(); const fd = useDateStr();
+  const { t, lang } = useApp(); const m = useMoney(); const fd = useDateStr();
   const [d, setD] = useState<RecvDetail | null>(null);
   const [err, setErr] = useState<string | null>(null);
   useEffect(() => {
@@ -2840,9 +3023,9 @@ export function ReceivableModal({ id, onClose }: { id: string; onClose: () => vo
       {!d ? (err ? <Muted>{err}</Muted> : <ActivityIndicator size="large" color={color.primary} />) : (
         <View>
           <Card>
-            <Muted>{d.party.mobile}</Muted>
-            <Text style={{ fontSize: 28, fontWeight: '700', color: d.balance > 0 ? '#C62828' : '#1B7F4B' }}>{m(d.balance)}</Text>
-            <Muted>{t('currentDue')}</Muted>
+            <Muted>{localeDigits(d.party.mobile, lang)}</Muted>
+            <Text style={{ fontSize: 28, fontWeight: '700', color: d.balance > 0 ? '#C62828' : '#1B7F4B' }}>{m(Math.abs(d.balance))}</Text>
+            <Muted>{d.balance < 0 ? (lang === 'bn' ? 'কাস্টমার অগ্রিম' : 'Customer advance') : t('currentDue')}</Muted>
             {d.opening > 0 ? <Row left={t('prevDue')} right={m(d.opening)} /> : null}
           </Card>
           {d.sales.map(s => (
@@ -2864,7 +3047,7 @@ export function ReceivableModal({ id, onClose }: { id: string; onClose: () => vo
           <Card>
             <Row left={t('totalSales')} right={m(d.totalSales)} />
             <Row left={t('totalPaid')} right={m(d.totalPaid)} />
-            <Row left={t('currentDue')} right={m(d.balance)} neg={d.balance > 0} />
+            <Row left={d.balance < 0 ? (lang === 'bn' ? 'কাস্টমার অগ্রিম' : 'Customer advance') : t('currentDue')} right={m(Math.abs(d.balance))} neg={d.balance > 0} />
           </Card>
         </View>
       )}
@@ -2873,7 +3056,7 @@ export function ReceivableModal({ id, onClose }: { id: string; onClose: () => vo
 }
 
 export function PayableModal({ id, onClose }: { id: string; onClose: () => void }) {
-  const { t } = useApp(); const m = useMoney(); const fd = useDateStr();
+  const { t, lang } = useApp(); const m = useMoney(); const fd = useDateStr();
   const [d, setD] = useState<PayDetail | null>(null);
   const [err, setErr] = useState<string | null>(null);
   useEffect(() => {
@@ -2886,9 +3069,9 @@ export function PayableModal({ id, onClose }: { id: string; onClose: () => void 
       {!d ? (err ? <Muted>{err}</Muted> : <ActivityIndicator size="large" color={color.primary} />) : (
         <View>
           <Card>
-            <Muted>{d.party.mobile}</Muted>
-            <Text style={{ fontSize: 28, fontWeight: '700', color: d.balance > 0 ? '#C62828' : '#1B7F4B' }}>{m(d.balance)}</Text>
-            <Muted>{t('currentPayable')}</Muted>
+            <Muted>{localeDigits(d.party.mobile, lang)}</Muted>
+            <Text style={{ fontSize: 28, fontWeight: '700', color: d.balance > 0 ? '#C62828' : '#1B7F4B' }}>{m(Math.abs(d.balance))}</Text>
+            <Muted>{d.balance < 0 ? (lang === 'bn' ? 'সরবরাহকারী অগ্রিম' : 'Supplier advance') : t('currentPayable')}</Muted>
             {d.opening > 0 ? <Row left={t('prevDue')} right={m(d.opening)} /> : null}
           </Card>
           {d.purchases.map(p => (
@@ -2910,7 +3093,7 @@ export function PayableModal({ id, onClose }: { id: string; onClose: () => void 
           <Card>
             <Row left={t('totalPurchase')} right={m(d.totalPurchase)} />
             <Row left={t('totalPaid')} right={m(d.totalPaid)} />
-            <Row left={t('currentPayable')} right={m(d.balance)} neg={d.balance > 0} />
+            <Row left={d.balance < 0 ? (lang === 'bn' ? 'সরবরাহকারী অগ্রিম' : 'Supplier advance') : t('currentPayable')} right={m(Math.abs(d.balance))} neg={d.balance > 0} />
           </Card>
         </View>
       )}
@@ -2987,7 +3170,7 @@ function useKpiReport(kind: KpiKind, period: KpiPeriod, fin: PeriodFinance | nul
         meta: [{ label: t('accounts'), value: t('currentBalanceNote') }],
         sections: [{ rows: list.map(x => ({
           label: x.p.name,
-          sub: [x.p.mobile, x.p.next ? `${t('nextDate')}: ${fd(x.p.next)}` : ''].filter(Boolean).join(' \u2022 '),
+          sub: [localeDigits(x.p.mobile, lang), x.p.next ? `${t('nextDate')}: ${fd(x.p.next)}` : ''].filter(Boolean).join(' \u2022 '),
           right: m(x.b), neg: true,
         })) }],
         total: { label: isC ? t('totalDue') : t('totalPayable'), value: m(total), neg: true },
@@ -3329,7 +3512,7 @@ export function Trash() {
 
 // Return detail + printable receipt.
 export function ReturnModal({ id, onClose }: { id: string; onClose: () => void }) {
-  const { t } = useApp(); const m = useMoney(); const n = useNum(); const fd = useDateStr();
+  const { t, lang } = useApp(); const m = useMoney(); const n = useNum(); const fd = useDateStr();
   const { printReturn, condLabel, reasonLabel } = useInvoice();
   const [d, setD] = useState<ReturnDetail | null>(null);
   useEffect(() => {
@@ -3352,7 +3535,7 @@ export function ReturnModal({ id, onClose }: { id: string; onClose: () => void }
         <Row left={t('origInvoice')} right={d.origInvoiceNo ?? ''} />
         <Row left={t('date')} right={fd(d.date)} />
         <Row left={isSale ? t('customer') : t('vendor')} right={d.party?.name ?? (isSale ? t('cashSale') : '')} />
-        {d.party?.mobile ? <Row left={t('mobile')} right={d.party.mobile} /> : null}
+        {d.party?.mobile ? <Row left={t('mobile')} right={localeDigits(d.party.mobile, lang)} /> : null}
       </Card>
       <Card>
         {d.items.map((it, i) => (

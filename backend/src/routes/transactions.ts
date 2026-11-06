@@ -1,16 +1,70 @@
 import { Router, Request, Response } from 'express';
+import { randomUUID } from 'node:crypto';
 import { db } from '../db';
 import { toKg, isUnit, transactionDay, checkPromiseDay } from '../units';
 import { accountBalance, accountBalances, lockAccounts, methodForAmount, moneyBalances, recordMovement, resolveAccount } from '../money';
 import { currentAvgCost, round2, writeMovement } from '../valuation';
 import { lifetimeFinance, periodFinance } from '../finance';
-import { settleAll, settleParty, syncPartyInvoices, buildSettlement } from '../settlement';
+import { settleAll, settleParty, syncPartyInvoices, buildSettlement, buildPaymentAllocations } from '../settlement';
 import { productJson } from './products';
 
 const num = (v: unknown, d = 0) => {
   const n = typeof v === 'number' ? v : parseFloat(String(v ?? ''));
   return Number.isFinite(n) ? n : d;
 };
+
+// Preserve the old FIFO application on invoices that already existed when an
+// advance was received. Lock those allocations before a new invoice is added,
+// so a new invoice is only settled from advance when the user selects it.
+async function freezeLegacyAdvanceAllocations(t: TxClient, kind: 'sale' | 'purchase', partyId: string) {
+  const isSale = kind === 'sale';
+  const [invoices, returns, payments] = await Promise.all([
+    isSale ? t.sale.findMany({ where: { customerId: partyId }, select: { id: true, date: true, total: true, createdAt: true } })
+      : t.purchase.findMany({ where: { vendorId: partyId }, select: { id: true, date: true, total: true, createdAt: true } }),
+    t.productReturn.findMany({ where: isSale ? { kind: 'sale', customerId: partyId } : { kind: 'purchase', vendorId: partyId }, select: { saleId: true, purchaseId: true, totalAmount: true, settlement: true, refundAmount: true } }),
+    isSale ? t.customerPayment.findMany({ where: { customerId: partyId, active: true }, select: { id: true, saleId: true, returnId: true, date: true, amount: true, createdAt: true, allocationLocked: true, allocations: { select: { saleId: true, amount: true } } } })
+      : t.vendorPayment.findMany({ where: { vendorId: partyId, active: true }, select: { id: true, purchaseId: true, returnId: true, date: true, amount: true, createdAt: true, allocationLocked: true, allocations: { select: { purchaseId: true, amount: true } } } }),
+  ]);
+  const normalized = payments.map((p: any) => ({ id: p.id, partyId, invoiceId: p.saleId ?? p.purchaseId ?? null, returnId: p.returnId, date: p.date, amount: p.amount, createdAt: p.createdAt, allocationLocked: p.allocationLocked, allocations: (p.allocations ?? []).map((a: any) => ({ invoiceId: a.saleId ?? a.purchaseId, amount: a.amount })) }));
+  const computed = buildPaymentAllocations(invoices.map((i: any) => ({ ...i, partyId })), returns.map((r: any) => ({ invoiceId: r.saleId ?? r.purchaseId ?? null, amount: r.totalAmount, settlement: r.settlement, refundAmount: r.refundAmount })), normalized);
+  const allocationByPayment = new Map<string, { invoiceId: string; amount: number }[]>();
+  for (const [invoiceId, rows] of computed) for (const row of rows) {
+    const list = allocationByPayment.get(row.paymentId) ?? [];
+    list.push({ invoiceId, amount: row.amount }); allocationByPayment.set(row.paymentId, list);
+  }
+  for (const payment of payments as any[]) {
+    if (payment.saleId || payment.purchaseId || payment.returnId || payment.allocationLocked) continue;
+    const rows = allocationByPayment.get(payment.id) ?? [];
+    if (isSale) {
+      await t.customerPayment.update({ where: { id: payment.id }, data: { allocationLocked: true, allocations: { create: rows.map(row => ({ saleId: row.invoiceId, amount: row.amount })) } } });
+    } else {
+      await t.vendorPayment.update({ where: { id: payment.id }, data: { allocationLocked: true, allocations: { create: rows.map(row => ({ purchaseId: row.invoiceId, amount: row.amount })) } } });
+    }
+  }
+}
+
+async function applyAdvanceToInvoice(t: TxClient, kind: 'sale' | 'purchase', partyId: string, invoiceId: string, requested: number) {
+  const amount = round2(Math.max(0, requested));
+  if (!amount) return 0;
+  const isSale = kind === 'sale';
+  const payments = isSale
+    ? await t.customerPayment.findMany({ where: { customerId: partyId, active: true, saleId: null, returnId: null }, include: { allocations: true }, orderBy: [{ date: 'asc' }, { createdAt: 'asc' }] })
+    : await t.vendorPayment.findMany({ where: { vendorId: partyId, active: true, purchaseId: null, returnId: null }, include: { allocations: true }, orderBy: [{ date: 'asc' }, { createdAt: 'asc' }] });
+  let left = amount;
+  let available = 0;
+  const candidates = payments.map((p: any) => ({ p, free: round2(Math.max(0, p.amount - p.allocations.reduce((sum: number, a: any) => sum + a.amount, 0))) }));
+  for (const c of candidates) available = round2(available + c.free);
+  if (available + 0.001 < amount) throw Object.assign(new Error('Selected advance is no longer available'), { status: 400, code: 'ADVANCE_UNAVAILABLE' });
+  for (const { p, free } of candidates) {
+    const take = round2(Math.min(left, free));
+    if (take <= 0) continue;
+    if (isSale) await t.customerPayment.update({ where: { id: p.id }, data: { allocationLocked: true, allocations: { create: { saleId: invoiceId, amount: take } } } });
+    else await t.vendorPayment.update({ where: { id: p.id }, data: { allocationLocked: true, allocations: { create: { purchaseId: invoiceId, amount: take } } } });
+    left = round2(left - take);
+    if (left <= 0) break;
+  }
+  return amount;
+}
 
 // Payment account of an existing transaction, read from the ledger row that was
 // written when it was saved. Display only - nothing is created or changed here.
@@ -26,6 +80,67 @@ const paymentOf = async (sourceType: string, sourceId: string) => {
   return { accountName: names.join(', ') || null, method: methods.length === 1 ? methods[0] : 'mixed', amount: round2(rows.reduce((sum, m) => sum + m.amount, 0)), date: rows[0].date };
 };
 
+const invoicePaymentDetails = async (
+  kind: 'sale' | 'purchase',
+  invoiceId: string,
+  partyId: string | null | undefined,
+) => {
+  if (!partyId) return [];
+  const [invoices, returns, payments] = kind === 'sale'
+    ? await Promise.all([
+        db.sale.findMany({ where: { customerId: partyId }, select: { id: true, customerId: true, date: true, total: true, createdAt: true } }),
+        db.productReturn.findMany({ where: { kind: 'sale', customerId: partyId }, select: { saleId: true, totalAmount: true, settlement: true, refundAmount: true } }),
+        db.customerPayment.findMany({ where: { customerId: partyId, active: true }, select: { id: true, customerId: true, saleId: true, returnId: true, date: true, amount: true, note: true, createdAt: true, allocationLocked: true, allocations: { select: { saleId: true, amount: true } } } }),
+      ])
+    : await Promise.all([
+        db.purchase.findMany({ where: { vendorId: partyId }, select: { id: true, vendorId: true, date: true, total: true, createdAt: true } }),
+        db.productReturn.findMany({ where: { kind: 'purchase', vendorId: partyId }, select: { purchaseId: true, totalAmount: true, settlement: true, refundAmount: true } }),
+        db.vendorPayment.findMany({ where: { vendorId: partyId, active: true }, select: { id: true, vendorId: true, purchaseId: true, returnId: true, date: true, amount: true, note: true, createdAt: true, allocationLocked: true, allocations: { select: { purchaseId: true, amount: true } } } }),
+      ]);
+  const allocations = buildPaymentAllocations(
+    invoices.map(invoice => ({ id: invoice.id, partyId, date: invoice.date, total: invoice.total, createdAt: invoice.createdAt })),
+    returns.map(r => ({ invoiceId: kind === 'sale' ? (r as any).saleId : (r as any).purchaseId, amount: r.totalAmount, settlement: r.settlement as 'credit' | 'refund', refundAmount: r.refundAmount })),
+    payments.map(payment => ({ id: payment.id, partyId, invoiceId: kind === 'sale' ? (payment as any).saleId : (payment as any).purchaseId, returnId: payment.returnId, date: payment.date, amount: payment.amount, createdAt: payment.createdAt, allocationLocked: payment.allocationLocked, allocations: payment.allocations.map((a: any) => ({ invoiceId: a.saleId ?? a.purchaseId, amount: a.amount })) })),
+  ).get(invoiceId) ?? [];
+  if (!allocations.length) return [];
+  const ids = [...new Set(allocations.map(row => row.paymentId))];
+  const [paymentRows, movementRows] = await Promise.all([
+    kind === 'sale'
+      ? db.customerPayment.findMany({ where: { id: { in: ids } }, orderBy: { createdAt: 'asc' }, select: { id: true, paymentNo: true, amount: true, date: true, note: true, saleId: true } })
+      : db.vendorPayment.findMany({ where: { id: { in: ids } }, orderBy: { createdAt: 'asc' }, select: { id: true, paymentNo: true, amount: true, date: true, note: true, purchaseId: true } }),
+    db.moneyMovement.findMany({
+      where: {
+        active: true,
+        OR: [
+          { sourceType: kind === 'sale' ? 'customerPayment' : 'vendorPayment', sourceId: { in: ids } },
+          { sourceType: kind === 'sale' ? 'sale' : 'purchase', OR: [{ sourceId: invoiceId }, { sourceId: { startsWith: `${invoiceId}:` } }] },
+        ],
+      },
+      include: { moneyAccount: { select: { id: true, name: true } } },
+      orderBy: { createdAt: 'asc' },
+    }),
+  ]);
+  const paymentById = new Map(paymentRows.map(row => [row.id, row]));
+  const movementById = new Map(movementRows.map(row => [row.sourceId, row]));
+  const directPayments = paymentRows.filter(row => Boolean((row as any).saleId ?? (row as any).purchaseId));
+  const directMovements = movementRows.filter(row => row.sourceType === (kind === 'sale' ? 'sale' : 'purchase'));
+  const directMovementByPaymentId = new Map(directPayments.map((payment, index) => [payment.id, directMovements[index]]));
+  return allocations.map(allocation => {
+    const payment = paymentById.get(allocation.paymentId);
+    const movement = movementById.get(allocation.paymentId) ?? directMovementByPaymentId.get(allocation.paymentId);
+    return {
+      id: allocation.paymentId,
+      paymentNo: payment?.paymentNo,
+      amount: allocation.amount,
+      date: payment?.date,
+      note: payment?.note ?? undefined,
+      accountId: movement?.moneyAccountId ?? undefined,
+      accountName: movement?.moneyAccount?.name ?? undefined,
+      advance: !((payment as any)?.saleId ?? (payment as any)?.purchaseId),
+    };
+  });
+};
+
 // Atomic yearly invoice counter. A single upsert statement so concurrent
 // transactions never receive the same number. Never derived from row counts.
 export type TxClient = Parameters<Parameters<typeof db.$transaction>[0]>[0];
@@ -37,6 +152,14 @@ export async function nextInvoiceNo(
   const key = `${prefix}:${date.slice(0, 4)}`;
   const rows = await t.$queryRaw<{ last: number }[]>`INSERT INTO "Sequence"("key", "last") VALUES (${key}, 1) ON CONFLICT ("key") DO UPDATE SET "last" = "Sequence"."last" + 1 RETURNING "last"`;
   return `${prefix}-${date.slice(0, 4)}-${String(rows[0].last).padStart(6, '0')}`;
+}
+
+// Independent atomic sequences keep customer receipts easy to distinguish
+// from supplier payments in ledgers and account statements.
+export async function nextPaymentNo(t: TxClient, kind: 'received' | 'payment' = 'payment'): Promise<string> {
+  const prefix = kind === 'received' ? 'REC' : 'PAY';
+  const rows = await t.$queryRaw<{ last: number }[]>`INSERT INTO "Sequence"("key", "last") VALUES (${prefix}, 1) ON CONFLICT ("key") DO UPDATE SET "last" = "Sequence"."last" + 1 RETURNING "last"`;
+  return `${prefix}-${String(rows[0].last).padStart(3, '0')}`;
 }
 
 export const tx = Router();
@@ -57,7 +180,7 @@ async function assertLastStockEvent(t: TxClient, productIds: string[], createdAt
 
 async function editSale(req: Request, res: Response) {
   try {
-    const { customerId, lines, discount, paid, accountId, next, date, payments } = req.body ?? {};
+    const { customerId, lines, discount, paid, accountId, next, date, payments, paymentNote } = req.body ?? {};
     if (!Array.isArray(lines) || !lines.length) return res.status(400).json({ error: 'No items in sale' });
     const day = transactionDay(date);
     checkPromiseDay(next);
@@ -72,6 +195,7 @@ async function editSale(req: Request, res: Response) {
       await assertLastStockEvent(t, ids, old.createdAt, old.id);
       const payAccounts = split ? await Promise.all(split.map((x: any) => resolveAccount(t, { accountId: x.accountId }))) : [];
       const payAccount = !split && pay > 0 ? await resolveAccount(t, { accountId, method: accountId ? undefined : 'cash' }) : null;
+      const allowNegativeStock = (await t.businessSettings.findUnique({ where: { id: 'main' }, select: { allowNegativeStock: true } }))?.allowNegativeStock ?? false;
 
       // Undo the old sale into stock at its saved AVCO cost, then repost the
       // edited lines at the AVCO that now applies at this point in history.
@@ -93,14 +217,17 @@ async function editSale(req: Request, res: Response) {
         const rate = num(line.rate, product.price);
         if (!(rate > 0)) throw Object.assign(new Error('Invalid sale rate'), { status: 400 });
         const currentAvg = await currentAvgCost(t, product.id);
-        const unitCost = line.unitCost === undefined ? currentAvg : num(line.unitCost, currentAvg);
-        if (unitCost < 0) throw Object.assign(new Error('Purchase cost cannot be negative.'), { status: 400 });
-        if (qtyKg > product.qtyKg) throw Object.assign(new Error(`Not enough stock: ${product.name}`), { status: 400 });
-        if (round2(product.stockValue - qtyKg * unitCost) < -0.01) throw Object.assign(new Error(`Purchase cost exceeds the available inventory value for ${product.name}.`), { status: 400 });
-        if (qtyKg >= product.qtyKg && Math.abs(product.stockValue - qtyKg * unitCost) > 0.01) throw Object.assign(new Error(`When selling all remaining ${product.name} stock, use its current average cost.`), { status: 400 });
+        const becomesNegative = qtyKg > product.qtyKg;
+        if (becomesNegative && !allowNegativeStock) throw Object.assign(new Error(`Not enough stock: ${product.name}`), { status: 400 });
+        const requestedUnitCost = line.unitCost === undefined ? currentAvg : num(line.unitCost, currentAvg);
+        if (requestedUnitCost < 0) throw Object.assign(new Error('Purchase cost cannot be negative.'), { status: 400 });
+        const unitCost = becomesNegative ? currentAvg : requestedUnitCost;
+        if (!becomesNegative && round2(product.stockValue - qtyKg * unitCost) < -0.01) throw Object.assign(new Error(`Purchase cost exceeds the available inventory value for ${product.name}.`), { status: 400 });
+        if (!becomesNegative && qtyKg >= product.qtyKg && Math.abs(product.stockValue - qtyKg * unitCost) > 0.01) throw Object.assign(new Error(`When selling all remaining ${product.name} stock, use its current average cost.`), { status: 400 });
         const lineCogs = round2(qtyKg * unitCost);
+        const negativeStockQtyKg = round2(Math.max(0, qtyKg - Math.max(0, product.qtyKg)));
         subtotal = round2(subtotal + qtyKg * rate); cogs = round2(cogs + lineCogs);
-        savedItems.push({ productId: product.id, unit: line.unit, enteredQty, qtyKg, rate, unitCost, cogs: lineCogs });
+        savedItems.push({ productId: product.id, unit: line.unit, enteredQty, qtyKg, rate, unitCost, cogs: lineCogs, negativeStockQtyKg });
         const customCostNote = Math.abs(unitCost - currentAvg) >= 0.01;
         const nextAverage = product.qtyKg - qtyKg > 0 ? round2((product.stockValue - qtyKg * unitCost) / (product.qtyKg - qtyKg)) : unitCost;
         await writeMovement(t, product.id, {
@@ -120,8 +247,8 @@ async function editSale(req: Request, res: Response) {
       await t.sale.update({ where: { id: old.id }, data: { customerId: validCustomerId, date: day, discount: disc, total, paid: cappedPay, due, profit: round2(total - cogs), nextDate: next || null, items: { create: savedItems } } });
 
       const postPayment = async (amount: number, acc: any) => {
-        const payment = await t.customerPayment.create({ data: { customerId: validCustomerId, saleId: old.id, amount, date: day } });
-        await recordMovement(t, { accountId: acc.id, method: acc.type, direction: 'in', amount, date: day, sourceType: 'customerPayment', sourceId: payment.id, note: old.invoiceNo });
+        const payment = await t.customerPayment.create({ data: { paymentNo: await nextPaymentNo(t, 'received'), customerId: validCustomerId, saleId: old.id, amount, date: day, note: paymentNote ?? null } });
+        await recordMovement(t, { accountId: acc.id, method: acc.type, direction: 'in', amount, date: day, sourceType: 'customerPayment', sourceId: payment.id, note: paymentNote ?? old.invoiceNo });
       };
       if (split) {
         let remaining = cappedPay;
@@ -137,7 +264,7 @@ async function editSale(req: Request, res: Response) {
 
 async function editPurchase(req: Request, res: Response) {
   try {
-    const { vendorId, lines, paid, accountId, date, next, payments } = req.body ?? {};
+    const { vendorId, lines, paid, accountId, date, next, payments, paymentNote } = req.body ?? {};
     if (!vendorId) return res.status(400).json({ error: 'Vendor is required' });
     if (!Array.isArray(lines) || !lines.length) return res.status(400).json({ error: 'No items in purchase' });
     const day = transactionDay(date); checkPromiseDay(next);
@@ -147,6 +274,8 @@ async function editPurchase(req: Request, res: Response) {
       const old = await t.purchase.findUnique({ where: { id: req.params.id }, include: { items: true, returns: true } });
       if (!old) throw Object.assign(new Error('Purchase not found'), { status: 404 });
       if (old.returns.length) throw Object.assign(new Error('Invoices with posted returns cannot be edited.'), { status: 409 });
+      const negativeCostResolution = await t.stockMovement.findFirst({ where: { refId: old.id, type: 'NEGATIVE_STOCK_COGS_ADJUSTMENT' }, select: { id: true } });
+      if (negativeCostResolution) throw Object.assign(new Error('This purchase resolved negative-stock sale costs and cannot be edited. Create a correcting purchase instead.'), { status: 409 });
       if (day !== old.date) throw Object.assign(new Error('The invoice date cannot be changed during edit; use the original date to preserve AVCO history.'), { status: 409 });
       const ids = [...old.items.map(i => i.productId), ...lines.map((l: any) => String(l.productId ?? ''))];
       await assertLastStockEvent(t, ids, old.createdAt, old.id);
@@ -181,8 +310,8 @@ async function editPurchase(req: Request, res: Response) {
       const cappedPay = Math.min(pay, total); const due = round2(total - cappedPay);
       await t.purchase.update({ where: { id: old.id }, data: { vendorId: vendor.id, date: day, total, paid: cappedPay, due, nextDate: next || null, items: { create: savedItems } } });
       const postPayment = async (amount: number, acc: any) => {
-        const payment = await t.vendorPayment.create({ data: { vendorId: vendor.id, purchaseId: old.id, amount, date: day } });
-        await recordMovement(t, { accountId: acc.id, method: acc.type, direction: 'out', amount, date: day, sourceType: 'purchase', sourceId: `${old.id}:${payment.id}`, note: old.invoiceNo });
+        const payment = await t.vendorPayment.create({ data: { paymentNo: await nextPaymentNo(t), vendorId: vendor.id, purchaseId: old.id, amount, date: day, note: paymentNote ?? null } });
+        await recordMovement(t, { accountId: acc.id, method: acc.type, direction: 'out', amount, date: day, sourceType: 'purchase', sourceId: `${old.id}:${payment.id}`, note: paymentNote ?? old.invoiceNo });
       };
       if (split) {
         let remaining = cappedPay;
@@ -264,10 +393,6 @@ tx.get('/sales/:id', async (req: Request, res: Response) => {
 
   const displayPaid = Math.min(netTotal, Math.max(0, round2(st?.paid ?? s.paid)));
   const displayDue = Math.max(0, round2(st?.due ?? (netTotal - displayPaid)));
-  const savedPayments = await db.customerPayment.findMany({ where: { saleId: s.id, returnId: null, active: true }, orderBy: { createdAt: 'asc' } });
-  const paymentRows = await db.moneyMovement.findMany({ where: { sourceType: 'customerPayment', active: true, sourceId: { in: savedPayments.map(p => p.id) } }, orderBy: { createdAt: 'asc' }, select: { sourceId: true, moneyAccountId: true } });
-  const paymentAccount = new Map(paymentRows.map(p => [p.sourceId, p.moneyAccountId]));
-
   res.json({
     id: s.id, invoiceNo: s.invoiceNo, date: s.date, createdAt: s.createdAt,
     discount: s.discount,
@@ -280,7 +405,7 @@ tx.get('/sales/:id', async (req: Request, res: Response) => {
     items: [...regularItems, ...retItems],
     returns: s.returns.map(r => ({ id: r.id, returnNo: r.returnNo, date: r.date, amount: r.totalAmount })),
     payment: await paymentOf('sale', s.id),
-    payments: savedPayments.map(p => ({ accountId: paymentAccount.get(p.id), amount: p.amount })),
+    payments: await invoicePaymentDetails('sale', s.id, s.customerId),
   });
 });
 
@@ -316,7 +441,7 @@ tx.get('/sales/:id/returnable', async (req: Request, res: Response) => {
 // POST /api/sales { customerId?, lines: [{productId, unit, enteredQty}], discount?, paid?, method?, next?, date?, memoNo? }
 tx.post('/sales', async (req: Request, res: Response) => {
   try {
-    const { customerId, lines, discount, paid, method, accountId, next, date, memoNo } = req.body ?? {};
+    const { customerId, lines, discount, paid, method, accountId, next, date, memoNo, paymentNote, advanceToApply } = req.body ?? {};
     if (!Array.isArray(lines) || !lines.length) return res.status(400).json({ error: 'No items in sale' });
     const day = transactionDay(date);
     checkPromiseDay(next);
@@ -329,9 +454,10 @@ tx.post('/sales', async (req: Request, res: Response) => {
       // is resolved once and used by the ledger entry below.
       const payAccount = !splitPayments && pay > 0 ? await resolveAccount(t, { accountId, method: accountId ? undefined : payMethod }) : null;
       const splitAccounts = splitPayments ? await Promise.all(splitPayments.map((x: any) => resolveAccount(t, { accountId: x.accountId }))) : [];
+      const allowNegativeStock = (await t.businessSettings.findUnique({ where: { id: 'main' }, select: { allowNegativeStock: true } }))?.allowNegativeStock ?? false;
       let sub = 0, cogs = 0;
       let returnTotalAmount = 0, returnCogsReversed = 0;
-      const items: { productId: string; unit: string; enteredQty: number; qtyKg: number; rate: number; unitCost: number; cogs: number }[] = [];
+      const items: { productId: string; unit: string; enteredQty: number; qtyKg: number; rate: number; unitCost: number; cogs: number; negativeStockQtyKg: number }[] = [];
       const returnItems: {
         productId: string; unit: string; enteredQty: number; qtyKg: number; goodKg: number; damagedKg: number;
         condition: string; damageReason: string | null; note: string | null; rate: number; amount: number;
@@ -352,19 +478,22 @@ tx.post('/sales', async (req: Request, res: Response) => {
         const currentAvg = await currentAvgCost(t, p.id);
         // The invoice purchase-price field is the chosen COGS/inventory issue
         // cost. When omitted, use the current moving average.
-        const unitCost = entered > 0 && l.unitCost !== undefined ? num(l.unitCost, currentAvg) : currentAvg;
-        if (unitCost < 0) throw Object.assign(new Error('Purchase cost cannot be negative.'), { status: 400 });
+        const requestedUnitCost = entered > 0 && l.unitCost !== undefined ? num(l.unitCost, currentAvg) : currentAvg;
+        if (requestedUnitCost < 0) throw Object.assign(new Error('Purchase cost cannot be negative.'), { status: 400 });
 
         if (entered > 0) {
           // Standard sale line
           const qtyKg = Math.round(toKg(p, l.unit, entered) * 100) / 100;
-          if (qtyKg > p.qtyKg) throw Object.assign(new Error(`Not enough stock: ${p.name}`), { status: 400 });
-          if (round2(p.stockValue - qtyKg * unitCost) < -0.01) throw Object.assign(new Error(`Purchase cost exceeds the available inventory value for ${p.name}.`), { status: 400 });
-          if (qtyKg >= p.qtyKg && Math.abs(p.stockValue - qtyKg * unitCost) > 0.01) throw Object.assign(new Error(`When selling all remaining ${p.name} stock, use its current average cost.`), { status: 400 });
+          const becomesNegative = qtyKg > p.qtyKg;
+          if (becomesNegative && !allowNegativeStock) throw Object.assign(new Error(`Not enough stock: ${p.name}`), { status: 400 });
+          const unitCost = becomesNegative ? currentAvg : requestedUnitCost;
+          if (!becomesNegative && round2(p.stockValue - qtyKg * unitCost) < -0.01) throw Object.assign(new Error(`Purchase cost exceeds the available inventory value for ${p.name}.`), { status: 400 });
+          if (!becomesNegative && qtyKg >= p.qtyKg && Math.abs(p.stockValue - qtyKg * unitCost) > 0.01) throw Object.assign(new Error(`When selling all remaining ${p.name} stock, use its current average cost.`), { status: 400 });
           const lineCogs = round2(qtyKg * unitCost);
+          const negativeStockQtyKg = round2(Math.max(0, qtyKg - Math.max(0, p.qtyKg)));
           cogs += lineCogs;
           sub += round2(qtyKg * rate);
-          items.push({ productId: p.id, unit: l.unit, enteredQty: entered, qtyKg, rate, unitCost, cogs: lineCogs });
+          items.push({ productId: p.id, unit: l.unit, enteredQty: entered, qtyKg, rate, unitCost, cogs: lineCogs, negativeStockQtyKg });
           // Selling leaves quantity AND inventory value (AVCO out).
           const customCostNote = Math.abs(unitCost - currentAvg) >= 0.01;
           const nextAverage = p.qtyKg - qtyKg > 0 ? round2((p.stockValue - qtyKg * unitCost) / (p.qtyKg - qtyKg)) : unitCost;
@@ -378,6 +507,7 @@ tx.post('/sales', async (req: Request, res: Response) => {
           const absEntered = Math.abs(entered);
           const returnKg = Math.round(toKg(p, l.unit, absEntered) * 100) / 100;
           const lineAmount = round2(returnKg * rate);
+          const unitCost = requestedUnitCost;
           const lineCogs = round2(returnKg * unitCost);
           returnTotalAmount = round2(returnTotalAmount + lineAmount);
           returnCogsReversed = round2(returnCogsReversed + lineCogs);
@@ -424,6 +554,8 @@ tx.post('/sales', async (req: Request, res: Response) => {
         resolvedInvoiceNo = await nextInvoiceNo(t, 'SAL', day);
       }
 
+      if (validCustomerId) await freezeLegacyAdvanceAllocations(t, 'sale', validCustomerId);
+
       const sale = await t.sale.create({
         data: {
           customerId: validCustomerId, date: day, discount: disc,
@@ -431,7 +563,7 @@ tx.post('/sales', async (req: Request, res: Response) => {
           paid: cappedPay,
           due,
           profit: round2(grossTotal - cogs),
-          nextDate: next ?? null, invoiceNo: resolvedInvoiceNo,
+          nextDate: next ?? null, invoiceNo: resolvedInvoiceNo, advanceAllocationControlled: true,
           items: { create: items },
         },
       });
@@ -460,6 +592,7 @@ tx.post('/sales', async (req: Request, res: Response) => {
         if (validCustomerId) {
           await t.customerPayment.create({
             data: {
+              paymentNo: await nextPaymentNo(t, 'received'),
               customerId: validCustomerId,
               saleId: null,
               returnId: createdReturn.id,
@@ -478,26 +611,31 @@ tx.post('/sales', async (req: Request, res: Response) => {
           if (!(amount > 0)) continue;
           const acc = splitAccounts[i];
           const payment = await t.customerPayment.create({
-            data: { customerId: validCustomerId, saleId: sale.id, amount, date: day },
+            data: { paymentNo: await nextPaymentNo(t, 'received'), customerId: validCustomerId, saleId: sale.id, amount, date: day, note: paymentNote ?? null },
           });
           await recordMovement(t, {
             accountId: acc.id, method: acc.type, direction: 'in', amount, date: day,
-            sourceType: 'customerPayment', sourceId: payment.id, note: sale.invoiceNo,
+            sourceType: 'customerPayment', sourceId: payment.id, note: paymentNote ?? sale.invoiceNo,
           });
           remaining = round2(remaining - amount);
         }
       } else if (payAccount) {
         const payment = await t.customerPayment.create({
-          data: { customerId: validCustomerId, saleId: sale.id, amount: cappedPay, date: day },
+          data: { paymentNo: await nextPaymentNo(t, 'received'), customerId: validCustomerId, saleId: sale.id, amount: cappedPay, date: day, note: paymentNote ?? null },
         });
         await recordMovement(t, {
           accountId: payAccount.id, method: payAccount.type, direction: 'in', amount: cappedPay, date: day,
-          sourceType: 'customerPayment', sourceId: payment.id, note: sale.invoiceNo,
+          sourceType: 'customerPayment', sourceId: payment.id, note: paymentNote ?? sale.invoiceNo,
         });
+      }
+      let advanceApplied = 0;
+      if (validCustomerId && num(advanceToApply) > 0) {
+        const applyAmount = Math.min(round2(num(advanceToApply)), due);
+        advanceApplied = await applyAdvanceToInvoice(t, 'sale', validCustomerId, sale.id, applyAmount);
       }
       if (validCustomerId && next) await t.customer.update({ where: { id: validCustomerId }, data: { nextDate: String(next) } });
       if (validCustomerId) await syncPartyInvoices('sale', validCustomerId, t);
-      return { id: sale.id, invoiceNo: sale.invoiceNo, total: netInvoiceTotal, returnNo: createdReturn?.returnNo };
+      return { id: sale.id, invoiceNo: sale.invoiceNo, total: netInvoiceTotal, returnNo: createdReturn?.returnNo, advanceApplied };
     });
     res.status(201).json(result);
   } catch (e: unknown) {
@@ -571,10 +709,6 @@ tx.get('/purchases/:id', async (req: Request, res: Response) => {
 
   const displayPaid = Math.min(netTotal, Math.max(0, round2(st?.paid ?? p.paid)));
   const displayDue = Math.max(0, round2(st?.due ?? (netTotal - displayPaid)));
-  const savedPayments = await db.vendorPayment.findMany({ where: { purchaseId: p.id, returnId: null, active: true }, orderBy: { createdAt: 'asc' } });
-  const paymentRows = await db.moneyMovement.findMany({ where: { sourceType: 'purchase', active: true, OR: [{ sourceId: { startsWith: p.id } }, { sourceId: { in: savedPayments.map(payment => payment.id) } }] }, orderBy: { createdAt: 'asc' }, select: { sourceId: true, moneyAccountId: true } });
-  const paymentAccount = new Map(paymentRows.map(m => [m.sourceId, m.moneyAccountId]));
-
   res.json({
     id: p.id, invoiceNo: p.invoiceNo, date: p.date, createdAt: p.createdAt,
     total: returnTotal > 0 ? netTotal : p.total,
@@ -585,7 +719,7 @@ tx.get('/purchases/:id', async (req: Request, res: Response) => {
     vendor: { id: p.vendor.id, name: p.vendor.name, mobile: p.vendor.mobile },
     items: [...regularItems, ...retItems],
     payment: await paymentOf('purchase', p.id),
-    payments: savedPayments.map((payment, index) => ({ accountId: paymentAccount.get(`${p.id}:${payment.id}`) ?? paymentAccount.get(payment.id) ?? paymentAccount.get(`${p.id}:${index}`) ?? paymentAccount.get(p.id), amount: payment.amount })),
+    payments: await invoicePaymentDetails('purchase', p.id, p.vendorId),
     returns: p.returns.map(r => ({ id: r.id, returnNo: r.returnNo, date: r.date, amount: r.totalAmount })),
   });
 });
@@ -622,7 +756,7 @@ tx.get('/purchases/:id/returnable', async (req: Request, res: Response) => {
 // POST /api/purchases { vendorId, lines: [{productId, unit, enteredQty, rate?}], paid?, method?, next?, date?, memoNo? }
 tx.post('/purchases', async (req: Request, res: Response) => {
   try {
-    const { vendorId, lines, paid, method, accountId, next, date, memoNo } = req.body ?? {};
+    const { vendorId, lines, paid, method, accountId, next, date, memoNo, paymentNote, advanceToApply } = req.body ?? {};
     if (!vendorId) return res.status(400).json({ error: 'Vendor is required' });
     if (!Array.isArray(lines) || !lines.length) return res.status(400).json({ error: 'No items in purchase' });
     const day = transactionDay(date);
@@ -631,6 +765,7 @@ tx.post('/purchases', async (req: Request, res: Response) => {
     const splitPayments = Array.isArray(req.body.payments) ? req.body.payments.filter((x: any) => x && num(x.amount) > 0) : null;
     const payMethod = methodForAmount(method, pay, Boolean(accountId));
     const result = await db.$transaction(async t => {
+      const purchaseId = randomUUID();
       const payAccount = !splitPayments && pay > 0 ? await resolveAccount(t, { accountId, method: accountId ? undefined : payMethod }) : null;
       const splitAccounts = splitPayments ? await Promise.all(splitPayments.map((x: any) => resolveAccount(t, { accountId: x.accountId }))) : [];
       const v = await t.vendor.findUnique({ where: { id: String(vendorId) } });
@@ -679,7 +814,7 @@ tx.post('/purchases', async (req: Request, res: Response) => {
 
           // Stock in at the buyer's cost (vendor rate + other cost per kg); weighted average re-blends.
           await writeMovement(t, p.id, {
-            type: 'PURCHASE', bucket: 'sellable', qtyKg, unitCost: buyerCostPerKg, date: day,
+            type: 'PURCHASE', bucket: 'sellable', qtyKg, unitCost: buyerCostPerKg, date: day, refId: purchaseId,
           });
         } else {
           // Negative quantity => PURCHASE RETURN line
@@ -720,13 +855,16 @@ tx.post('/purchases', async (req: Request, res: Response) => {
         resolvedPurInvoiceNo = await nextInvoiceNo(t, 'PUR', day);
       }
 
+      await freezeLegacyAdvanceAllocations(t, 'purchase', String(vendorId));
+
       const pur = await t.purchase.create({
         data: {
+          id: purchaseId,
           vendorId: String(vendorId), date: day,
           total: grossTotal,
           paid: cappedPayP,
           due,
-          nextDate: next ?? null, invoiceNo: resolvedPurInvoiceNo,
+          nextDate: next ?? null, invoiceNo: resolvedPurInvoiceNo, advanceAllocationControlled: true,
           items: { create: items },
         },
       });
@@ -753,6 +891,7 @@ tx.post('/purchases', async (req: Request, res: Response) => {
 
         await t.vendorPayment.create({
           data: {
+            paymentNo: await nextPaymentNo(t),
             vendorId: String(vendorId),
             purchaseId: null,
             returnId: createdPurReturn.id,
@@ -771,28 +910,84 @@ tx.post('/purchases', async (req: Request, res: Response) => {
           const amount = round2(Math.min(remaining, num(splitPayments[i].amount)));
           if (!(amount > 0)) continue;
           const acc = splitAccounts[i];
-          await t.vendorPayment.create({ data: { vendorId: String(vendorId), purchaseId: pur.id, amount, date: day } });
-          await recordMovement(t, { accountId: acc.id, method: acc.type, direction: 'out', amount, date: day, sourceType: 'purchase', sourceId: pur.id + ':' + i, note: pur.invoiceNo });
+          await t.vendorPayment.create({ data: { paymentNo: await nextPaymentNo(t), vendorId: String(vendorId), purchaseId: pur.id, amount, date: day, note: paymentNote ?? null } });
+          await recordMovement(t, { accountId: acc.id, method: acc.type, direction: 'out', amount, date: day, sourceType: 'purchase', sourceId: pur.id + ':' + i, note: paymentNote ?? pur.invoiceNo });
           remaining = round2(remaining - amount);
         }
       } else if (payAccount) {
         await t.vendorPayment.create({
-          data: { vendorId: String(vendorId), purchaseId: pur.id, amount: cappedPayP, date: day },
+          data: { paymentNo: await nextPaymentNo(t), vendorId: String(vendorId), purchaseId: pur.id, amount: cappedPayP, date: day, note: paymentNote ?? null },
         });
         await recordMovement(t, {
           accountId: payAccount.id, method: payAccount.type, direction: 'out', amount: cappedPayP, date: day,
-          sourceType: 'purchase', sourceId: pur.id, note: pur.invoiceNo,
+          sourceType: 'purchase', sourceId: pur.id, note: paymentNote ?? pur.invoiceNo,
         });
+      }
+      let advanceApplied = 0;
+      if (num(advanceToApply) > 0) {
+        const applyAmount = Math.min(round2(num(advanceToApply)), due);
+        advanceApplied = await applyAdvanceToInvoice(t, 'purchase', String(vendorId), pur.id, applyAmount);
       }
       if (next) await t.vendor.update({ where: { id: String(vendorId) }, data: { nextDate: String(next) } });
       // Same-transaction re-materialization of this vendor's stored paid/due.
       await syncPartyInvoices('purchase', String(vendorId), t);
-      return { id: pur.id, invoiceNo: pur.invoiceNo, total: netInvoiceTotal, returnNo: createdPurReturn?.returnNo };
+      return { id: pur.id, invoiceNo: pur.invoiceNo, total: netInvoiceTotal, returnNo: createdPurReturn?.returnNo, advanceApplied };
     });
     res.status(201).json(result);
   } catch (e: unknown) {
     const err = e as { status?: number; message?: string };
     res.status(err.status ?? 500).json({ error: err.message ?? 'Failed to create purchase' });
+  }
+});
+
+// One confirmed customer/vendor entry may be split between its cash and bank ledgers.
+tx.post('/party-payments/split', async (req: Request, res: Response) => {
+  try {
+    const { kind, partyId, payments, date, note } = req.body ?? {};
+    if (!['c', 'v'].includes(kind) || typeof partyId !== 'string' || !partyId || !Array.isArray(payments) || !payments.length || payments.length > 2) {
+      return res.status(400).json({ error: 'Select a customer or supplier and enter a cash or bank amount.' });
+    }
+    const rows = payments.map((p: any) => ({ accountId: String(p?.accountId ?? ''), amount: round2(num(p?.amount)) })).filter((p: any) => p.amount > 0);
+    if (!rows.length || rows.some((p: any) => !p.accountId) || (note !== undefined && (typeof note !== 'string' || note.length > 500))) {
+      return res.status(400).json({ error: 'Enter at least one valid cash or bank amount.' });
+    }
+    const day = transactionDay(date);
+    const result = await db.$transaction(async t => {
+      await lockAccounts(t, rows.map((p: any) => p.accountId));
+      const accounts = await Promise.all(rows.map((p: any) => t.moneyAccount.findUnique({ where: { id: p.accountId } })));
+      for (let i = 0; i < rows.length; i++) {
+        const account = accounts[i];
+        if (!account?.active || !['cash', 'bank'].includes(account.type)) throw Object.assign(new Error('Choose an active cash or bank account.'), { status: 400 });
+      }
+      const isCustomer = kind === 'c';
+      const party = isCustomer
+        ? await t.customer.findUnique({ where: { id: partyId } })
+        : await t.vendor.findUnique({ where: { id: partyId } });
+      if (!party || party.deletedAt) throw Object.assign(new Error(isCustomer ? 'Customer not found' : 'Supplier not found'), { status: 400 });
+      if (!isCustomer) {
+        const totals = new Map<string, number>();
+        rows.forEach((p: any) => totals.set(p.accountId, round2((totals.get(p.accountId) ?? 0) + p.amount)));
+        for (const [accountId, amount] of totals) {
+          if (round2(await accountBalance(t, accountId)) < amount) throw Object.assign(new Error('Not enough money in this account'), { status: 400, code: 'PAYMENT_FUNDS' });
+        }
+      }
+      const created: { id: string; paymentNo: string; amount: number; accountId: string }[] = [];
+      for (let i = 0; i < rows.length; i++) {
+        const row = rows[i], account = accounts[i]!;
+        const paymentNo = await nextPaymentNo(t, kind === 'c' ? 'received' : 'payment');
+        const payment = isCustomer
+          ? await t.customerPayment.create({ data: { paymentNo, customerId: partyId, amount: row.amount, date: day, note: note?.trim() || null } })
+          : await t.vendorPayment.create({ data: { paymentNo, vendorId: partyId, amount: row.amount, date: day, note: note?.trim() || null } });
+        await recordMovement(t, { accountId: account.id, method: account.type, direction: isCustomer ? 'in' : 'out', amount: row.amount, date: day, sourceType: isCustomer ? 'customerPayment' : 'vendorPayment', sourceId: payment.id, note: note?.trim() || null });
+        created.push({ id: payment.id, paymentNo, amount: row.amount, accountId: account.id });
+      }
+      await syncPartyInvoices(isCustomer ? 'sale' : 'purchase', partyId, t);
+      return created;
+    });
+    res.status(201).json({ payments: result });
+  } catch (e: unknown) {
+    const err = e as { status?: number; message?: string; code?: string };
+    res.status(err.status ?? 500).json({ error: err.message ?? 'Could not save collection or payment', code: err.code });
   }
 });
 
@@ -810,26 +1005,17 @@ tx.post('/customer-payments', async (req: Request, res: Response) => {
       const acc = await resolveAccount(t, { accountId, method: accountId ? undefined : payMethod });
       const c = await t.customer.findUnique({ where: { id: String(customerId) } });
       if (!c || (c as { deletedAt?: Date | null }).deletedAt) throw Object.assign(new Error('Customer not found'), { status: 400 });
-      // No advance/credit architecture exists, so a collection can never push a
-      // customer into a negative (advance) balance. Checked INSIDE the same
-      // transaction so the rejection is atomic with the future write.
-      const [csales, cpays] = await Promise.all([
-        t.sale.findMany({ where: { customerId: c.id } }),
-        t.customerPayment.findMany({ where: { customerId: c.id, active: true } }),
-      ]);
-      const due = round2(c.openingDue + csales.reduce((s, x) => s + x.total, 0) - cpays.reduce((s, x) => s + x.amount, 0));
-      if (round2(amt) > due) throw Object.assign(new Error('Amount exceeds current customer balance'), { status: 400, code: 'PAYMENT_OVERPAY' });
       const created = await t.customerPayment.create({
-        data: { customerId: c.id, amount: amt, date: day, note: note ?? null, nextDate: next ?? null },
+        data: { paymentNo: await nextPaymentNo(t, 'received'), customerId: c.id, amount: amt, date: day, note: note ?? null, nextDate: next ?? null },
       });
       // The oldest-invoice-first FIFO pool just grew: re-attribute this
       // customer's invoices inside the same transaction.
       await syncPartyInvoices('sale', c.id, t);
-      await recordMovement(t, { accountId: acc.id, method: acc.type, direction: 'in', amount: amt, date: day, sourceType: 'customerPayment', sourceId: created.id });
+      await recordMovement(t, { accountId: acc.id, method: acc.type, direction: 'in', amount: amt, date: day, sourceType: 'customerPayment', sourceId: created.id, note: note ?? null });
       if (next) await t.customer.update({ where: { id: c.id }, data: { nextDate: String(next) } });
       return created;
     });
-    res.status(201).json({ id: p.id });
+    res.status(201).json({ id: p.id, paymentNo: p.paymentNo });
   } catch (e: unknown) {
     const err = e as { status?: number; message?: string };
     res.status(err.status ?? 500).json({ error: err.message ?? 'Failed to save payment' });
@@ -853,24 +1039,18 @@ tx.post('/vendor-payments', async (req: Request, res: Response) => {
       // Serialize same-account money-out work so two payments can never both
       // pass the balance check (same rule the transfer route uses).
       await lockAccounts(t, [acc.id]);
-      const [vpurs, vpays] = await Promise.all([
-        t.purchase.findMany({ where: { vendorId: v.id } }),
-        t.vendorPayment.findMany({ where: { vendorId: v.id, active: true } }),
-      ]);
-      const payable = round2(v.openingPayable + vpurs.reduce((s, x) => s + x.total, 0) - vpays.reduce((s, x) => s + x.amount, 0));
-      if (round2(amt) > payable) throw Object.assign(new Error('Amount exceeds current vendor payable'), { status: 400, code: 'PAYMENT_OVERPAY' });
       const available = await accountBalance(t, acc.id);
       if (round2(available) < amt) throw Object.assign(new Error('Not enough money in this account'), { status: 400, code: 'PAYMENT_FUNDS' });
       const created = await t.vendorPayment.create({
-        data: { vendorId: v.id, amount: amt, date: day, note: note ?? null, nextDate: next ?? null },
+        data: { paymentNo: await nextPaymentNo(t), vendorId: v.id, amount: amt, date: day, note: note ?? null, nextDate: next ?? null },
       });
       // FIFO pool grew: re-attribute this vendor's purchases in the same tx.
       await syncPartyInvoices('purchase', v.id, t);
-      await recordMovement(t, { accountId: acc.id, method: acc.type, direction: 'out', amount: amt, date: day, sourceType: 'vendorPayment', sourceId: created.id });
+      await recordMovement(t, { accountId: acc.id, method: acc.type, direction: 'out', amount: amt, date: day, sourceType: 'vendorPayment', sourceId: created.id, note: note ?? null });
       if (next) await t.vendor.update({ where: { id: v.id }, data: { nextDate: String(next) } });
       return created;
     });
-    res.status(201).json({ id: p.id });
+    res.status(201).json({ id: p.id, paymentNo: p.paymentNo });
   } catch (e: unknown) {
     const err = e as { status?: number; message?: string };
     res.status(err.status ?? 500).json({ error: err.message ?? 'Failed to save payment' });
@@ -899,7 +1079,7 @@ tx.get('/bootstrap', async (_req: Request, res: Response) => {
     db.productReturn.findMany({ orderBy: [{ date: 'desc' }, { createdAt: 'desc' }] }),
     moneyBalances(),
     accountBalances(),
-    db.moneyMovement.findMany({ where: { active: true, sourceType: { in: ['expense', 'sale', 'customerPayment', 'vendorPayment', 'purchase'] } }, select: { sourceId: true, sourceType: true, method: true, moneyAccountId: true } }),
+    db.moneyMovement.findMany({ where: { active: true, sourceType: { in: ['expense', 'sale', 'customerPayment', 'vendorPayment', 'purchase'] } }, select: { sourceId: true, sourceType: true, method: true, moneyAccountId: true, transactionNo: true } }),
     db.moneyTransfer.findMany({ orderBy: [{ date: 'desc' }, { createdAt: 'desc' }], take: 50 }),
     periodFinance('day'),
     lifetimeFinance(),
@@ -924,9 +1104,11 @@ tx.get('/bootstrap', async (_req: Request, res: Response) => {
   // Payment method for money-in rows: standalone collections and sale-time
   // payments both live in MoneyMovement.
   const inMethod = new Map<string, string>();
+  const paymentTransactionNo = new Map<string, string>();
   for (const m of ledger) {
     if (m.sourceType === 'customerPayment') inMethod.set(`p:${m.sourceId}`, m.method);
     if (m.sourceType === 'sale') inMethod.set(`s:${m.sourceId}`, m.method);
+    if (m.sourceType === 'customerPayment' || m.sourceType === 'vendorPayment') paymentTransactionNo.set(m.sourceId, m.transactionNo);
   }
   // Concrete account of each money-in / money-out row, so payment history in
   // the Customer / Vendor detail can show which Bank & Cash account was used.
@@ -965,10 +1147,10 @@ tx.get('/bootstrap', async (_req: Request, res: Response) => {
     }),
     purchases: purchases.map(p => {
       const st = purSet.get(p.id);
-      return { id: p.id, vendorId: p.vendorId, date: p.date, total: p.total, paid: st?.paid ?? p.paid, due: st?.due ?? p.due, status: st?.status ?? 'due', invoiceNo: p.invoiceNo ?? undefined, items: purchaseLinesById.get(p.id) ?? [] };
+      return { id: p.id, vendorId: p.vendorId, date: p.date, createdAt: p.createdAt, total: p.total, paid: st?.paid ?? p.paid, due: st?.due ?? p.due, status: st?.status ?? 'due', invoiceNo: p.invoiceNo ?? undefined, items: purchaseLinesById.get(p.id) ?? [] };
     }),
-    customerPayments: customerPayments.map(p => ({ id: p.id, customerId: p.customerId ?? 'cash', amount: p.amount, date: p.date, note: p.note ?? undefined, returnId: p.returnId ?? undefined, returnNo: p.returnId ? retNo.get(p.returnId) : undefined, createdAt: p.createdAt, saleId: p.saleId ?? undefined, method: p.returnId ? undefined : (inMethod.get(`p:${p.id}`) ?? (p.saleId ? inMethod.get(`s:${p.saleId}`) : undefined)), accountId: p.returnId ? undefined : inAccount.get(p.id)?.accountId, accountName: p.returnId ? undefined : inAccount.get(p.id)?.accountName })),
-    vendorPayments: vendorPayments.map(p => ({ id: p.id, vendorId: p.vendorId, amount: p.amount, date: p.date, note: p.note ?? undefined, returnId: p.returnId ?? undefined, returnNo: p.returnId ? retNo.get(p.returnId) : undefined, createdAt: p.createdAt, purchaseId: p.purchaseId ?? undefined, accountId: p.returnId ? undefined : outAccount.get(p.id)?.accountId, accountName: p.returnId ? undefined : outAccount.get(p.id)?.accountName })),
+    customerPayments: customerPayments.map(p => ({ id: p.id, paymentNo: p.paymentNo, transactionNo: paymentTransactionNo.get(p.id), customerId: p.customerId ?? 'cash', amount: p.amount, date: p.date, note: p.note ?? undefined, returnId: p.returnId ?? undefined, returnNo: p.returnId ? retNo.get(p.returnId) : undefined, createdAt: p.createdAt, saleId: p.saleId ?? undefined, method: p.returnId ? undefined : (inMethod.get(`p:${p.id}`) ?? (p.saleId ? inMethod.get(`s:${p.saleId}`) : undefined)), accountId: p.returnId ? undefined : inAccount.get(p.id)?.accountId, accountName: p.returnId ? undefined : inAccount.get(p.id)?.accountName })),
+    vendorPayments: vendorPayments.map(p => ({ id: p.id, paymentNo: p.paymentNo, transactionNo: paymentTransactionNo.get(p.id), vendorId: p.vendorId, amount: p.amount, date: p.date, note: p.note ?? undefined, returnId: p.returnId ?? undefined, returnNo: p.returnId ? retNo.get(p.returnId) : undefined, createdAt: p.createdAt, purchaseId: p.purchaseId ?? undefined, accountId: p.returnId ? undefined : outAccount.get(p.id)?.accountId, accountName: p.returnId ? undefined : outAccount.get(p.id)?.accountName })),
     movements: movements.map(mv => {
       const sale = mv.refId ? sales.find(row => row.id === mv.refId) : undefined;
       const purchase = mv.refId ? purchases.find(row => row.id === mv.refId) : undefined;

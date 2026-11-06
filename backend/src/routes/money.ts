@@ -2,7 +2,7 @@ import { Router, Request, Response } from 'express';
 import { db } from '../db';
 import {
   ACCOUNT_TYPES, ACCOUNT_TYPE_LABEL, accountBalance, accountBalances, isAccountType, lockAccount, lockAccounts,
-  moneyBalances, recordMovement, requireAccountType, resolveAccount, type AccountRow,
+  moneyBalances, nextMoneyTransactionNo, recordMovement, requireAccountType, resolveAccount, type AccountRow,
 } from '../money';
 import { nextInvoiceNo } from './transactions';
 import type { TxClient } from './transactions';
@@ -49,6 +49,7 @@ money.post('/entries', async (req: Request, res: Response) => {
         throw Object.assign(new Error('Not enough money in this account'), { status: 400, code: 'INSUFFICIENT_FUNDS' });
       }
       return t.moneyMovement.create({ data: {
+        transactionNo: await nextMoneyTransactionNo(t),
         moneyAccountId: accountId, method: account.type, direction, amount: round2(amount), date,
         sourceType, sourceId: requestId, note: note?.trim() || null,
       } });
@@ -114,8 +115,10 @@ money.get('/types', (_req: Request, res: Response) => {
 });
 
 // GET /api/money/accounts — every account with its derived balance
-money.get('/accounts', async (_req: Request, res: Response) => {
-  const list = await accountBalances();
+money.get('/accounts', async (req: Request, res: Response) => {
+  const asOf = typeof req.query.asOf === 'string' ? req.query.asOf : undefined;
+  if (asOf && !validDate(asOf)) return fail(res, 'Invalid account balance date', 'INVALID_DATE');
+  const list = await accountBalances(db, undefined, asOf);
   res.json({
     accounts: list,
     totalMoney: round2(list.filter(a => a.active).reduce((s, a) => s + a.balance, 0)),
@@ -142,15 +145,15 @@ money.get('/accounts/:id', async (req: Request, res: Response) => {
   const chartAccount = await db.chartAccount.findUnique({ where: { moneyAccountId: acc.id } });
   const journalLines = chartAccount ? await db.journalLine.findMany({ where: { accountId: chartAccount.id, entry: { active: true, sourceType: 'manual' } }, include: { entry: { select: { id: true, entryNo: true, date: true, memo: true, sourceType: true, sourceRef: true } } } }) : [];
   const merged = [
-    ...rows.map(m => ({ id: m.id, date: m.date, direction: m.direction as 'in' | 'out', amount: m.amount, sourceType: m.sourceType, sourceId: m.sourceId, note: m.note ?? undefined, transferNo: m.transfer?.transferNo, counterpartyAccountId: m.transfer ? (m.transfer.fromAccountId === acc.id ? m.transfer.toAccountId : m.transfer.fromAccountId) ?? undefined : undefined, active: m.active, createdAt: m.createdAt })),
-    ...journalLines.filter(line => line.debit > 0 || line.credit > 0).map(line => ({ id: `journal-${line.id}`, date: line.entry.date, direction: line.debit > 0 ? 'in' as const : 'out' as const, amount: line.debit > 0 ? line.debit : line.credit, sourceType: 'journal', sourceId: line.entry.id, note: `${line.entry.entryNo} · ${line.entry.memo}`, transferNo: undefined, counterpartyAccountId: undefined, active: true, createdAt: line.createdAt })),
+    ...rows.map(m => ({ id: m.id, transactionNo: m.transactionNo, date: m.date, direction: m.direction as 'in' | 'out', amount: m.amount, sourceType: m.sourceType, sourceId: m.sourceId, note: m.note ?? undefined, transferNo: m.transfer?.transferNo, counterpartyAccountId: m.transfer ? (m.transfer.fromAccountId === acc.id ? m.transfer.toAccountId : m.transfer.fromAccountId) ?? undefined : undefined, active: m.active, createdAt: m.createdAt })),
+    ...journalLines.filter(line => line.debit > 0 || line.credit > 0).map(line => ({ id: `journal-${line.id}`, transactionNo: line.entry.entryNo, date: line.entry.date, direction: line.debit > 0 ? 'in' as const : 'out' as const, amount: line.debit > 0 ? line.debit : line.credit, sourceType: 'journal', sourceId: line.entry.id, note: `${line.entry.entryNo} · ${line.entry.memo}`, transferNo: undefined, counterpartyAccountId: undefined, active: true, createdAt: line.createdAt })),
   ].sort((a, b) => b.date.localeCompare(a.date) || b.createdAt.getTime() - a.createdAt.getTime() || b.id.localeCompare(a.id));
   // Running balance from the newest entry backwards.
   let running = acc.balance;
   const movements = merged.map(m => {
     const signed = m.direction === 'in' ? m.amount : -m.amount;
     const entry = {
-      id: m.id, date: m.date, direction: m.direction, amount: m.amount,
+      id: m.id, transactionNo: m.transactionNo, date: m.date, direction: m.direction, amount: m.amount,
       sourceType: m.sourceType, sourceId: m.sourceId, note: m.note,
       transferNo: m.transferNo,
       counterpartyAccountId: m.counterpartyAccountId,

@@ -39,7 +39,7 @@ export function AccountPage({ id, onBack }: { id: string; onBack: () => void }) 
   const columns: TableColumn<MoneyAccountMovement>[] = [
     { key: 'date', label: l('তারিখ', 'Date'), render: r => <Text>{fd(r.date)}</Text> },
     { key: 'type', label: l('লেনদেনের ধরন', 'Transaction'), flex: 1.3, render: r => <Text>{names[r.sourceType] ?? r.sourceType}</Text> },
-    { key: 'note', label: l('বিবরণ / রেফারেন্স', 'Details / Reference'), flex: 2, render: r => <Text>{[r.transferNo, otherName(r), r.note !== r.transferNo ? r.note : ''].filter(Boolean).join(' · ') || '—'}</Text> },
+    { key: 'note', label: l('বিবরণ / রেফারেন্স', 'Details / Reference'), flex: 2, render: r => <Text>{[r.transactionNo, r.transferNo, otherName(r), r.note !== r.transferNo ? r.note : ''].filter(Boolean).join(' · ') || '—'}</Text> },
     { key: 'in', label: l('জমা', 'Money in'), align: 'right', render: r => <Text style={{ color: '#15803D' }}>{r.direction === 'in' ? m(r.amount) : '—'}</Text> },
     { key: 'out', label: l('উত্তোলন', 'Money out'), align: 'right', render: r => <Text style={{ color: '#DC2626' }}>{r.direction === 'out' ? m(r.amount) : '—'}</Text> },
     { key: 'balance', label: l('স্থিতি', 'Balance'), align: 'right', render: r => <Text style={{ fontWeight: '600' }}>{m(r.balance)}</Text> },
