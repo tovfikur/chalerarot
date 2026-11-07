@@ -49,6 +49,7 @@ export type ActivityQuery = { group?: string; q?: string; userId?: string; from?
 let authExpired: (() => void) | undefined;
 export const onAuthExpired = (callback?: () => void) => { authExpired = callback; };
 export type MoneyMovementRow = { id: string; transactionNo: string; moneyAccountId: string; direction: string; amount: number; date: string; sourceType: string; transferId?: string | null; note?: string | null; moneyAccount?: { name: string; type: string } };
+export type HouseExpenseRow = { id: string; transactionNo: string; date: string; amount: number; accountId: string; accountName: string; description: string; note: string };
 export type BusinessSettings = { name: string; address: string; phone: string; currency: string; fiscalStartMonth: number; language: 'bn' | 'en'; allowNegativeStock: boolean };
 export type BulkImportRes = {
   total: number;
@@ -182,6 +183,8 @@ export const api = {
   profile: (body: { name: string; phone: string; email: string; password: string; currentPassword: string }) => req<AppUser>('/auth/profile', { method: 'PUT', body: JSON.stringify(body) }),
   moneyMovements: () => req<MoneyMovementRow[]>('/money/movements?limit=30'),
   moneyEntry: (body: { accountId: string; direction: 'in' | 'out'; amount: number; date: string; note: string; requestId: string }) => req<MoneyMovementRow>('/money/entries', { method: 'POST', body: JSON.stringify(body) }),
+  houseExpenses: () => req<HouseExpenseRow[]>('/house-expenses'),
+  createHouseExpense: (body: { accountId: string; amount: number; date: string; description: string; note: string; requestId: string }) => req<HouseExpenseRow>('/house-expenses', { method: 'POST', body: JSON.stringify(body) }),
   updateMoneyEntry: (id: string, body: { amount: number; note: string }) => req<MoneyMovementRow & { previousAmount: number }>(`/money/entries/${id}`, { method: 'PUT', body: JSON.stringify(body) }),
   settings: () => req<BusinessSettings>('/settings'),
   saveSettings: (value: BusinessSettings) => req<BusinessSettings>('/settings', { method: 'PUT', body: JSON.stringify(value) }),

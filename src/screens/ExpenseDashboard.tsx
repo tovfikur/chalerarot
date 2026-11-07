@@ -1,5 +1,5 @@
-import React, { useCallback, useEffect, useMemo, useState } from 'react';
-import { Alert, Text, TouchableOpacity, View } from 'react-native';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { Alert, ScrollView, Text, TouchableOpacity, View } from 'react-native';
 import { useApp, today } from '../store';
 import { api, type Expense, type ExpenseCategoryKind, type ExpenseCategoryRow } from '../api';
 import {
@@ -78,6 +78,7 @@ export function ExpenseDashboard(_props: ExpenseDashboardProps) {
   const [customCats, setCustomCats] = useState<ExpenseCategoryRow[]>([]);
   const [search, setSearch] = useState('');
   const [catFilter, setCatFilter] = useState('all');
+  const [catFilterOpen, setCatFilterOpen] = useState(false);
   const [page, setPage] = useState(1);
   const [formOpen, setFormOpen] = useState(false);
   const [catOpen, setCatOpen] = useState(false);
@@ -87,6 +88,10 @@ export function ExpenseDashboard(_props: ExpenseDashboardProps) {
   const [voucher, setVoucher] = useState('');
   const [date, setDate] = useState(today());
   const [catId, setCatId] = useState('');
+  const [categoryPickerOpen, setCategoryPickerOpen] = useState(false);
+  const expenseNameInput = useRef<any>(null);
+  const amountInput = useRef<any>(null);
+  const [expenseName, setExpenseName] = useState('');
   const [amount, setAmount] = useState('');
   const [accountId, setAccountId] = useState('');
   const [note, setNote] = useState('');
@@ -120,6 +125,10 @@ export function ExpenseDashboard(_props: ExpenseDashboardProps) {
       list.push(cat);
     };
     add({ id: 'builtin:other', name: lang === 'bn' ? '\u0985\u09a8\u09cd\u09af\u09be\u09a8\u09cd\u09af' : 'Other', kind: 'other', key: 'other' }, 'builtin:other');
+    SYSTEM_META.forEach(meta => add(
+      { id: `builtin:${meta.key}`, name: lang === 'bn' ? meta.bn : meta.en, kind: meta.kind, key: meta.key },
+      `builtin:${meta.key}`,
+    ));
     customCats.forEach(c => {
       add(
         { id: `custom:${c.id}`, name: c.name, kind: c.kind, custom: true },
@@ -132,7 +141,7 @@ export function ExpenseDashboard(_props: ExpenseDashboardProps) {
         const lower = e.customName.toLowerCase();
         if (categoryByLower.has(lower)) return;
         add(
-          { id: `custom-name:${e.customName}`, name: e.customName, kind: 'other', custom: true },
+          { id: `custom-name:${e.customName}`, name: e.stockAdjustment ? (lang === 'bn' ? 'স্টক সমন্বয়' : 'Inventory adjustment') : e.customName, kind: 'other', custom: true },
           `name:${lower}`,
         );
         return;
@@ -172,6 +181,7 @@ export function ExpenseDashboard(_props: ExpenseDashboardProps) {
   }, [categoryByLower]);
 
   const catLabel = useCallback((e: Expense) => {
+    if (e.stockAdjustment) return lang === 'bn' ? 'স্টক সমন্বয়' : 'Inventory adjustment';
     if (e.customName) return e.customName;
     const b = SYSTEM_META.find(x => x.key === e.category);
     return b ? (lang === 'bn' ? b.bn : b.en) : e.category === 'other' ? (lang === 'bn' ? '\u0985\u09a8\u09cd\u09af\u09be\u09a8\u09cd\u09af' : 'Other') : e.category;
@@ -217,10 +227,12 @@ export function ExpenseDashboard(_props: ExpenseDashboardProps) {
     setVoucher('');
     setDate(today());
     setAmount('');
+    setExpenseName('');
     setNote('');
     setFormError('');
     setAccountId(defaultAccountId);
-    setCatId(initialCat && initialCat !== 'all' ? initialCat : defaultCatId);
+    setCatId(initialCat && initialCat !== 'all' ? initialCat : '');
+    setCategoryPickerOpen(false);
     setFormOpen(true);
   }, [defaultAccountId, defaultCatId]);
 
@@ -230,6 +242,7 @@ export function ExpenseDashboard(_props: ExpenseDashboardProps) {
     setVoucher(e.voucherNo ?? '');
     setDate(e.date);
     setAmount(String(e.amount));
+    setExpenseName(e.customName ?? '');
     setNote(e.note ?? '');
     setAccountId(e.accountId ?? defaultAccountId);
     setCatId(allCategories.some(c => c.id === current) ? current : defaultCatId);
@@ -241,6 +254,7 @@ export function ExpenseDashboard(_props: ExpenseDashboardProps) {
     const cat = allCategories.find(c => c.id === catId);
     const value = parseNum(amount);
     if (!cat) { setFormError(tx('একটি ক্যাটাগরি বাছুন।', 'Choose a category.')); return; }
+    if (cat.key === 'other' && !cat.custom && !expenseName.trim()) { setFormError(tx('খরচের নাম লিখুন।', 'Enter an expense name.')); return; }
     if (value <= 0) { setFormError(tx('সঠিক পরিমাণ লিখুন।', 'Enter a valid amount.')); return; }
     if (!accountId) { setFormError(tx('টাকার অ্যাকাউন্ট বাছুন।', 'Choose a money account.')); return; }
     setSaving(true);
@@ -249,7 +263,7 @@ export function ExpenseDashboard(_props: ExpenseDashboardProps) {
       await saveExpense({
         id: editId ?? undefined,
         category: cat.custom ? 'other' : cat.key!,
-        customName: cat.custom ? cat.name : '',
+        customName: cat.custom ? cat.name : cat.key === 'other' ? expenseName.trim() : '',
         amount: value,
         accountId,
         date: toEnDigits(date),
@@ -317,7 +331,6 @@ export function ExpenseDashboard(_props: ExpenseDashboardProps) {
     setCatName(category.name);
     setCatKind(category.kind);
     setCatError('');
-    setCategoryManageOpen(false);
     setCatOpen(true);
   };
 
@@ -362,10 +375,15 @@ export function ExpenseDashboard(_props: ExpenseDashboardProps) {
           <View>
             <Text style={{ fontSize: size, color: color.text, fontWeight: '600' }}>{catLabel(r)}</Text>
             {r.capitalized ? <Text style={{ fontSize: size - 2, color: color.purple }}>{tx('মজুদের মূল্যে যোগ; পরিচালন খরচ নয়', 'Added to inventory cost; not an operating expense')}</Text> : null}
-            {r.note ? <Text numberOfLines={1} style={{ fontSize: size - 2, color: color.muted }}>{r.note}</Text> : null}
             {isMobile && (r.accountName || accountName(r.accountId)) ? <Text style={{ fontSize: size - 2, color: color.muted }}>{r.accountName || accountName(r.accountId)}</Text> : null}
           </View>
         ),
+      },
+      {
+        key: 'description',
+        label: tx('বিবরণ', 'Description'),
+        flex: 1.8,
+        render: (r, size) => <Text numberOfLines={2} style={{ fontSize: size, color: r.note ? color.text : color.muted }}>{r.note || '-'}</Text>,
       },
     ];
     if (!isMobile) {
@@ -394,16 +412,63 @@ export function ExpenseDashboard(_props: ExpenseDashboardProps) {
   const exportFilteredExpenses = () => {
     const cell = (value: unknown) => `"${String(value ?? '').replace(/"/g, '""')}"`;
     const csv = [
-      [tx('তারিখ', 'Date'), tx('খাত', 'Category'), tx('হিসাবের ধরন', 'Treatment'), tx('অ্যাকাউন্ট', 'Account'), tx('বিবরণ', 'Note'), tx('পরিমাণ', 'Amount')].map(cell).join(','),
+      [tx('তারিখ', 'Date'), tx('খাত', 'Category'), tx('হিসাবের ধরন', 'Treatment'), tx('অ্যাকাউন্ট', 'Account'), tx('বিবরণ', 'Description'), tx('পরিমাণ', 'Amount')].map(cell).join(','),
       ...filtered.map(e => [e.date, catLabel(e), e.capitalized ? tx('মজুদের মূল্যে যোগ', 'Capitalized into inventory') : tx('পরিচালন খরচ', 'Operating expense'), accountName(e.accountId), e.note ?? '', e.amount].map(cell).join(',')),
     ].join('\r\n');
     downloadCSV(`expense_report_${today()}.csv`, csv);
   };
 
+  if (categoryManageOpen) {
+    return (
+      <Screen maxWidth={1000}>
+        <PageHeader
+          title={tx('\u0996\u09b0\u099a\u09c7\u09b0 \u0995\u09cd\u09af\u09be\u099f\u09be\u0997\u09b0\u09bf \u09ac\u09cd\u09af\u09ac\u09b8\u09cd\u09a5\u09be\u09aa\u09a8\u09be', 'Manage Expense Categories')}
+          subtitle={tx('\u0996\u09b0\u099a\u09c7\u09b0 \u0995\u09cd\u09af\u09be\u099f\u09be\u0997\u09b0\u09bf \u09a4\u09c8\u09b0\u09bf, \u09b8\u09ae\u09cd\u09aa\u09be\u09a6\u09a8\u09be \u0993 \u09ae\u09c1\u099b\u09c1\u09a8', 'Create, edit and delete expense categories')}
+          icon={icons.expense}
+          onBack={() => setCategoryManageOpen(false)}
+          actions={<Btn label={tx('\u09a8\u09a4\u09c1\u09a8 \u0995\u09cd\u09af\u09be\u099f\u09be\u0997\u09b0\u09bf', 'New Category')} icon={icons.plus} onPress={() => { setCatEditId(null); setCatName(''); setCatKind('operating'); setCatError(''); setCatOpen(true); }} />}
+        />
+        <Card>
+          {deleteCategoryTarget ? <View style={{ padding: 14, marginBottom: 12, borderWidth: 1, borderColor: color.line, borderRadius: 10, gap: 10, backgroundColor: '#FFF7ED' }}>
+            <Text style={{ color: color.text }}>{tx('\u0995\u09cd\u09af\u09be\u099f\u09be\u0997\u09b0\u09bf \u09ae\u09c1\u099b\u09c7 \u09ab\u09c7\u09b2\u09ac\u09c7\u09a8?', 'Delete category?')} “{deleteCategoryTarget.name}”</Text>
+            <View style={{ flexDirection: 'row', justifyContent: 'flex-end', gap: 8 }}>
+              <Btn label={tx('\u09ac\u09be\u09a4\u09bf\u09b2', 'Cancel')} kind="ghost" onPress={() => setDeleteCategoryTarget(null)} />
+              <Btn label={tx('\u09ae\u09c1\u099b\u09c1\u09a8', 'Delete')} kind="danger" icon={icons.del} onPress={() => void confirmDeleteCategory()} />
+            </View>
+          </View> : null}
+          {allCategories.map(category => {
+            const custom = category.custom ? customCats.find(c => category.id === `custom:${c.id}`) : undefined;
+            return <View key={category.id} style={{ minHeight: 58, flexDirection: 'row', alignItems: 'center', gap: 10, paddingHorizontal: 10, borderBottomWidth: 1, borderBottomColor: color.line }}>
+              <View style={{ flex: 1 }}>
+                <Text style={{ color: color.text, fontWeight: '700' }}>{category.name}</Text>
+                <Text style={{ color: color.muted, fontSize: 12 }}>{KIND_OPTIONS.find(k => k.id === category.kind)?.[lang === 'bn' ? 'bn' : 'en'] ?? category.kind}{custom ? '' : ` · ${tx('\u09b8\u09bf\u09b8\u09cd\u099f\u09c7\u09ae', 'Built-in')}`}</Text>
+              </View>
+              {custom ? <>
+                <TouchableOpacity accessibilityRole="button" accessibilityLabel={`Edit ${custom.name}`} onPress={() => editCategory(custom)} style={{ minWidth: 42, minHeight: 42, alignItems: 'center', justifyContent: 'center' }}><AppIcon name={icons.edit} size={19} iconColor={color.primary} /></TouchableOpacity>
+                <TouchableOpacity accessibilityRole="button" accessibilityLabel={`Delete ${custom.name}`} onPress={() => removeCategory(custom)} style={{ minWidth: 42, minHeight: 42, alignItems: 'center', justifyContent: 'center' }}><AppIcon name={icons.del} size={19} iconColor={color.red} /></TouchableOpacity>
+              </> : <Text style={{ color: color.muted, fontSize: 12 }}>{tx('\u09a8\u09bf\u09b0\u09cd\u09a7\u09be\u09b0\u09bf\u09a4', 'Fixed')}</Text>}
+            </View>;
+          })}
+          {catError ? <Text style={{ color: color.red, marginTop: 10 }}>{catError}</Text> : null}
+        </Card>
+        {catOpen ? <DetailShell
+          title={catEditId ? tx('\u0995\u09cd\u09af\u09be\u099f\u09be\u0997\u09b0\u09bf \u09b8\u09ae\u09cd\u09aa\u09be\u09a6\u09a8\u09be', 'Edit Category') : tx('\u09a8\u09a4\u09c1\u09a8 \u0995\u09cd\u09af\u09be\u099f\u09be\u0997\u09b0\u09bf', 'New Category')}
+          onClose={() => { setCatOpen(false); setCatEditId(null); }}
+          footer={<Btn label={catBusy ? tx('\u09b8\u0982\u09b0\u0995\u09cd\u09b7\u09a3 \u09b9\u099a\u09cd\u099b\u09c7...', 'Saving...') : catEditId ? tx('\u0995\u09cd\u09af\u09be\u099f\u09be\u0997\u09b0\u09bf \u09b8\u0982\u09b0\u0995\u09cd\u09b7\u09a3', 'Save Category') : tx('\u0995\u09cd\u09af\u09be\u099f\u09be\u0997\u09b0\u09bf \u09a4\u09c8\u09b0\u09bf \u0995\u09b0\u09c1\u09a8', 'Create Category')} onPress={createCategory} />}
+        >
+          <Field label={tx('\u0995\u09cd\u09af\u09be\u099f\u09be\u0997\u09b0\u09bf\u09b0 \u09a8\u09be\u09ae', 'Category Name')} value={catName} onChange={setCatName} />
+          <Muted>{tx('\u09a7\u09b0\u09a8', 'Type')}</Muted>
+          <Chips items={KIND_OPTIONS.map(k => ({ id: k.id, name: lang === 'bn' ? k.bn : k.en }))} value={catKind} onPick={id => setCatKind(id as ExpenseCategoryKind)} />
+          {catError ? <Text style={{ color: color.red, marginTop: 4, fontSize: fs }}>{catError}</Text> : null}
+        </DetailShell> : null}
+      </Screen>
+    );
+  }
+
   return (
     <Screen maxWidth={1400}>
       <PageHeader
-        title={tx('খরচ ড্যাশবোর্ড', 'Expense Dashboard')}
+        title={tx('খরচের হিসাব', 'Expense Dashboard')}
         subtitle={tx('সব খরচ, ক্যাটাগরি ও ল্যান্ডিং খরচ এক জায়গায়', 'All expenses, categories and landing costs in one place')}
         icon={icons.expense}
         actions={<View style={{ flexDirection: 'row', gap: 8, flexWrap: 'wrap' }}>
@@ -424,14 +489,25 @@ export function ExpenseDashboard(_props: ExpenseDashboardProps) {
         <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 8, flexWrap: 'wrap' }}>
           <Title>{tx('ক্যাটাগরি', 'Categories')}</Title>
           <Btn
-            label='Categories'
+            label={tx('\u0995\u09cd\u09af\u09be\u099f\u09be\u0997\u09b0\u09bf \u09ae\u09cd\u09af\u09be\u09a8\u09c7\u099c \u0995\u09b0\u09c1\u09a8', 'Manage Categories')}
             kind="ghost"
             icon={icons.plus}
             onPress={() => { setCatError(''); setCategoryManageOpen(true); }}
           />
         </View>
         <Muted>{tx('ক্যাটাগরি বেছে নিলে নিচের টেবিলে সেই খরচগুলো দেখাবে।', 'Pick a category to filter the expense table below.')}</Muted>
-        <Chips items={filterItems} value={catFilter} onPick={setCatFilter} />
+        <View style={{ maxWidth: 420, marginTop: 12 }}>
+          <Muted>{tx('ক্যাটাগরি ফিল্টার', 'Category filter')}</Muted>
+          <TouchableOpacity accessibilityRole="button" onPress={() => setCatFilterOpen(open => !open)} style={{ minHeight: 46, paddingHorizontal: 12, borderWidth: 1, borderColor: catFilterOpen ? color.primary : color.line, borderRadius: 10, backgroundColor: '#FFFFFF', flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }}>
+            <Text style={{ color: color.text, fontSize: 15 }}>{filterItems.find(item => item.id === catFilter)?.name ?? filterItems[0].name}</Text>
+            <AppIcon name={catFilterOpen ? 'chevron-up' : 'chevron-down'} size={18} iconColor={color.muted} />
+          </TouchableOpacity>
+          {catFilterOpen ? <ScrollView nestedScrollEnabled showsVerticalScrollIndicator keyboardShouldPersistTaps="handled" style={{ maxHeight: 220, marginTop: 4, borderWidth: 1, borderColor: color.line, borderRadius: 10, backgroundColor: '#FFFFFF' }}>
+            {filterItems.map(item => <TouchableOpacity key={item.id} accessibilityRole="button" onPress={() => { setCatFilter(item.id); setCatFilterOpen(false); setPage(1); }} style={{ minHeight: 42, justifyContent: 'center', paddingHorizontal: 12, borderBottomWidth: 1, borderBottomColor: color.line, backgroundColor: catFilter === item.id ? '#EFF6FF' : '#FFFFFF' }}>
+              <Text style={{ color: color.text, fontWeight: catFilter === item.id ? '700' : '500' }}>{item.name}</Text>
+            </TouchableOpacity>)}
+          </ScrollView> : null}
+        </View>
       </Card>
 
       <Card>
@@ -441,7 +517,7 @@ export function ExpenseDashboard(_props: ExpenseDashboardProps) {
             <Muted>{`${n(filtered.length)} ${tx('টি খরচ', 'expenses')}`}</Muted>
           </View>
           <View style={{ width: 280, maxWidth: '100%' }}>
-            <SearchField value={search} onChange={setSearch} placeholder={tx('খরচ, নোট বা ভাউচার খুঁজুন', 'Search expense, note or voucher')} />
+            <SearchField value={search} onChange={setSearch} placeholder={tx('খরচ, বিবরণ বা ভাউচার খুঁজুন', 'Search expense, description or voucher')} />
           </View>
         </View>
 
@@ -490,63 +566,24 @@ export function ExpenseDashboard(_props: ExpenseDashboardProps) {
         >
           {voucher ? <Muted>{tx('ভাউচার', 'Voucher')}: #{voucher}</Muted> : null}
           <DateField label={tx('তারিখ', 'Date')} value={date} onChange={setDate} allowPast />
-          <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginTop: 2 }}>
-            <Muted>{tx('ক্যাটাগরি', 'Category')} *</Muted>
-          </View>
-          <Chips items={allCategories} value={catId} onPick={setCatId} />
-          <Field label={tx('পরিমাণ', 'Amount')} value={amount} onChange={setAmount} num />
+          <Muted>{tx('ক্যাটাগরি', 'Category')} *</Muted>
+          <TouchableOpacity accessibilityRole="button" accessibilityLabel={tx('ক্যাটাগরি বাছুন', 'Choose expense category')} onPress={() => setCategoryPickerOpen(open => !open)} style={{ minHeight: 48, paddingHorizontal: 12, borderWidth: 1, borderColor: categoryPickerOpen ? color.primary : color.line, borderRadius: 10, backgroundColor: '#FFFFFF', flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }}>
+            <Text style={{ color: catId ? color.text : color.muted, fontSize: 16 }}>{allCategories.find(c => c.id === catId)?.name ?? tx('ক্যাটাগরি বাছুন', 'Select a category')}</Text>
+            <AppIcon name={categoryPickerOpen ? 'chevron-up' : 'chevron-down'} size={18} iconColor={color.muted} />
+          </TouchableOpacity>
+          {categoryPickerOpen ? <ScrollView nestedScrollEnabled showsVerticalScrollIndicator keyboardShouldPersistTaps="handled" style={{ maxHeight: 220, marginTop: 4, borderWidth: 1, borderColor: color.line, borderRadius: 10, backgroundColor: '#FFFFFF' }}>
+            {allCategories.map(category => <TouchableOpacity key={category.id} accessibilityRole="button" onPress={() => { setCatId(category.id); setCategoryPickerOpen(false); requestAnimationFrame(() => (category.key === 'other' && !category.custom ? expenseNameInput.current : amountInput.current)?.focus()); }} style={{ minHeight: 44, justifyContent: 'center', paddingHorizontal: 12, borderBottomWidth: 1, borderBottomColor: color.line, backgroundColor: catId === category.id ? '#EFF6FF' : '#FFFFFF' }}>
+              <Text style={{ color: color.text, fontWeight: catId === category.id ? '700' : '500' }}>{category.name}</Text>
+            </TouchableOpacity>)}
+          </ScrollView> : null}
+          {(() => { const selected = allCategories.find(c => c.id === catId); return selected?.key === 'other' && !selected.custom ? <Field inputRef={expenseNameInput} label={tx('খরচের নাম', 'Expense name')} value={expenseName} onChange={setExpenseName} /> : null; })()}
+          <Field label={tx('বিবরণ (ঐচ্ছিক)', 'Description (optional)')} value={note} onChange={setNote} />
+          <Field inputRef={amountInput} label={tx('পরিমাণ', 'Amount')} value={amount} onChange={setAmount} num />
           <AccountPicker accountId={accountId} onPick={setAccountId} label={tx('টাকার অ্যাকাউন্ট', 'Money Account')} required />
-          <Field label={tx('নোট (ঐচ্ছিক)', 'Note (optional)')} value={note} onChange={setNote} />
           {formError ? <Text style={{ color: color.red, marginTop: 4, fontSize: fs }}>{formError}</Text> : null}
         </DetailShell>
       ) : null}
 
-      {categoryManageOpen ? (
-        <DetailShell title="Manage Categories" onClose={() => setCategoryManageOpen(false)}>
-          <Btn
-            label="New Category"
-            icon={icons.plus}
-            onPress={() => {
-              setCatEditId(null);
-              setCatName('');
-              setCatKind('operating');
-              setCatError('');
-              setCategoryManageOpen(false);
-              setCatOpen(true);
-            }}
-          />
-          {deleteCategoryTarget ? (
-            <View style={{ padding: 14, borderWidth: 1, borderColor: color.line, borderRadius: 10, gap: 10, marginTop: 12 }}>
-              <Text style={{ color: color.text }}>
-                Delete "{deleteCategoryTarget.name}"? Existing expenses will stay under Other.
-              </Text>
-              <View style={{ flexDirection: 'row', justifyContent: 'flex-end', gap: 8 }}>
-                <Btn label="Cancel" kind="ghost" onPress={() => setDeleteCategoryTarget(null)} />
-                <Btn label="Delete" kind="danger" icon={icons.del} onPress={confirmDeleteCategory} />
-              </View>
-            </View>
-          ) : null}
-          <View style={{ gap: 8, marginTop: 10 }}>
-            {customCats.length ? customCats.map(category => (
-              <View key={category.id} style={{ flexDirection: 'row', alignItems: 'center', gap: 8, padding: 10, borderWidth: 1, borderColor: color.line, borderRadius: 10 }}>
-                <View style={{ flex: 1 }}>
-                  <Text style={{ color: color.text, fontWeight: '700' }}>{category.name}</Text>
-                  <Text style={{ color: color.muted, fontSize: 12 }}>
-                    {KIND_OPTIONS.find(k => k.id === category.kind)?.[lang === 'bn' ? 'bn' : 'en'] ?? category.kind}
-                  </Text>
-                </View>
-                <TouchableOpacity accessibilityRole="button" accessibilityLabel="Edit category" onPress={() => editCategory(category)} style={{ padding: 8 }}>
-                  <AppIcon name={icons.edit} size={18} iconColor={color.primary} />
-                </TouchableOpacity>
-                <TouchableOpacity accessibilityRole="button" accessibilityLabel="Delete category" onPress={() => removeCategory(category)} style={{ padding: 8 }}>
-                  <AppIcon name={icons.del} size={18} iconColor={color.red} />
-                </TouchableOpacity>
-              </View>
-            )) : <Muted>No custom categories yet.</Muted>}
-            {catError ? <Text style={{ color: color.red, fontSize: fs }}>{catError}</Text> : null}
-          </View>
-        </DetailShell>
-      ) : null}
       {catOpen ? (
         <DetailShell
           title={catEditId ? 'Edit Category' : 'New Category'}

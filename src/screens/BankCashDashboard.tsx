@@ -43,6 +43,7 @@ export function BankCashDashboard() {
   }, [moneyAccounts, retry, lang]);
   const names: Record<string, string> = {
     deposit: label('জমা', 'Deposit'), withdrawal: label('উত্তোলন', 'Withdrawal'), sale: t('sale'), purchase: t('purchase'),
+    houseExpense: label('বাসার খরচ', 'House expense'),
     customerPayment: t('collect'), vendorPayment: t('pay'), expense: t('expense'), saleReturn: t('saleReturnLabel2'), purchaseReturn: t('purchaseReturnLabel'),
     transferIn: t('transferMoney'), transferOut: t('transferMoney'), openingAdjust: t('openingMoney'),
   };

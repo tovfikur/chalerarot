@@ -134,7 +134,7 @@ const mapHeaders = (rawHeaders: string[], kind: BulkKind): Record<number, string
 };
 
 export function BulkUploadModal({ kind, onClose, onSuccess }: BulkUploadModalProps) {
-  const { bulkUploadProducts, bulkUploadParties, products, customers, vendors, lang } = useApp();
+  const { bulkUploadProducts, bulkUploadParties, products, customers, vendors, lang, business } = useApp();
   const m = useMoney();
   const n = useNum();
   const fileInputRef = useRef<any>(null);
@@ -286,13 +286,13 @@ export function BulkUploadModal({ kind, onClose, onSuccess }: BulkUploadModalPro
 
         if (item.openingBags !== undefined) {
           const openingInput = readUploadNumber(item.openingBags, 0);
-          if (!openingInput.valid || openingInput.value < 0) addError('Opening bag quantity must be non-negative');
-          item.openingBags = openingInput.valid && openingInput.value >= 0 ? openingInput.value : 0;
+          if (!openingInput.valid || (!business.allowNegativeStock && openingInput.value < 0)) addError('Opening bag quantity cannot be negative unless negative stock is enabled');
+          item.openingBags = openingInput.valid && (business.allowNegativeStock || openingInput.value >= 0) ? openingInput.value : 0;
           item.opening = Math.round(item.openingBags * item.bagKg * 100) / 100;
         } else {
           const openingInput = readUploadNumber(item.opening, 0);
-          if (!openingInput.valid || openingInput.value < 0) addError('Opening stock kg must be non-negative');
-          item.opening = openingInput.valid && openingInput.value >= 0 ? openingInput.value : 0;
+          if (!openingInput.valid || (!business.allowNegativeStock && openingInput.value < 0)) addError('Opening stock cannot be negative unless negative stock is enabled');
+          item.opening = openingInput.valid && (business.allowNegativeStock || openingInput.value >= 0) ? openingInput.value : 0;
           item.openingBags = Math.round((item.opening / item.bagKg) * 100) / 100;
         }
         item.uom = String(item.uom ?? '').trim() || 'bag';
@@ -363,7 +363,7 @@ export function BulkUploadModal({ kind, onClose, onSuccess }: BulkUploadModalPro
         const costPerBag = readUploadNumber(data.costPerBag, 0);
         if (!costPerBag.valid || costPerBag.value < 0) errors[index].push('Cost per bag must be a non-negative number');
         const openingBags = readUploadNumber(data.openingBags, 0);
-        if (!openingBags.valid || openingBags.value < 0) errors[index].push('Opening bag quantity must be non-negative');
+        if (!openingBags.valid || (!business.allowNegativeStock && openingBags.value < 0)) errors[index].push('Opening bag quantity cannot be negative unless negative stock is enabled');
         data.bagKg = bag.valid ? bag.value : data.bagKg;
         data.costPerBag = costPerBag.valid ? costPerBag.value : data.costPerBag;
         data.openingBags = openingBags.valid ? openingBags.value : data.openingBags;

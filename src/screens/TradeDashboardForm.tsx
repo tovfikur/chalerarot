@@ -13,7 +13,7 @@ import {
 } from 'react-native';
 import { useApp, today, Product, Party } from '../store';
 import { color, useMoney, useNum, toBnDigits, AccountPicker, Field } from '../ui';
-import { parseNum, localeDigits } from '../bn';
+import { parseNum, localeDigits, toEnDigits } from '../bn';
 import { AppIcon, icons } from '../icons';
 import { MonthCal } from '../screens';
 import { BagUnit, kgPerUnit } from '../bags';
@@ -291,12 +291,9 @@ export function TradeDashboardForm({ mode, onDone, onOpenHistory, editId }: Trad
   const [landingExpenseId, setLandingExpenseId] = useState<string>();
 
   // Payments (Cash, Bank) & Discount (no default '0' strings)
-  const [cashPaid, setCashPaid] = useState('');
-  const [bankPaid, setBankPaid] = useState('');
+  const [paymentAmounts, setPaymentAmounts] = useState<Record<string, string>>({});
   const [paymentNote, setPaymentNote] = useState('');
   const [advanceToApply, setAdvanceToApply] = useState(0);
-  const [cashAccountId, setCashAccountId] = useState('');
-  const [bankAccountId, setBankAccountId] = useState('');
   const [expenseAccountId, setExpenseAccountId] = useState('');
   const [discount, setDiscount] = useState('');
 
@@ -304,8 +301,6 @@ export function TradeDashboardForm({ mode, onDone, onOpenHistory, editId }: Trad
     const active = moneyAccounts.filter(a => a.active);
     const cash = active.find(a => a.type === 'cash');
     const bank = active.find(a => a.type === 'bank');
-    setCashAccountId(prev => active.some(a => a.id === prev) ? prev : cash?.id ?? '');
-    setBankAccountId(prev => active.some(a => a.id === prev) ? prev : bank?.id ?? '');
     setExpenseAccountId(prev => active.some(a => a.id === prev) ? prev : cash?.id ?? bank?.id ?? '');
   }, [moneyAccounts]);
 
@@ -355,8 +350,9 @@ export function TradeDashboardForm({ mode, onDone, onOpenHistory, editId }: Trad
       if (unsupportedPaymentLines.length) setEditPaymentUnsupported(true);
       for (const p of paymentLines) {
         const account = moneyAccounts.find(a => a.id === p.accountId);
-        if (account?.type === 'bank') { setBankAccountId(account.id); setBankPaid(v => String(parseNum(v) + p.amount)); }
-        else if (account?.type === 'cash') { setCashAccountId(account.id); setCashPaid(v => String(parseNum(v) + p.amount)); }
+        if (account?.type === 'bank' || account?.type === 'cash') {
+          setPaymentAmounts(v => ({ ...v, [account.id]: String(parseNum(v[account.id]) + p.amount) }));
+        }
       }
       if (unsupportedPaymentLines.length) setFormError(tx('এই ইনভয়েসে ক্যাশ/ব্যাংক ছাড়া অন্য অ্যাকাউন্টের পেমেন্ট আছে। সম্পাদনার আগে হিসাবরক্ষকের সাহায্য নিন।', 'This invoice has a payment account the editor cannot preserve. Ask an administrator before editing it.'));
       const invoiceRef = doc.invoiceNo ?? editId;
@@ -429,8 +425,15 @@ export function TradeDashboardForm({ mode, onDone, onOpenHistory, editId }: Trad
 
   const numTransport = parseNum(transportCost);
 
-  const numCash = parseNum(cashPaid);
-  const numBank = parseNum(bankPaid);
+  const paymentAccounts = useMemo(() => moneyAccounts.filter(account =>
+    (account.active || parseNum(paymentAmounts[account.id]) > 0) &&
+    (account.type === 'cash' || account.type === 'bank')
+  ), [moneyAccounts, paymentAmounts]);
+  const paymentLines = paymentAccounts
+    .map(account => ({ accountId: account.id, amount: parseNum(paymentAmounts[account.id]), type: account.type, active: account.active }))
+    .filter(payment => payment.amount > 0);
+  const numCash = paymentLines.filter(payment => payment.type === 'cash').reduce((sum, payment) => sum + payment.amount, 0);
+  const numBank = paymentLines.filter(payment => payment.type === 'bank').reduce((sum, payment) => sum + payment.amount, 0);
   const numDiscount = parseNum(discount);
   const totalPaid = numCash + numBank;
 
@@ -695,8 +698,7 @@ export function TradeDashboardForm({ mode, onDone, onOpenHistory, editId }: Trad
       billDate,
       items,
       transportCost,
-      cashPaid,
-      bankPaid,
+      paymentAmounts,
       savedAt: new Date().toISOString(),
     };
     try {
@@ -711,7 +713,7 @@ export function TradeDashboardForm({ mode, onDone, onOpenHistory, editId }: Trad
   }, [
     mode, orderNo, memoNo, selectedPartyId, partyCode, partyName, partyMobile,
     partyAddress, billDate, items, transportCost,
-    cashPaid, bankPaid
+    paymentAmounts
   ]);
 
   // Reset form to clean state for a new entry (cursor starts at partyCode, pre-fills default customer/vendor)
@@ -739,8 +741,7 @@ export function TradeDashboardForm({ mode, onDone, onOpenHistory, editId }: Trad
     setPartyAddress(defAddress);
 
     setItems([{ id: 'item_1', code: '', productId: '', name: '', unit: 'medium', qty: '', purchaseRate: '', rate: '', otherCost: '' }]);
-    setCashPaid('');
-    setBankPaid('');
+    setPaymentAmounts({});
     setAdvanceToApply(0);
     setPaymentNote('');
     setDiscount('');
@@ -841,10 +842,14 @@ export function TradeDashboardForm({ mode, onDone, onOpenHistory, editId }: Trad
 
     // Default cash receive (sale) or cash payment (purchase) to the exact invoice amount
     const invoiceAmt = Math.max(0, Math.round(totalProductValue - numTransport - numDiscount));
-    if (!editId) setCashPaid(String(invoiceAmt));
+    const hasEnteredPaymentAmount = Object.values(paymentAmounts).some(value => value.trim() !== '');
+    if (!editId && !hasEnteredPaymentAmount) {
+      const defaultPaymentAccount = paymentAccounts.find(account => account.type === 'cash') ?? paymentAccounts[0];
+      setPaymentAmounts(defaultPaymentAccount ? { [defaultPaymentAccount.id]: String(invoiceAmt) } : {});
+    }
 
     setReviewSplitOpen(true);
-  }, [items, isSale, selectedPartyId, parties, t, lang, products, totalProductValue, numTransport, numDiscount, editId, editPaymentUnsupported, tx]);
+  }, [items, isSale, selectedPartyId, parties, t, lang, products, totalProductValue, numTransport, numDiscount, editId, editPaymentUnsupported, tx, paymentAccounts, paymentAmounts]);
 
   // Final submission handler that creates the invoice
   const executeTransaction = useCallback(async (printWin?: any) => {
@@ -881,9 +886,8 @@ export function TradeDashboardForm({ mode, onDone, onOpenHistory, editId }: Trad
     }
 
     const effectivePartyId = selectedPartyId;
-    const chosenAccountId = numBank > 0 ? bankAccountId : cashAccountId;
-    if (numCash > 0 && !moneyAccounts.some(a => a.id === cashAccountId && a.type === 'cash' && a.active)) { setFormError('Select an active cash account for the cash payment.'); return; }
-    if (numBank > 0 && !moneyAccounts.some(a => a.id === bankAccountId && a.type === 'bank' && a.active)) { setFormError('Select an active bank account for the bank payment.'); return; }
+    if (paymentLines.some(payment => !payment.active)) { setFormError('Payments must use active cash or bank accounts.'); return; }
+    const chosenAccountId = paymentLines[0]?.accountId ?? paymentAccounts[0]?.id ?? expenseAccountId;
     if (!isSale && validLines.some(l => parseNum(l.otherCost) > 0) && !expenseAccountId) { setFormError('Select an active account for purchase costs.'); return; }
 
     setSubmitting(true);
@@ -951,10 +955,7 @@ export function TradeDashboardForm({ mode, onDone, onOpenHistory, editId }: Trad
           discount: numDiscount,
           paid: totalPaid,
           accountId: chosenAccountId,
-          payments: [
-            ...(numCash > 0 ? [{ accountId: cashAccountId, amount: numCash }] : []),
-            ...(numBank > 0 ? [{ accountId: bankAccountId, amount: numBank }] : []),
-          ],
+          payments: paymentLines.map(({ accountId, amount }) => ({ accountId, amount })),
           paymentNote: paymentNote.trim() || undefined,
           advanceToApply: selectedAdvance,
           date: isoDate,
@@ -967,10 +968,7 @@ export function TradeDashboardForm({ mode, onDone, onOpenHistory, editId }: Trad
           lines: processedLines,
           paid: totalPaid,
           accountId: chosenAccountId,
-          payments: [
-            ...(numCash > 0 ? [{ accountId: cashAccountId, amount: numCash }] : []),
-            ...(numBank > 0 ? [{ accountId: bankAccountId, amount: numBank }] : []),
-          ],
+          payments: paymentLines.map(({ accountId, amount }) => ({ accountId, amount })),
           paymentNote: paymentNote.trim() || undefined,
           advanceToApply: selectedAdvance,
           date: isoDate,
@@ -1106,7 +1104,7 @@ export function TradeDashboardForm({ mode, onDone, onOpenHistory, editId }: Trad
       setSubmitting(false);
     }
   }, [
-    submitting, items, selectedPartyId, isSale, products, moneyAccounts, numBank, billDate, editPaymentUnsupported,
+    submitting, items, selectedPartyId, isSale, products, moneyAccounts, paymentLines, paymentAccounts, numBank, billDate, editPaymentUnsupported,
     lang, sale, numDiscount, totalPaid, memoNo, purchase, numTransport, paymentNote, saveExpense, mode,
     printDoc, resetForm, sales, purchases, focusCustomerInput, editId, refresh, onDone
   ]);
@@ -1190,7 +1188,8 @@ export function TradeDashboardForm({ mode, onDone, onOpenHistory, editId }: Trad
     if (reviewSplitOpen) {
       if (Platform.OS === 'web') {
         const focusTimer = setTimeout(() => {
-          const el = inputRefs.current['modal_cashPaid'];
+          const firstPayment = paymentAccounts.find(account => account.type === 'cash') ?? paymentAccounts[0];
+          const el = firstPayment ? inputRefs.current[`modal_payment_${firstPayment.id}`] : inputRefs.current['modal_discount'];
           el?.focus();
           try { el?.select(); } catch {}
           const dom = (el as any)?._inputRef || (el as any)?.getNativeRef?.();
@@ -1204,6 +1203,9 @@ export function TradeDashboardForm({ mode, onDone, onOpenHistory, editId }: Trad
       return () => timers.forEach(clearTimeout);
     }
     prevReviewOpen.current = reviewSplitOpen;
+  // Focus only when the review modal opens. paymentAccounts can change when a
+  // payment amount is typed; including it here re-selects the field on every
+  // keystroke and makes multi-digit entry impossible.
   }, [reviewSplitOpen, focusCustomerInput]);
 
   const isInputFocused = (key: string) => focusedField === key;
@@ -1735,7 +1737,8 @@ export function TradeDashboardForm({ mode, onDone, onOpenHistory, editId }: Trad
                   </View>
                   <View style={{ padding: 14 }}>
                     <MonthCal
-                      selected={toCalendarDate(billDate) || toCalendarDate(getSessionBillDate())}
+                      key={dateCalendarOpen ? `open-${getSessionBillDate()}` : 'closed'}
+                      selected={toCalendarDate(getSessionBillDate())}
                       onPick={date => {
                         const formatted = fromCalendarDate(date);
                         if (formatted) setBillDate(formatted);
@@ -2465,12 +2468,12 @@ export function TradeDashboardForm({ mode, onDone, onOpenHistory, editId }: Trad
                       ) : null}
                       <View style={{ flexDirection: 'row', justifyContent: 'space-between' }}>
                     <Text style={{ fontSize: 13, color: '#64748B' }}>{tx('তারিখ:', 'Date:')}</Text>
-                    <Text style={{ fontSize: 13, fontWeight: '600', color: '#334155' }}>{billDate || tx('আজ', 'Today')}</Text>
+                    <Text style={{ fontSize: 13, fontWeight: '600', color: '#334155' }}>{billDate ? localeDigits(billDate, lang) : tx('আজ', 'Today')}</Text>
                       </View>
                       {memoNo ? (
                         <View style={{ flexDirection: 'row', justifyContent: 'space-between' }}>
                           <Text style={{ fontSize: 13, color: '#64748B' }}>{tx('মেমো নং:', 'Memo no.:')}</Text>
-                          <Text style={{ fontSize: 13, fontWeight: '700', color: '#1c70b9' }}>{memoNo}</Text>
+                          <Text style={{ fontSize: 13, fontWeight: '700', color: '#1c70b9' }}>{localeDigits(memoNo, lang)}</Text>
                         </View>
                       ) : null}
                     </View>
@@ -2478,48 +2481,52 @@ export function TradeDashboardForm({ mode, onDone, onOpenHistory, editId }: Trad
                     {/* 1. TOTAL INVOICE VALUE */}
                     <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', backgroundColor: '#F8FAFC', paddingVertical: 10, paddingHorizontal: 12, borderRadius: 8, borderWidth: 1.5, borderColor: '#E2E8F0', marginBottom: 10 }}>
                       <Text style={{ fontSize: 14, fontWeight: '800', color: '#1E293B' }}>{tx('মোট ইনভয়েস মূল্য:', 'Invoice total:')}</Text>
-                      <Text style={{ fontSize: 18, fontWeight: '900', color: '#0F172A' }}>৳{toBnDigits(String(Math.round(totalProductValue)))}</Text>
+                      <Text style={{ fontSize: 18, fontWeight: '900', color: '#0F172A' }}>৳{localeDigits(String(Math.round(totalProductValue)), lang)}</Text>
                     </View>
 
-                    {/* 2. CASH */}
-                    <View style={{ marginBottom: 8 }}>
-                      <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 3 }}>
-                        <Text style={{ fontSize: 13, fontWeight: '700', color: '#475569' }}>
-                          {isSale ? tx('ক্যাশ গ্রহণ (৳):', 'Cash received (৳):') : tx('ক্যাশ পরিশোধ (৳):', 'Cash paid (৳):')}
-                        </Text>
-                        <TouchableOpacity
-                          onPress={() => {
-                            const invoiceAmt = Math.max(0, Math.round(totalProductValue - numTransport - numDiscount));
-                            setCashPaid(String(invoiceAmt));
-                          }}
-                          style={{
-                            paddingHorizontal: 6,
-                            paddingVertical: 1,
-                            borderRadius: 4,
-                            backgroundColor: '#E0F2FE',
-                            borderWidth: 1,
-                            borderColor: '#BAE6FD',
-                          }}
-                        >
-                          <Text style={{ fontSize: 11, fontWeight: '700', color: '#0369A1' }}>
-                            {tx('ইনভয়েস মূল্য', 'Invoice amount')} (৳{lang === 'bn' ? toBnDigits(String(Math.max(0, Math.round(totalProductValue - numTransport - numDiscount)))) : Math.max(0, Math.round(totalProductValue - numTransport - numDiscount))})
+                    {/* Every active cash and bank account gets its own payment amount. */}
+                    {paymentAccounts.map((account, index) => {
+                      const fieldKey = `modal_payment_${account.id}`;
+                      const isCash = account.type === 'cash';
+                      const defaultCashAccount = paymentAccounts.find(candidate => candidate.type === 'cash');
+                      return <View key={account.id} style={{ marginBottom: 8 }}>
+                        <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 3 }}>
+                          <Text style={{ fontSize: 13, fontWeight: '700', color: '#475569' }}>
+                            {isCash
+                              ? (isSale ? tx('ক্যাশ গ্রহণ', 'Cash received') : tx('ক্যাশ পরিশোধ', 'Cash paid'))
+                              : (isSale ? tx('ব্যাংকে গ্রহণ', 'Bank received') : tx('ব্যাংক পরিশোধ', 'Bank paid'))} · {account.name} (৳)
                           </Text>
-                        </TouchableOpacity>
-                      </View>
-                      <TextInput
-                        ref={el => (inputRefs.current['modal_cashPaid'] = el)}
-                        accessibilityLabel="Cash paid"
-                        value={cashPaid}
-                        onChangeText={setCashPaid}
-                        keyboardType="numeric"
-                        onFocus={(e: any) => {
-                          setFocusedField('modal_cashPaid');
-                          try { e?.target?.select?.(); } catch {}
-                        }}
-                        onSubmitEditing={() => inputRefs.current['modal_bankPaid']?.focus()}
-                        style={{ borderWidth: 1.5, borderColor: '#CBD5E1', borderRadius: 8, paddingHorizontal: 10, height: 38, fontSize: 15, backgroundColor: '#FFFFFF', fontWeight: '700', color: '#0F172A' }}
-                        returnKeyType="next"
-                      />
+                          {isCash && account.id === defaultCashAccount?.id ? <TouchableOpacity
+                            onPress={() => {
+                              const invoiceAmt = Math.max(0, Math.round(totalProductValue - numTransport - numDiscount));
+                              setPaymentAmounts(previous => ({ ...previous, [account.id]: String(invoiceAmt) }));
+                            }}
+                            style={{ paddingHorizontal: 6, paddingVertical: 1, borderRadius: 4, backgroundColor: '#E0F2FE', borderWidth: 1, borderColor: '#BAE6FD' }}
+                          >
+                            <Text style={{ fontSize: 11, fontWeight: '700', color: '#0369A1' }}>
+                              {tx('ইনভয়েস মূল্য', 'Invoice amount')} (৳{lang === 'bn' ? toBnDigits(String(Math.max(0, Math.round(totalProductValue - numTransport - numDiscount)))) : Math.max(0, Math.round(totalProductValue - numTransport - numDiscount))})
+                            </Text>
+                          </TouchableOpacity> : null}
+                        </View>
+                        <TextInput
+                          ref={el => (inputRefs.current[fieldKey] = el)}
+                          accessibilityLabel={`${isCash ? 'Cash' : 'Bank'} payment amount: ${account.name}`}
+                          value={localeDigits(paymentAmounts[account.id] ?? '', lang)}
+                          onChangeText={value => setPaymentAmounts(previous => ({ ...previous, [account.id]: toEnDigits(value) }))}
+                          keyboardType="numeric"
+                          onFocus={(e: any) => {
+                            setFocusedField(fieldKey);
+                            try { e?.target?.select?.(); } catch {}
+                          }}
+                          onSubmitEditing={() => inputRefs.current[index + 1 < paymentAccounts.length ? `modal_payment_${paymentAccounts[index + 1].id}` : 'modal_discount']?.focus()}
+                          style={{ borderWidth: 1.5, borderColor: '#CBD5E1', borderRadius: 8, paddingHorizontal: 10, height: 38, fontSize: 15, backgroundColor: '#FFFFFF', fontWeight: '700', color: '#0F172A' }}
+                          returnKeyType="next"
+                        />
+                      </View>;
+                    })}
+                    {paymentAccounts.length === 0 ? <Text style={{ color: '#64748B', marginBottom: 8 }}>{tx('সক্রিয় ক্যাশ বা ব্যাংক অ্যাকাউন্ট নেই', 'No active cash or bank accounts')}</Text> : null}
+
+                    {numCash > 0 ? <View style={{ marginBottom: 8 }}>
                       <View
                         testID="modal-due-after-cash"
                         style={{
@@ -2539,31 +2546,12 @@ export function TradeDashboardForm({ mode, onDone, onOpenHistory, editId }: Trad
                           {isSale ? tx('ক্যাশ গ্রহণের পর বাকি:', 'Due after cash received:') : tx('ক্যাশ পরিশোধের পর বাকি:', 'Due after cash paid:')}
                         </Text>
                         <Text style={{ fontSize: 13, fontWeight: '800', color: totalDue > 0 ? '#DC2626' : '#15803D' }}>
-                          ৳{toBnDigits(String(Math.round(totalDue)))}
+                          ৳{localeDigits(String(Math.round(totalDue)), lang)}
                           {prevDue > 0 ? ` (${tx('ইনভয়েস বাকি:', 'Invoice due:')} ৳${lang === 'bn' ? toBnDigits(String(Math.round(invoiceDue))) : Math.round(invoiceDue)})` : ''}
                           {prevDue + netInvoiceBalance < 0 ? ` (${tx('ফেরত:', 'Refund:')} ৳${lang === 'bn' ? toBnDigits(String(Math.round(Math.abs(prevDue + netInvoiceBalance)))) : Math.round(Math.abs(prevDue + netInvoiceBalance))})` : ''}
                         </Text>
                       </View>
-                    </View>
-
-                    <AccountPicker accountId={cashAccountId} onPick={setCashAccountId} label={isSale ? 'Cash receiving account' : 'Cash payment account'} required={numCash > 0} accountType="cash" />
-
-                    {/* 3. BANK */}
-                    <View style={{ marginBottom: 8 }}>
-                      <Text style={{ fontSize: 13, fontWeight: '700', color: '#475569', marginBottom: 3 }}>{isSale ? tx('ব্যাংকে গ্রহণ (৳):', 'Bank received (৳):') : tx('ব্যাংক পরিশোধ (৳):', 'Bank paid (৳):')}</Text>
-                      <TextInput
-                        ref={el => (inputRefs.current['modal_bankPaid'] = el)}
-                        accessibilityLabel="Bank paid"
-                        value={bankPaid}
-                        onChangeText={setBankPaid}
-                        keyboardType="numeric"
-                        onSubmitEditing={() => inputRefs.current['modal_discount']?.focus()}
-                        style={{ borderWidth: 1.5, borderColor: '#CBD5E1', borderRadius: 8, paddingHorizontal: 10, height: 38, fontSize: 15, backgroundColor: '#FFFFFF', fontWeight: '700', color: '#0F172A' }}
-                        returnKeyType="next"
-                      />
-                    </View>
-
-                    <AccountPicker accountId={bankAccountId} onPick={setBankAccountId} label={isSale ? 'Bank receiving account' : 'Bank payment account'} required={numBank > 0} accountType="bank" />
+                    </View> : null}
                     <Field label={tx('পেমেন্টের নোট', 'Payment note')} value={paymentNote} onChange={setPaymentNote} />
 
                     {/* 4. DISCOUNT */}

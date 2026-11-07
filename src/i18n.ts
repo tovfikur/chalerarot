@@ -108,7 +108,7 @@ const d = {
     cancelBtn:'বাতিল করুন', saveDraft:'ড্রাফট সংরক্ষণ',
     stockDashboard:'মজুদ পণ্য', physicalStock:'মোট ফিজিক্যাল মজুদ', onTransitStock:'মোট অন-ট্রানজিট মজুদ', totalStockLabel:'সর্বমোট মজুদ', stockMovement:'স্টক মুভমেন্ট', excelDownload:'এক্সেল ডাউনলোড',
     searchProductCodeOrName:'পণ্য কোড বা পণ্যের নাম দিয়ে খুঁজুন...', allProducts:'সব পণ্য', addNewProduct:'নতুন পণ্য যোগ করুন', bagQtyKg:'বস্তায় পরিমাণ (কেজি)', openingStockBags:'প্রারম্ভিক মজুদ (বস্তা)', purchaseCostRate:'ক্রয়মূল্য (৳)', optionalDesc:'বিবরণ (ঐচ্ছিক)',
-    expenseDashboard:'খরচ', operationExpense:'অপারেশন খরচ', allExpenses:'সকল খরচ', voucherNo:'ভাউচার নং', expenseKind:'খরচের ধরন', expenseCategory:'খরচের ক্যাটাগরি', paymentMethod:'প্রদান পদ্ধতি', payerName:'প্রদানকারীর নাম (ঐচ্ছিক)', responsiblePerson:'দায়িত্বপ্রাপ্ত ব্যক্তি (ঐচ্ছিক)', saveBtn:'সংরক্ষণ করুন', reports:'রিপোর্ট', office:'অফিস',
+    expenseDashboard:'খরচের হিসাব', operationExpense:'অপারেশন খরচ', allExpenses:'সকল খরচ', voucherNo:'ভাউচার নং', expenseKind:'খরচের ধরন', expenseCategory:'খরচের ক্যাটাগরি', paymentMethod:'প্রদান পদ্ধতি', payerName:'প্রদানকারীর নাম (ঐচ্ছিক)', responsiblePerson:'দায়িত্বপ্রাপ্ত ব্যক্তি (ঐচ্ছিক)', saveBtn:'সংরক্ষণ করুন', reports:'রিপোর্ট', office:'অফিস',
     bulkUpload:'বাল্ক আপলোড', bulkProductUpload:'বাল্ক পণ্য আপলোড', bulkCustomerUpload:'বাল্ক কাস্টমার আপলোড', bulkVendorUpload:'বাল্ক সরবরাহকারী আপলোড',
     downloadTemplate:'টেমপ্লেট ডাউনলোড', pasteCsvOrChoose:'CSV ফাইল বা টেক্সট পেস্ট করুন', parseAndPreview:'যাচাই ও প্রিভিউ', uploadNow:'আপলোড সম্পন্ন করুন',
     validRows:'বৈধ রেকর্ড', invalidRows:'ত্রুটিপূর্ণ রেকর্ড', totalRecords:'মোট রেকর্ড' },

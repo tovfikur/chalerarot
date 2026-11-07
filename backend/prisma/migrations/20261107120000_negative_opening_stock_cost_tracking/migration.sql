@@ -1,0 +1,2 @@
+ALTER TABLE "StockMovement"
+ADD COLUMN "negativeStockCostAdjustedQtyKg" DOUBLE PRECISION NOT NULL DEFAULT 0;

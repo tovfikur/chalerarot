@@ -1,6 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import { Router, Request, Response } from 'express';
 import { db } from '../db';
+import { accountBalance, lockAccount, nextMoneyTransactionNo } from '../money';
 
 export const accounting = Router();
 const types = ['asset', 'liability', 'equity', 'income', 'expense'] as const;
@@ -8,7 +9,7 @@ const defaults = [
   ['1010', 'Cash', 'asset'], ['1020', 'Bank', 'asset'], ['1030', 'bKash', 'asset'], ['1040', 'Nagad', 'asset'], ['1050', 'Rocket', 'asset'],
   ['1100', 'Accounts receivable', 'asset'], ['1110', 'Supplier advances', 'asset'], ['1200', 'Inventory', 'asset'],
   ['2000', 'Accounts payable', 'liability'], ['2010', 'Customer credits', 'liability'],
-  ['3000', 'Owner equity', 'equity'], ['3200', 'Owner drawings / other expense', 'expense'], ['4000', 'Sales revenue', 'income'],
+  ['3000', 'Owner equity', 'equity'], ['3200', 'Owner drawings / other expense', 'expense'], ['3300', 'House Expenses', 'equity'], ['4000', 'Sales revenue', 'income'],
   ['4100', 'Sales returns', 'income'], ['5000', 'Cost of goods sold', 'expense'], ['6000', 'Operating expenses', 'expense'],
   ['6100', 'Inventory adjustments', 'expense'], ['9000', 'Other income/expenses', 'expense'],
 ] as const;
@@ -36,6 +37,80 @@ const entryNo = (date: string) => `JRN-${date.replace(/-/g, '')}-${randomUUID().
 const respondError = (res: Response, message: string, status = 400) => res.status(status).json({ error: message });
 
 accounting.get('/chart-of-accounts', async (_req, res) => { await seedChart(); res.json(await db.chartAccount.findMany({ orderBy: [{ code: 'asc' }, { name: 'asc' }] })); });
+
+accounting.get('/house-expenses', async (req, res) => {
+  await seedChart();
+  const from = typeof req.query.from === 'string' ? req.query.from : undefined;
+  const to = typeof req.query.to === 'string' ? req.query.to : undefined;
+  const movements = await db.moneyMovement.findMany({
+    where: { active: true, sourceType: 'houseExpense', ...(from && to ? { date: { gte: from, lte: to } } : {}) },
+    orderBy: [{ date: 'desc' }, { createdAt: 'desc' }], take: 500,
+    include: { moneyAccount: { select: { name: true, type: true } } },
+  });
+  const entries = await db.journalEntry.findMany({
+    where: { active: true, sourceType: 'houseExpense', sourceId: { in: movements.map(row => row.sourceId) } },
+    select: { sourceId: true, memo: true },
+  });
+  const descriptionById = new Map(entries.map(entry => [entry.sourceId ?? '', entry.memo]));
+  res.json(movements.map(row => ({
+    id: row.id, transactionNo: row.transactionNo, date: row.date, amount: row.amount,
+    accountId: row.moneyAccountId, accountName: row.moneyAccount?.name ?? '',
+    description: descriptionById.get(row.sourceId) ?? '', note: row.note ?? '',
+  })));
+});
+
+accounting.post('/house-expenses', async (req, res) => {
+  const { accountId, amount, date, description, note, requestId } = req.body ?? {};
+  const cleanDescription = typeof description === 'string' ? description.trim() : '';
+  const cleanNote = typeof note === 'string' ? note.trim() : '';
+  if (typeof accountId !== 'string' || !accountId || typeof amount !== 'number' || !Number.isFinite(amount) || amount <= 0 ||
+      !validDate(date) || !cleanDescription || cleanDescription.length > 250 || cleanNote.length > 500 ||
+      typeof requestId !== 'string' || requestId.length < 8 || requestId.length > 100) {
+    return respondError(res, 'Enter a valid account, amount, date, and description.', 400);
+  }
+  try {
+    await seedChart();
+    const result = await db.$transaction(async t => {
+      const existing = await t.moneyMovement.findUnique({ where: { sourceType_sourceId: { sourceType: 'houseExpense', sourceId: requestId } }, include: { moneyAccount: { select: { name: true, type: true } } } });
+      if (existing) return existing;
+      await lockAccount(t, accountId);
+      const account = await t.moneyAccount.findUnique({ where: { id: accountId } });
+      if (!account?.active) throw Object.assign(new Error('Select an active cash or bank account.'), { status: 400 });
+      const roundedAmount = Math.round(amount * 100) / 100;
+      if (Math.round(await accountBalance(t, accountId) * 100) / 100 < roundedAmount) {
+        throw Object.assign(new Error('Not enough money in this account.'), { status: 400, code: 'INSUFFICIENT_FUNDS' });
+      }
+      const houseAccount = await t.chartAccount.upsert({
+        where: { code: '3300' }, update: {},
+        create: { code: '3300', name: 'House Expenses', type: 'equity', system: true },
+      });
+      const moneyChart = await t.chartAccount.findUnique({ where: { moneyAccountId: accountId } });
+      if (!moneyChart) throw Object.assign(new Error('The selected account is missing from the chart of accounts.'), { status: 400 });
+      const entryNo = `HSE-${date.replace(/-/g, '')}-${randomUUID().slice(0, 8).toUpperCase()}`;
+      await t.journalEntry.create({ data: {
+        entryNo, date, memo: cleanDescription, sourceType: 'houseExpense', sourceId: requestId,
+        lines: { create: [
+          { accountId: houseAccount.id, description: cleanDescription, debit: roundedAmount, credit: 0 },
+          { accountId: moneyChart.id, description: account.name, debit: 0, credit: roundedAmount },
+        ] },
+      } });
+      return t.moneyMovement.create({ data: {
+        transactionNo: await nextMoneyTransactionNo(t), moneyAccountId: accountId, method: account.type,
+        direction: 'out', amount: roundedAmount, date, sourceType: 'houseExpense', sourceId: requestId,
+        note: cleanNote || null,
+      }, include: { moneyAccount: { select: { name: true, type: true } } } });
+    });
+    res.status(201).json({
+      id: result.id, transactionNo: result.transactionNo, date: result.date, amount: result.amount,
+      accountId: result.moneyAccountId, accountName: result.moneyAccount?.name ?? '',
+      description: cleanDescription, note: result.note ?? '',
+    });
+  } catch (e) {
+    const err = e as { status?: number; message?: string; code?: string };
+    res.status(err.status ?? 500).json({ error: err.message ?? 'Could not save house expense.', code: err.code });
+  }
+});
+
 accounting.post('/chart-of-accounts', async (req, res) => {
   const { code, name, type } = req.body ?? {};
   if (typeof code !== 'string' || !/^[A-Za-z0-9-]{2,20}$/.test(code.trim()) || typeof name !== 'string' || !name.trim() || !types.includes(type)) return respondError(res, 'Enter an account code, name, and valid account type.');

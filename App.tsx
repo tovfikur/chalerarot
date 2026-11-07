@@ -154,7 +154,7 @@ function Shell() {
   }
   const body = {
     home: <Home go={setRoute} />, sale: <Trade key="s" mode="sale" editId={transactionEdit?.kind === 'sale' ? transactionEdit.id : null} onEditDone={finishPartyTransactionEdit} />, purchase: <Trade key="p" mode="purchase" editId={transactionEdit?.kind === 'purchase' ? transactionEdit.id : null} onEditDone={finishPartyTransactionEdit} />, accounts: <Accounts go={setRoute} focus={focus} onFocusDone={() => setFocus(null)} />, more: <Settings />, settings: <Settings />,
-    customers: <Parties kind="c" focus={partyFocus?.kind === 'c' ? partyFocus.id : null} onFocusDone={() => setPartyFocus(null)} onReturn={() => setRoute('home')} onEditTransaction={editPartyTransaction} />, vendors: <Parties kind="v" focus={partyFocus?.kind === 'v' ? partyFocus.id : null} onFocusDone={() => setPartyFocus(null)} onReturn={() => setRoute('home')} onEditTransaction={editPartyTransaction} />, stock: <StockDashboard />, expense: <ExpenseDashboard go={setRoute} />, collect: <Money key="c" kind="c" done={home} />, pay: <Money key="v" kind="v" done={home} />, trash: <Trash />,
+    customers: <Parties kind="c" focus={partyFocus?.kind === 'c' ? partyFocus.id : null} onFocusDone={() => setPartyFocus(null)} onReturn={() => setRoute('home')} onEditTransaction={editPartyTransaction} />, vendors: <Parties kind="v" focus={partyFocus?.kind === 'v' ? partyFocus.id : null} onFocusDone={() => setPartyFocus(null)} onReturn={() => setRoute('home')} onEditTransaction={editPartyTransaction} />, stock: <StockDashboard />, expense: <ExpenseDashboard go={setRoute} />, collect: <Money key="c" kind="c" done={() => setRoute('accounts')} />, pay: <Money key="v" kind="v" done={() => setRoute('accounts')} />, trash: <Trash />,
     bank: <BankCash />,
   }[route];
   const openInv = (kind: 'sale' | 'purchase', id: string) => { closeSearch(); setInv({ kind, id }); };
@@ -305,7 +305,7 @@ function Shell() {
           </View>
         ) : (
           <View style={{ flex: 1, flexDirection: 'row', alignItems: 'center' }}>
-            {route in titleKey && !isDesktop && <TouchableOpacity onPress={() => setRoute('more')} style={{ marginRight: 12, minHeight: 44, minWidth: 44, alignItems: 'center', justifyContent: 'center' }}><AppIcon name={icons.back} size={22} iconColor="#fff" /></TouchableOpacity>}
+            {(route === 'collect' || route === 'pay' || (route in titleKey && !isDesktop)) && <TouchableOpacity onPress={() => setRoute(route === 'collect' || route === 'pay' ? 'accounts' : 'more')} accessibilityRole="button" accessibilityLabel={lang === 'bn' ? 'ফিরে যান' : 'Back'} style={{ marginRight: 12, minHeight: 44, minWidth: 44, alignItems: 'center', justifyContent: 'center' }}><AppIcon name={icons.back} size={22} iconColor="#fff" /></TouchableOpacity>}
             <Text style={{ color: '#fff', fontSize: headerFs, fontWeight: '700', flex: 1 }} numberOfLines={1}>{titleKey[route] ? t(titleKey[route]) : business.name}</Text>
             <TouchableOpacity onPress={() => setQOpen(true)} style={{ minHeight: 44, minWidth: 44, alignItems: 'center', justifyContent: 'center' }}>
               <AppIcon name={icons.search} size={24} iconColor="#fff" />

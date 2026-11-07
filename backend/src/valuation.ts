@@ -134,6 +134,35 @@ export async function writeMovement(
   if (m.type === 'PURCHASE' && m.bucket === 'sellable' && m.qtyKg > 0 && p.qtyKg < 0) {
     let left = Math.min(round2(m.qtyKg), round2(-p.qtyKg));
     let totalCostDelta = 0;
+    // Negative opening quantities imported in bulk have no sale invoice line
+    // to re-cost. Resolve those opening deficits first, at the incoming
+    // purchase's actual unit cost, and retain the matched quantity on the
+    // opening movement so later purchases only adjust the remaining deficit.
+    const negativeOpenings = await t.stockMovement.findMany({
+      where: { productId: p.id, type: 'OPENING', bucket: 'sellable', note: 'bulk-negative-opening-stock', qtyKg: { lt: 0 } },
+      orderBy: [{ date: 'asc' }, { createdAt: 'asc' }, { id: 'asc' }],
+    });
+    for (const opening of negativeOpenings) {
+      if (left <= 0) break;
+      const openNegativeQty = round2(Math.max(0, Math.abs(opening.qtyKg) - opening.negativeStockCostAdjustedQtyKg));
+      const matchedQty = round2(Math.min(left, openNegativeQty));
+      if (matchedQty <= 0) continue;
+      const delta = round2(matchedQty * (m.unitCost - opening.unitCost));
+      await t.stockMovement.update({
+        where: { id: opening.id },
+        data: { negativeStockCostAdjustedQtyKg: round2(opening.negativeStockCostAdjustedQtyKg + matchedQty) },
+      });
+      if (delta !== 0) {
+        await t.stockMovement.create({ data: {
+          productId: p.id, type: 'NEGATIVE_STOCK_COGS_ADJUSTMENT', bucket: 'sellable',
+          qtyKg: 0, unitCost: round2(m.unitCost), value: round2(-delta), date: m.date,
+          refId: m.refId ?? null,
+          note: `Imported opening stock cost adjusted by ${delta.toFixed(2)} for ${matchedQty.toFixed(2)} kg at receipt cost ${m.unitCost.toFixed(2)}.`,
+        } });
+      }
+      totalCostDelta = round2(totalCostDelta + delta);
+      left = round2(left - matchedQty);
+    }
     const priorSaleItems = await t.saleItem.findMany({
       where: { productId: p.id, negativeStockQtyKg: { gt: 0 } },
       include: { sale: { select: { id: true, profit: true } } },

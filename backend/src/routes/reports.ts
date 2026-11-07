@@ -62,8 +62,10 @@ reports.get('/balance-sheet', async (req: Request, res: Response) => {
       + movements.filter(m => m.moneyAccountId === a.id).reduce((sum, m) => sum + (m.direction === 'in' ? m.amount : -m.amount), 0), 0)
       + legacyMovements.reduce((sum, m) => sum + (m.direction === 'in' ? m.amount : -m.amount), 0);
   };
-  const savedJournalLines = await db.journalLine.findMany({ where: { entry: { active: true, sourceType: 'manual', date: { lte: asOf } } }, include: { account: { select: { code: true, name: true, type: true, moneyAccount: { select: { type: true } } } } } });
-  const delta = (fn: (code: string, name: string, type: string, moneyType?: string) => boolean) => savedJournalLines.filter(line => fn(line.account.code, line.account.name, line.account.type, line.account.moneyAccount?.type)).reduce((total, line) => total + line.debit - line.credit, 0);
+  const savedJournalLines = await db.journalLine.findMany({ where: { entry: { active: true, sourceType: { in: ['manual', 'houseExpense'] }, date: { lte: asOf } } }, include: { entry: { select: { sourceType: true } }, account: { select: { code: true, name: true, type: true, moneyAccount: { select: { type: true } } } } } });
+  // House expense cash movements are already reflected in MoneyMovement; only
+  // manual journals need to adjust the derived cash and party balances here.
+  const delta = (fn: (code: string, name: string, type: string, moneyType?: string) => boolean) => savedJournalLines.filter(line => line.entry.sourceType === 'manual' && fn(line.account.code, line.account.name, line.account.type, line.account.moneyAccount?.type)).reduce((total, line) => total + line.debit - line.credit, 0);
   const cash = (accountBalance('cash') ?? 0) + delta((code, _name, _type, moneyType) => moneyType === 'cash' || (!moneyType && code === '1010'));
   const bank = (accountBalance('bank') ?? 0) + delta((code, _name, _type, moneyType) => moneyType === 'bank' || (!moneyType && code === '1020'));
   const walletBalances = ['bkash', 'nagad', 'rocket'].map((type, index) => (accountBalance(type) ?? 0) + delta((code, _name, _accountType, moneyType) => moneyType === type || (!moneyType && code === String(1030 + index * 10))));
@@ -104,7 +106,7 @@ reports.get('/balance-sheet', async (req: Request, res: Response) => {
   const byName = new Map(chart.map(account => [account.name, account]));
   const byCode = new Map(chart.map(account => [account.code, account]));
   const accountTotals = new Map<string, { code: string; name: string; type: string; balance: number }>();
-  for (const row of journalRows.filter(item => item.sourceType === 'manual')) {
+  for (const row of journalRows.filter(item => item.sourceType === 'manual' || item.sourceType === 'houseExpense')) {
     const account = byId.get(row.accountId ?? '') ?? byName.get(row.account) ?? byCode.get(ledgerAccountCode(row.account));
     if (!account || !['asset', 'liability', 'equity'].includes(account.type)) continue;
     const key = account.id;
@@ -284,7 +286,7 @@ async function deriveJournalRows(from: string, to: string) {
     db.customer.findMany({ where: { deletedAt: null, openingDue: { not: 0 } } }),
     db.vendor.findMany({ where: { deletedAt: null, openingPayable: { not: 0 } } }),
     db.stockMovement.findMany({ where: { date: { gte: from, lte: to }, type: { in: ['OPENING', 'ADJUSTMENT', 'REVALUE'] }, bucket: 'sellable' } }),
-    db.journalEntry.findMany({ where: { active: true, sourceType: 'manual', date: { gte: from, lte: to } }, include: { lines: { include: { account: true } } } }),
+    db.journalEntry.findMany({ where: { active: true, sourceType: { in: ['manual', 'houseExpense'] }, date: { gte: from, lte: to } }, include: { lines: { include: { account: true } } } }),
     db.chartAccount.findMany({ where: { moneyAccountId: { not: null } }, select: { moneyAccountId: true, name: true } }),
   ]);
   const linkedName = new Map(linkedCashAccounts.map(a => [a.moneyAccountId!, a.name]));
@@ -609,7 +611,7 @@ reports.get('/cashflow', async (req: Request, res: Response) => {
   const returnOutflows = amount(['saleReturn', 'purchaseReturn'], 'out');
   const openingDeposits = accounts.filter(a => a.openingDate && a.openingDate >= from && a.openingDate <= to).reduce((total, a) => total + a.openingBalance, 0);
   const otherInflows = amount(['deposit', 'openingAdjust'], 'in') + openingDeposits + Math.max(0, journalCashDeltaPeriod);
-  const otherOutflows = amount(['withdrawal', 'openingAdjust'], 'out') + Math.max(0, -journalCashDeltaPeriod);
+  const otherOutflows = amount(['withdrawal', 'houseExpense', 'openingAdjust'], 'out') + Math.max(0, -journalCashDeltaPeriod);
   const operatingInflows = customerReceipts + returnInflows + otherInflows;
   const operatingOutflows = supplierPayments + inventoryCostPayments + expensePayments + returnOutflows + otherOutflows;
   const netCashFlow = Math.round((operatingInflows - operatingOutflows) * 100) / 100;

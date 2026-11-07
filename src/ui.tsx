@@ -76,12 +76,12 @@ export const Btn = ({ label, onPress, kind = 'primary', icon, testID }: { label:
     </TouchableOpacity>
   );
 };
-export const Field = ({ label, value, onChange, num, accessibilityLabel }: { label: string; value: string; onChange: (v: string) => void; num?: boolean; accessibilityLabel?: string }) => {
+export const Field = ({ label, value, onChange, num, accessibilityLabel, inputRef }: { label: string; value: string; onChange: (v: string) => void; num?: boolean; accessibilityLabel?: string; inputRef?: React.Ref<TextInput> }) => {
   const fs = useFs(17, 15);
   return (
     <View style={{ marginBottom: 10 }}>
       <Muted>{label}</Muted>
-      <TextInput value={value} onChangeText={onChange} accessibilityLabel={accessibilityLabel ?? label} keyboardType={num ? 'numeric' : 'default'} inputMode={num ? 'decimal' : undefined} style={[s.input, { fontSize: fs }]} />
+      <TextInput ref={inputRef} value={value} onChangeText={onChange} accessibilityLabel={accessibilityLabel ?? label} keyboardType={num ? 'numeric' : 'default'} inputMode={num ? 'decimal' : undefined} style={[s.input, { fontSize: fs }]} />
     </View>
   );
 };

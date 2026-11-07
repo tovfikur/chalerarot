@@ -1,5 +1,5 @@
-import React, { useState, useMemo, useEffect, useRef } from 'react';
-import { localeDigits } from '../bn';
+import React, { useState, useMemo, useEffect, useRef, useCallback } from 'react';
+import { localeDigits, parseNum, toEnDigits } from '../bn';
 import {
   View,
   Text,
@@ -34,12 +34,15 @@ import {
   Muted,
   Empty,
   Btn,
+  Field,
+  AccountPicker,
 } from '../ui';
 import { AppIcon, icons } from '../icons';
 import { useBreakpoint } from '../responsive';
 import { printReport, previewReport, printedAtStamp, downloadReportCSV, type ReportDoc, type ReportRow } from '../report';
 import { api } from '../api';
-import type { GeneralLedger, JournalEntries, SavedJournalEntry } from '../api';
+import type { GeneralLedger, JournalEntries, SavedJournalEntry, HouseExpenseRow } from '../api';
+import type { Key } from '../i18n';
 import {
   FilterModal,
   ExpenseModal,
@@ -59,6 +62,48 @@ interface AccountsDashboardProps {
   go?: (route: string) => void;
   focus?: { kind: 'c' | 'v'; id: string } | null;
   onFocusDone?: () => void;
+}
+
+function HouseExpenseEntryForm({ onCancel, onSaved }: { onCancel: () => void; onSaved: () => Promise<void> }) {
+  const { lang, t, moneyAccounts } = useApp();
+  const label = (en: string, bn: string) => lang === 'bn' ? bn : en;
+  const [accountId, setAccountId] = useState(moneyAccounts.find(account => account.active)?.id ?? '');
+  const [amount, setAmount] = useState('');
+  const [date, setDate] = useState(today());
+  const [description, setDescription] = useState('');
+  const [note, setNote] = useState('');
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState('');
+  const requestId = useRef(`house-${Date.now()}-${Math.random().toString(36).slice(2)}`);
+  useEffect(() => {
+    if (!accountId) setAccountId(moneyAccounts.find(account => account.active)?.id ?? '');
+  }, [moneyAccounts, accountId]);
+  const save = async () => {
+    if (!accountId || !(parseNum(amount) > 0) || !description.trim()) {
+      setError(label('Choose an account, enter an amount, and add a description.', 'অ্যাকাউন্ট নির্বাচন করুন, পরিমাণ লিখুন এবং বিবরণ দিন।'));
+      return;
+    }
+    setBusy(true); setError('');
+    try {
+      await api.createHouseExpense({ accountId, amount: parseNum(amount), date: toEnDigits(date), description: description.trim(), note: note.trim(), requestId: requestId.current });
+      await onSaved();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : label('Could not save house expense.', 'বাসার খরচ সংরক্ষণ করা যায়নি।'));
+    } finally { setBusy(false); }
+  };
+  return <View style={{ backgroundColor: '#F8FAFC', borderWidth: 1, borderColor: '#DBEAFE', borderRadius: 14, padding: 14, marginBottom: 14 }}>
+    <Text style={{ fontSize: 17, fontWeight: '800', color: '#123D64', marginBottom: 8 }}>{label('Record house expense withdrawal', 'বাসার খরচ উত্তোলন নথিভুক্ত করুন')}</Text>
+    <AccountPicker accountId={accountId} onPick={setAccountId} label={label('Withdraw from account', 'যে অ্যাকাউন্ট থেকে উত্তোলন')} required />
+    <Field label={label('Amount', 'পরিমাণ')} value={amount} onChange={setAmount} num />
+    <DateField label={label('Date', 'তারিখ')} value={date} onChange={setDate} allowPast />
+    <Field label={label('Description', 'বিবরণ')} value={description} onChange={setDescription} />
+    <Field label={label('Log note (optional)', 'লগ নোট (ঐচ্ছিক)')} value={note} onChange={setNote} />
+    {error ? <Text accessibilityRole="alert" style={{ color: '#DC2626', marginBottom: 8 }}>{error}</Text> : null}
+    <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginTop: 8 }}>
+      <Btn label={busy ? t('wait') : label('Save withdrawal', 'উত্তোলন সংরক্ষণ')} icon={icons.moneyOut} onPress={() => { if (!busy) void save(); }} />
+      <Btn label={label('Cancel', 'বাতিল')} kind="ghost" onPress={onCancel} />
+    </View>
+  </View>;
 }
 
 // Preset Range Calculator
@@ -86,6 +131,7 @@ const presetRange = (id: 'today' | 'last7' | 'thisMonth' | 'last3m' | 'thisYear'
   if (id === 'thisYear') { const y = Number(td.slice(0, 4)) - (Number(td.slice(5, 7)) < fiscalMonth ? 1 : 0); const from = `${y}-${pad2n(fiscalMonth)}-01`; return { from, to: addDays(`${y + 1}-${pad2n(fiscalMonth)}-01`, -1) }; }
   return { from: td, to: td };
 };
+const expenseTranslationKey = (category: string) => `ex${category.charAt(0).toUpperCase()}${category.slice(1)}` as Key;
 
 export function AccountsDashboard({ go, focus, onFocusDone }: AccountsDashboardProps) {
   const {
@@ -114,21 +160,28 @@ export function AccountsDashboard({ go, focus, onFocusDone }: AccountsDashboardP
   const m = useMoney();
   const n = useNum();
   const fd = useDateStr();
+  const expenseCategoryLabel = useCallback((category: string, customName?: string) =>
+    category === 'other' && customName
+      ? customName === 'Inventory adjustment' && lang === 'bn' ? 'স্টক সমন্বয়' : customName
+      : t(expenseTranslationKey(category)), [t, lang]);
   const s = stats();
   const td = today();
   const { isDesktop, isTablet, isMobile, width } = useBreakpoint();
 
   // Active navigation tab
-  // 'overview' | 'due' | 'pay' | 'expense'
-  const [activeTab, setActiveTab] = useState<'overview' | 'reports' | 'due' | 'pay' | 'expense'>('overview');
+  // 'overview' | 'due' | 'pay' | 'expense' | 'houseExpense'
+  const [activeTab, setActiveTab] = useState<'overview' | 'reports' | 'due' | 'pay' | 'expense' | 'houseExpense'>('overview');
 
   // Filter state
-  const [fltPreset, setFltPreset] = useState<'today' | 'last7' | 'thisMonth' | 'last3m' | 'thisYear' | 'custom'>('thisMonth');
-  const [flt, setFlt] = useState<AcctFilter>(() => presetRange('thisMonth', today()));
+  const [fltPreset, setFltPreset] = useState<'today' | 'last7' | 'thisMonth' | 'last3m' | 'thisYear' | 'custom'>('today');
+  const [flt, setFlt] = useState<AcctFilter>(() => presetRange('today', today()));
   const [fltModalOpen, setFltModalOpen] = useState(false);
   const [moneyEntry, setMoneyEntry] = useState<'in' | 'out' | null>(null);
   const [transferModalOpen, setTransferModalOpen] = useState(false);
   const [accountRefresh, setAccountRefresh] = useState(0);
+  const [houseExpenseRows, setHouseExpenseRows] = useState<HouseExpenseRow[]>([]);
+  const [houseExpenseLoading, setHouseExpenseLoading] = useState(false);
+  const [houseExpenseFormOpen, setHouseExpenseFormOpen] = useState(false);
 
   // Focus effect for navigation from outside
   useEffect(() => {
@@ -170,6 +223,16 @@ export function AccountsDashboard({ go, focus, onFocusDone }: AccountsDashboardP
     }).catch(() => { if (on) setAccountsFor(''); });
     return () => { on = false; };
   }, [flt.to, accountRefresh]);
+
+  useEffect(() => {
+    if (activeTab !== 'houseExpense') return;
+    let on = true;
+    setHouseExpenseLoading(true);
+    api.houseExpenses().then(rows => { if (on) setHouseExpenseRows(rows); })
+      .catch(() => { if (on) Alert.alert(lang === 'bn' ? 'বাসার খরচ লোড করা যায়নি' : 'Could not load house expenses'); })
+      .finally(() => { if (on) setHouseExpenseLoading(false); });
+    return () => { on = false; };
+  }, [activeTab, accountRefresh, lang]);
 
   const f: PeriodFinance | null = finFor === finKey ? financePeriod : null;
 
@@ -444,6 +507,7 @@ export function AccountsDashboard({ go, focus, onFocusDone }: AccountsDashboardP
       due: lang === 'bn' ? 'গ্রাহক পাওনা' : 'Customer receivables',
       pay: lang === 'bn' ? 'সরবরাহকারী দেনা' : 'Supplier payables',
       expense: lang === 'bn' ? 'খরচের তালিকা' : 'Expense register',
+      houseExpense: lang === 'bn' ? 'বাসার খরচ উত্তোলন' : 'House expense withdrawals',
     };
     const moneyRow = (label: string, value: number): ReportRow => ({ label, right: m(value) });
     const sections: ReportDoc['sections'] = activeTab === 'due'
@@ -451,7 +515,9 @@ export function AccountsDashboard({ go, focus, onFocusDone }: AccountsDashboardP
       : activeTab === 'pay'
       ? [{ title: titles.pay, rows: vendorPayables.map(x => ({ label: x.vendor.name, sub: localeDigits(x.vendor.mobile, lang), right: m(x.balance) })) }]
       : activeTab === 'expense'
-      ? [{ title: titles.expense, rows: filteredExpensesList.map(x => ({ label: x.category === 'other' && x.customName ? x.customName : x.category, sub: `${x.capitalized ? (lang === 'bn' ? 'মজুদে অন্তর্ভুক্ত' : 'Capitalized to inventory') + ' · ' : ''}${x.date}${x.note ? ` · ${x.note}` : ''}`, right: m(x.amount) })) }]
+      ? [{ title: titles.expense, rows: filteredExpensesList.map(x => ({ label: expenseCategoryLabel(x.category, x.customName), sub: `${x.capitalized ? (lang === 'bn' ? 'মজুদে অন্তর্ভুক্ত' : 'Capitalized to inventory') + ' · ' : ''}${x.date}${x.note ? ` · ${x.note}` : ''}`, right: m(x.amount) })) }]
+      : activeTab === 'houseExpense'
+      ? [{ title: titles.houseExpense, rows: houseExpenseRows.map(x => ({ label: x.description, sub: `${x.date} · ${x.accountName}${x.note ? ` · ${x.note}` : ''}`, right: `−${m(x.amount)}` })) }]
       : [{ title: titles[activeTab], rows: [
         moneyRow(lang === 'bn' ? 'নগদ ও ব্যাংক' : 'Cash and bank', totalLiquidMoney),
         moneyRow(lang === 'bn' ? 'গ্রাহক পাওনা' : 'Receivables', totalDueAmount),
@@ -561,7 +627,7 @@ export function AccountsDashboard({ go, focus, onFocusDone }: AccountsDashboardP
     const totalExp = periodExps.reduce((sum, e) => sum + e.amount, 0);
     const catMap: Record<string, number> = {};
     for (const e of periodExps) {
-      const cat = e.category === 'other' && e.customName ? e.customName : e.category;
+      const cat = expenseCategoryLabel(e.category, e.customName);
       catMap[cat] = (catMap[cat] || 0) + e.amount;
     }
     return Object.entries(catMap)
@@ -571,7 +637,7 @@ export function AccountsDashboard({ go, focus, onFocusDone }: AccountsDashboardP
         pct: totalExp > 0 ? Math.round((amt / totalExp) * 100) : 0,
       }))
       .sort((a, b) => b.amount - a.amount);
-  }, [expenses, flt]);
+  }, [expenses, flt, expenseCategoryLabel]);
 
   // Print Complete Accounts Statement
   const handlePrintStatement = () => {
@@ -710,11 +776,11 @@ export function AccountsDashboard({ go, focus, onFocusDone }: AccountsDashboardP
         if (!inPeriod(e.date)) return false;
         if (expCatFilter !== 'all' && e.category !== expCatFilter) return false;
         if (!q) return true;
-        const catName = e.category === 'other' && e.customName ? e.customName : e.category;
-        return catName.toLowerCase().includes(q) || (e.note && e.note.toLowerCase().includes(q));
+        const catName = expenseCategoryLabel(e.category, e.customName);
+        return catName.toLowerCase().includes(q) || e.category.toLowerCase().includes(q) || (e.note && e.note.toLowerCase().includes(q));
       })
       .sort((a, b) => (a.date < b.date ? 1 : -1));
-  }, [expenses, flt, expSearch, expCatFilter]);
+  }, [expenses, flt, expSearch, expCatFilter, expenseCategoryLabel]);
 
   if (reportViewDoc) return (<>
     <View style={{ flex: 1, backgroundColor: '#F1F5F9' }}>
@@ -1131,6 +1197,7 @@ export function AccountsDashboard({ go, focus, onFocusDone }: AccountsDashboardP
           { key: 'due', labelBn: `👥 কাস্টমার বাকি (${n(totalDueCount)})`, labelEn: `Receivables (${totalDueCount})`, icon: icons.customers },
           { key: 'pay', labelBn: `🏢 মহাজন দেনা (${n(totalPayableCount)})`, labelEn: `Payables (${totalPayableCount})`, icon: icons.vendors },
           { key: 'expense', labelBn: '📉 খরচের রেজিস্টার', labelEn: 'Expense Register', icon: icons.expense },
+          { key: 'houseExpense', labelBn: '🏠 বাসার খরচ', labelEn: 'House Expenses', icon: icons.moneyOut },
         ].map(tTab => {
           const active = activeTab === tTab.key;
           return (
@@ -1845,7 +1912,7 @@ export function AccountsDashboard({ go, focus, onFocusDone }: AccountsDashboardP
             <AppIcon name={icons.search} size={20} iconColor="#64748B" />
             <TextInput
               style={styles.searchBarInput}
-              placeholder={lang === 'bn' ? 'খাতের নাম বা নোট দিয়ে খুঁজুন...' : 'Search expense by category or note...'}
+              placeholder={lang === 'bn' ? 'খাতের নাম বা বিবরণ দিয়ে খুঁজুন...' : 'Search expense by category or description...'}
               value={expSearch}
               onChangeText={setExpSearch}
             />
@@ -1857,7 +1924,7 @@ export function AccountsDashboard({ go, focus, onFocusDone }: AccountsDashboardP
               <Empty />
             ) : (
               filteredExpensesList.map(e => {
-                const label = e.category === 'other' && e.customName ? e.customName : e.category;
+                const label = expenseCategoryLabel(e.category, e.customName);
                 return (
                   <TouchableOpacity
                     key={e.id}
@@ -1870,14 +1937,53 @@ export function AccountsDashboard({ go, focus, onFocusDone }: AccountsDashboardP
                     <View style={{ flex: 1 }}>
                       <Text style={styles.expTitle}>{label}</Text>
                       <Text style={styles.expSub}>
-                        {fd(e.date)} {e.note ? `• ${e.note}` : ''}
+                        {fd(e.date)}
                       </Text>
+                      {e.note ? <Text style={{ color: '#64748B', fontSize: 12, marginTop: 3 }} numberOfLines={2}>{lang === 'bn' ? 'বিবরণ: ' : 'Description: '}{e.note}</Text> : null}
                     </View>
                     <Text style={styles.expAmt}>- {m(e.amount)}</Text>
                   </TouchableOpacity>
                 );
               })
             )}
+          </View>
+        </View>
+      )}
+
+      {activeTab === 'houseExpense' && (
+        <View style={styles.tabContentArea}>
+          <View style={styles.cardHeaderWithAction}>
+            <View style={{ flex: 1, marginRight: 10 }}>
+              <Text style={styles.blockTitle}>{lang === 'bn' ? 'বাসার খরচ উত্তোলন রেজিস্টার' : 'House Expenses Register'}</Text>
+              <Text style={{ color: '#64748B', fontSize: 12, marginTop: 3 }}>{lang === 'bn' ? 'মালিকানা থেকে আলাদা উত্তোলন হিসেবে নথিভুক্ত হবে' : 'Recorded separately as an owner equity withdrawal'}</Text>
+            </View>
+            {!houseExpenseFormOpen ? <TouchableOpacity style={styles.primaryActionButton} onPress={() => setHouseExpenseFormOpen(true)}>
+              <AppIcon name={icons.add} size={18} iconColor="#fff" />
+              <Text style={styles.primaryActionText}>{lang === 'bn' ? 'বাসার খরচ যোগ' : 'Add House Expense'}</Text>
+            </TouchableOpacity> : null}
+          </View>
+          {houseExpenseFormOpen ? <HouseExpenseEntryForm
+            onCancel={() => setHouseExpenseFormOpen(false)}
+            onSaved={async () => {
+              setHouseExpenseFormOpen(false);
+              await refresh();
+              setAccountRefresh(value => value + 1);
+              setHouseExpenseRows(await api.houseExpenses());
+            }}
+          /> : null}
+          <View style={styles.colCard}>
+            {houseExpenseLoading ? <Text style={{ padding: 14, color: '#64748B' }}>{lang === 'bn' ? 'লোড হচ্ছে…' : 'Loading…'}</Text>
+              : houseExpenseRows.length === 0 ? <Empty />
+              : houseExpenseRows.map(row => <View key={row.id} style={{ paddingHorizontal: 14, paddingVertical: 12, borderBottomWidth: 1, borderBottomColor: '#E2E8F0' }}>
+                <View style={{ flexDirection: 'row', alignItems: 'flex-start', gap: 10 }}>
+                  <View style={{ flex: 1 }}>
+                    <Text style={{ fontSize: 15, fontWeight: '700', color: '#0F172A' }}>{row.description}</Text>
+                    <Text style={{ color: '#64748B', fontSize: 12, marginTop: 3 }}>{row.transactionNo} · {fd(row.date)} · {row.accountName}</Text>
+                    {row.note ? <Text style={{ color: '#64748B', fontSize: 12, marginTop: 3 }}>{lang === 'bn' ? 'লগ নোট: ' : 'Log note: '}{row.note}</Text> : null}
+                  </View>
+                  <Text style={{ fontSize: 15, fontWeight: '800', color: '#B91C1C' }}>−{m(row.amount)}</Text>
+                </View>
+              </View>)}
           </View>
         </View>
       )}

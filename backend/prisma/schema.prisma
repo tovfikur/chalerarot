@@ -280,6 +280,7 @@ model StockMovement {
   date      String // YYYY-MM-DD
   refId     String?
   note      String?
+  negativeStockCostAdjustedQtyKg Float @default(0)
   createdAt DateTime @default(now())
 
   @@index([productId])

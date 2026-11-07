@@ -55,6 +55,7 @@ products.post('/bulk', async (req: Request, res: Response) => {
     const errors: { row: number; name?: string; error: string }[] = [];
 
     await db.$transaction(async tx => {
+      const allowNegativeStock = (await tx.businessSettings.findUnique({ where: { id: 'main' }, select: { allowNegativeStock: true } }))?.allowNegativeStock ?? false;
       const usedCodes = new Set<string>();
 
       for (let i = 0; i < items.length; i++) {
@@ -97,8 +98,12 @@ products.post('/bulk', async (req: Request, res: Response) => {
         const costPerBag = item.costPerBag !== undefined && String(item.costPerBag).trim() !== ''
           ? Math.max(0, num(item.costPerBag)) : null;
         const openingBags = item.openingBags !== undefined && String(item.openingBags).trim() !== ''
-          ? Math.max(0, num(item.openingBags)) : null;
-        const o = round2(Math.max(0, openingBags !== null ? openingBags * mb : num(item.opening ?? item.openingQtyKg)));
+          ? num(item.openingBags) : null;
+        const o = round2(openingBags !== null ? openingBags * mb : num(item.opening ?? item.openingQtyKg));
+        if (o < 0 && !allowNegativeStock) {
+          errors.push({ row: rowNum, name, error: 'Negative opening stock is disabled in inventory settings' });
+          continue;
+        }
         const c = round2(Math.max(0, costPerBag !== null ? costPerBag / (mb > 0 ? mb : 50) : num(item.cost)));
         const openingValue = round2(o * c);
 
@@ -120,13 +125,14 @@ products.post('/bulk', async (req: Request, res: Response) => {
             largeBagKg: lb > 0 ? lb : 50,
           },
         });
-        const postedStock = o > 0 ? await writeMovement(tx, created.id, {
+        const postedStock = o !== 0 ? await writeMovement(tx, created.id, {
             type: 'OPENING',
             bucket: 'sellable',
             qtyKg: o,
             unitCost: c,
             date: day,
             refId: created.id,
+            note: o < 0 ? 'bulk-negative-opening-stock' : null,
           }) : null;
         createdList.push(productJson(postedStock ? {
           ...created, qtyKg: postedStock.qtyAfter, stockValue: postedStock.valueAfter, cost: postedStock.avgAfter,

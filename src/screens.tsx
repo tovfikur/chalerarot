@@ -278,7 +278,7 @@ export function Home({ go }: { go?: (r: string) => void } = {}) {
         <View>
           <Head title={t('todayExpense')} back={() => setView('profit')} />
           <Card>
-            {tExp.map(e => <Row key={e.id} left={e.category === 'other' && e.customName ? e.customName : t(exKey(e.category))} sub={fd(e.date)} right={m(e.amount)} neg />)}
+            {tExp.map(e => <Row key={e.id} left={e.stockAdjustment ? (lang === 'bn' ? 'স্টক সমন্বয়' : 'Inventory adjustment') : e.category === 'other' && e.customName ? e.customName : t(exKey(e.category))} sub={fd(e.date)} right={m(e.amount)} neg />)}
             {!tExp.length ? <Empty /> : null}
           </Card>
         </View>
@@ -1658,6 +1658,15 @@ export function Money({ kind, done }: { kind: 'c' | 'v'; done: () => void }) {
   };
   const fieldStyle = { borderWidth: 1, borderColor: color.line, borderRadius: 12, minHeight: 48, paddingHorizontal: 12, backgroundColor: '#FFFFFF', color: color.text, fontSize: 17 } as const;
   return <Screen>
+    <TouchableOpacity
+      accessibilityRole="button"
+      accessibilityLabel={lang === 'bn' ? 'Back to Accounts' : 'Back to Accounts'}
+      onPress={done}
+      style={{ alignSelf: 'flex-start', flexDirection: 'row', alignItems: 'center', gap: 8, minHeight: 44, paddingHorizontal: 14, marginBottom: 10, borderRadius: 10, backgroundColor: '#FFFFFF', borderWidth: 1, borderColor: '#CBD5E1' }}
+    >
+      <AppIcon name={icons.back} size={18} iconColor="#1D4ED8" />
+      <Text style={{ color: '#1D4ED8', fontSize: 15, fontWeight: '700' }}>{lang === 'bn' ? 'Back to Accounts' : 'Back to Accounts'}</Text>
+    </TouchableOpacity>
     <MoneyBalanceCard balances={moneyBalances.filter(b => b.method === 'cash' || b.method === 'bank')} />
     <Card>
       <SectionHead icon={isC ? icons.collect : icons.pay}>{t(isC ? 'receivePayment' : 'payPayment')}</SectionHead>
@@ -2102,7 +2111,9 @@ export function DateField({ label, value, onChange, clearable, allowPast = true,
   // Last committed date that passed the constraint — business today when there
   // is none. A rejected pick reverts the calendar highlight here.
   const lastValid = useRef(value && !bad(value) ? value : dhakaToday());
-  const openCal = () => { setDraft(value); setOpen(true); };
+  // Always open on the current business day so users can navigate from today,
+  // even when the field currently contains an older saved date.
+  const openCal = () => { setDraft(dhakaToday()); setOpen(true); };
   const commit = (d: string) => {
     if (bad(d)) {
       setDraft(lastValid.current);
@@ -2168,21 +2179,35 @@ export function ExpenseModal({ init, onClose, onSave, onTrash }: {
   onSave: (v: { id?: string; category: string; customName?: string; amount: number; accountId: string; date: string; note?: string }) => Promise<void>;
   onTrash: (id: string) => Promise<void>;
 }) {
-  const { t } = useApp();
+  const { t, lang } = useApp();
   const [cat, setCat] = useState(init?.category ?? '');
   const [name, setName] = useState(init?.customName ?? '');
   const [amt, setAmt] = useState(init ? String(init.amount) : '');
   const [date, setDate] = useState(init?.date ?? dhakaToday());
   const [note, setNote] = useState(init?.note ?? '');
   const [accountId, setAccountId] = useState<string | undefined>(init?.accountId);
+  const [categoryListOpen, setCategoryListOpen] = useState(false);
+  const [customCategories, setCustomCategories] = useState<{ id: string; name: string; kind: string }[]>([]);
+  const [customCategoryName, setCustomCategoryName] = useState('');
+  const nameInput = useRef<TextInput>(null);
+  const amountInput = useRef<TextInput>(null);
+  useEffect(() => {
+    let live = true;
+    api.expenseCategories().then(rows => {
+      if (!live) return;
+      setCustomCategories(rows);
+      if (init?.category === 'other' && init.customName) setCustomCategoryName(init.customName);
+    }).catch(() => {});
+    return () => { live = false; };
+  }, [init?.category, init?.customName]);
   const save = () => {
     if (!cat) return Alert.alert(t('selectType'));
     if (!(num(amt) > 0)) return Alert.alert(t('invalidAmount'));
-    if (cat === 'other' && !name.trim()) return Alert.alert(t('needExpName'));
+    if (cat === 'other' && !customCategoryName && !name.trim()) return Alert.alert(t('needExpName'));
     if (!accountId) return Alert.alert(t('needAccount'));
     (async () => {
       try {
-        await onSave({ id: init?.id, category: cat, customName: cat === 'other' ? name.trim() : undefined, amount: num(amt), accountId, date: date || today(), note: note.trim() || undefined });
+        await onSave({ id: init?.id, category: cat, customName: cat === 'other' ? (customCategoryName || name.trim()) : undefined, amount: num(amt), accountId, date: date || today(), note: note.trim() || undefined });
       } catch (e) {
         Alert.alert(e instanceof Error ? e.message : t('invalid'));
       }
@@ -2202,21 +2227,26 @@ export function ExpenseModal({ init, onClose, onSave, onTrash }: {
   return (
     <DetailShell title={init ? (init.category === 'other' && init.customName ? init.customName : t(exKey(init.category))) : t('addExpense')} onClose={onClose}>
       <Card>
+        <DateField label={t('date')} value={date} onChange={setDate} allowPast={false} />
         <Muted>{t('expenseType')}</Muted>
-        <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginVertical: 6 }}>
-          {EXPENSE_CATS.map(c => (
-            <TouchableOpacity key={c} onPress={() => setCat(c)} style={{ paddingHorizontal: 14, minHeight: 44, justifyContent: 'center', borderRadius: 22, backgroundColor: cat === c ? color.primary : color.primaryLight }}>
-              <Text style={{ color: cat === c ? '#fff' : color.text, fontSize: 15, fontWeight: cat === c ? '700' : '400' }}>{t(exKey(c))}</Text>
-            </TouchableOpacity>
-          ))}
-        </View>
-        {cat === 'other' ? <Field label={t('expenseName')} value={name} onChange={setName} /> : null}
+        <TouchableOpacity accessibilityRole="button" accessibilityLabel={t('expenseType')} onPress={() => setCategoryListOpen(open => !open)} style={{ minHeight: 48, paddingHorizontal: 12, borderWidth: 1, borderColor: categoryListOpen ? color.primary : color.line, borderRadius: 10, backgroundColor: '#FFFFFF', flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }}>
+          <Text style={{ color: cat ? color.text : color.muted, fontSize: 16 }}>{customCategoryName || (cat ? t(exKey(cat)) : t('expenseType'))}</Text>
+          <AppIcon name={categoryListOpen ? 'chevron-up' : 'chevron-down'} size={18} iconColor={color.muted} />
+        </TouchableOpacity>
+        {categoryListOpen ? <ScrollView nestedScrollEnabled showsVerticalScrollIndicator keyboardShouldPersistTaps="handled" style={{ maxHeight: 220, marginTop: 4, borderWidth: 1, borderColor: color.line, borderRadius: 10, backgroundColor: '#FFFFFF' }}>
+          {EXPENSE_CATS.map(c => <TouchableOpacity key={c} accessibilityRole="button" onPress={() => { setCat(c); setCustomCategoryName(''); if (c !== 'other') setName(''); setCategoryListOpen(false); requestAnimationFrame(() => (c === 'other' ? nameInput.current : amountInput.current)?.focus()); }} style={{ minHeight: 44, justifyContent: 'center', paddingHorizontal: 12, borderBottomWidth: 1, borderBottomColor: color.line, backgroundColor: cat === c && !customCategoryName ? '#EFF6FF' : '#FFFFFF' }}>
+            <Text style={{ color: color.text, fontWeight: cat === c ? '700' : '500' }}>{t(exKey(c))}</Text>
+          </TouchableOpacity>)}
+          {customCategories.map(c => <TouchableOpacity key={c.id} accessibilityRole="button" onPress={() => { setCat('other'); setCustomCategoryName(c.name); setName(''); setCategoryListOpen(false); requestAnimationFrame(() => amountInput.current?.focus()); }} style={{ minHeight: 44, justifyContent: 'center', paddingHorizontal: 12, borderBottomWidth: 1, borderBottomColor: color.line, backgroundColor: customCategoryName === c.name ? '#EFF6FF' : '#FFFFFF' }}>
+            <Text style={{ color: color.text, fontWeight: customCategoryName === c.name ? '700' : '500' }}>{c.name}</Text>
+          </TouchableOpacity>)}
+        </ScrollView> : null}
+        {cat === 'other' && !customCategoryName ? <Field inputRef={nameInput} label={t('expenseName')} value={name} onChange={setName} /> : null}
+        <Field label={lang === 'bn' ? 'বিবরণ (ঐচ্ছিক)' : 'Description (optional)'} value={note} onChange={setNote} />
         <FormGrid>
-          <Field label={t('amount')} value={amt} onChange={setAmt} num />
-          <DateField label={t('date')} value={date} onChange={setDate} allowPast={false} />
+          <Field inputRef={amountInput} label={t('amount')} value={amt} onChange={setAmt} num />
         </FormGrid>
         <AccountPicker accountId={accountId} onPick={setAccountId} label={t('paymentAccount')} required />
-        <Field label={t('note')} value={note} onChange={setNote} />
         <Btn icon={icons.save} label={t('saveExpense')} onPress={save} />
         {init ? <Btn kind="danger" icon={icons.del} label={t('trashMoveBtn')} onPress={trash} /> : <Btn kind="ghost" icon={icons.cancel} label={t('cancel')} onPress={onClose} />}
       </Card>
@@ -3195,7 +3225,7 @@ function useKpiReport(kind: KpiKind, period: KpiPeriod, fin: PeriodFinance | nul
 
     if (kind === 'expense') {
       const rows = expenses.filter(e => inP(e.date)).map(e => ({
-        label: e.category === 'other' && e.customName ? e.customName : t(exKey(e.category)),
+        label: e.stockAdjustment ? (lang === 'bn' ? 'স্টক সমন্বয়' : 'Inventory adjustment') : e.category === 'other' && e.customName ? e.customName : t(exKey(e.category)),
         sub: [fd(e.date), e.method ? methodName(e.method, t) : '', e.note ?? ''].filter(Boolean).join(' \u2022 '),
         right: m(e.amount), neg: true,
       }));
