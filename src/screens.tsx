@@ -2,7 +2,7 @@ import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react'
 import { View, Text, TextInput, Alert, TouchableOpacity, Pressable, Modal, ActivityIndicator, ScrollView, Share, Platform } from 'react-native';
 import { useApp, today, Party, Product, type PeriodFinance } from './store';
 import { BagUnit, CartLine, kgPerUnit, toKg, lineTotal } from './bags';
-import { Card, Title, Muted, Btn, Field, Chips, Row, Empty, Screen, SectionHead, PageHeader, ListPageHeader, ListTable, type TableColumn, type TableSort, AccountPicker, ACCOUNT_TYPES, methodIcon, methodName, useMoney, useNum, useDateStr, color } from './ui';
+import { Card, Title, Muted, Btn, Field, RequiredLabel, Chips, Row, Empty, Screen, SectionHead, PageHeader, ListPageHeader, ListTable, type TableColumn, type TableSort, AccountPicker, ACCOUNT_TYPES, methodIcon, methodName, useMoney, useNum, useDateStr, color } from './ui';
 import { AppIcon, icons } from './icons';
 import { RGrid, TwoPanel, FormGrid, useFs, useBreakpoint } from './responsive';
 import { SearchToggle, SearchableSelect, SearchDropdown, NoResult, matchProduct, matchParty, exactCode } from './search';
@@ -10,8 +10,9 @@ import { api, ApiError, type TxnPayment, type SettlementStatus, DetailItem, Recv
 import { unitDetail, fmtTime, buildInvoiceText, buildInvoiceHTML, InvData, UnitNames } from './invoice';
 import { tp, Key } from './i18n';
 import { toEnDigits, toBnDigits, parseNum, localeDigits } from './bn';
-import { printReport, printedAtStamp, type ReportDoc, type ReportRow } from './report';
+import { printReport, printedAtStamp, downloadReportCSV, type ReportDoc, type ReportRow } from './report';
 import { downloadCSV } from './stockReport';
+import { showEntryError } from './entryDialog';
 import { TradeDashboardForm } from './screens/TradeDashboardForm';
 import { StockDashboard } from './screens/StockDashboard';
 import { ExpenseDashboard } from './screens/ExpenseDashboard';
@@ -421,7 +422,7 @@ export function QuickSale({ done }: { done?: () => void }) {
   const visible = products.filter(p => matchProduct(p, q));
 
   const addItem = useCallback((p: Product, unit: BagUnit, enteredQty: number) => {
-    if (!(enteredQty > 0)) { Alert.alert(t('invalid')); return false; }
+    if (!(enteredQty > 0)) { showEntryError(lang, lang === 'bn' ? 'পণ্যের পরিমাণ ০-এর বেশি দিন।' : 'Enter a quantity greater than zero.'); return false; }
     // Cart identity is product + sale type: same product + same type merges by
     // adding quantities, same product + different type stays a separate line.
     const qs = cartRef.current;
@@ -429,7 +430,7 @@ export function QuickSale({ done }: { done?: () => void }) {
     const sum = (i === -1 ? 0 : qs[i].enteredQty) + enteredQty;
     const qtyKg = toKg(p, unit, sum);
     const othersKg = qs.reduce((s, l, j) => (l.productId === p.id && j !== i ? s + l.qtyKg : s), 0);
-    if (!business.allowNegativeStock && othersKg + qtyKg > p.qty) { Alert.alert(t('outOfStock'), `${p.name}: ${n(p.qty)} ${kg}`); return false; }
+    if (!business.allowNegativeStock && othersKg + qtyKg > p.qty) { showEntryError(lang, `${t('outOfStock')}: ${p.name} · ${n(p.qty)} ${kg}`); return false; }
     // Keep the rate captured when the line was first added; only a brand new
     // line takes today's price.
     const line: CartLine = { productId: p.id, unit, enteredQty: sum, qtyKg, rate: i === -1 ? p.price : qs[i].rate };
@@ -448,17 +449,17 @@ export function QuickSale({ done }: { done?: () => void }) {
   }, [cart]);
 
   const confirm = () => {
-    if (!cart.length || total <= 0 || due < 0) return Alert.alert(t('invalid'));
-    if (due > 0 && !party) return Alert.alert(t('needCustomer'));
+    if (!cart.length || total <= 0 || due < 0) return showEntryError(lang, lang === 'bn' ? 'ইনভয়েসে পণ্য যোগ করুন এবং পরিমাণ ও মূল্য যাচাই করুন।' : 'Add an item to the invoice and check its quantity and amount.');
+    if (due > 0 && !party) return showEntryError(lang, t('needCustomer'));
     // Money only moves for the amount actually received, so the method is
     // only asked for then.
-    if (paidAmt > 0 && !accountId) return Alert.alert(t('needAccount'));
+    if (paidAmt > 0 && !accountId) return showEntryError(lang, t('needAccount'));
     // Validate combined KG across all lines of the same product.
     const need: Record<string, number> = {};
     for (const l of cart) need[l.productId] = (need[l.productId] ?? 0) + l.qtyKg;
     for (const pid of Object.keys(need)) {
       const p = products.find(x => x.id === pid)!;
-      if (!business.allowNegativeStock && need[pid] > p.qty) return Alert.alert(t('outOfStock'), p.name);
+      if (!business.allowNegativeStock && need[pid] > p.qty) return showEntryError(lang, `${t('outOfStock')}: ${p.name}`);
     }
     (async () => {
       try {
@@ -468,7 +469,7 @@ export function QuickSale({ done }: { done?: () => void }) {
         setSheetOpen(false);
         setSuccess({ invoiceNo: r.invoiceNo ?? '', total: r.total, id: r.id });
       } catch (e) {
-        Alert.alert(e instanceof Error ? e.message : t('invalid'));
+        showEntryError(lang, e instanceof Error ? e.message : t('invalid'));
       }
     })();
   };
@@ -634,6 +635,7 @@ function TxnHistory({ kind, onNew, focus, onFocusDone }: {
   kind: 'sale' | 'purchase'; onNew: () => void; focus?: string | null; onFocusDone?: () => void;
 }) {
   const { t, sales, purchases, customers, vendors, business, lang } = useApp();
+  const tx = (bn: string, en: string) => lang === 'bn' ? bn : en;
   const m = useMoney(); const fd = useDateStr();
   const { isDesktop } = useBreakpoint();
   const isSale = kind === 'sale';
@@ -740,40 +742,41 @@ function TxnHistory({ kind, onNew, focus, onFocusDone }: {
     </TouchableOpacity>
   );
   const sums = rows.reduce((s, r) => ({ total: s.total + r.total, paid: s.paid + r.paid, due: s.due + r.due }), { total: 0, paid: 0, due: 0 });
-  const dateRangeLabel = `${fromFilter || 'Beginning'} – ${toFilter || 'Today'}`;
+  const dateRangeLabel = `${fromFilter || tx('শুরু থেকে', 'Beginning')} – ${toFilter || tx('আজ পর্যন্ত', 'Today')}`;
   const exportExcel = () => {
     const cell = (value: unknown) => `"${String(value ?? '').replace(/"/g, '""')}"`;
     const csv = [
-      ['Date', 'Memo / Invoice', isSale ? 'Customer' : 'Supplier', isSale ? 'Customer code' : 'Supplier code', 'Products', 'Total', 'Paid', 'Due', 'Status'].map(cell).join(','),
+      [tx('তারিখ', 'Date'), tx('মেমো / ইনভয়েস', 'Memo / Invoice'), isSale ? t('customer') : t('vendor'), isSale ? tx('কাস্টমার কোড', 'Customer code') : tx('সরবরাহকারী কোড', 'Supplier code'), tx('পণ্যসমূহ', 'Products'), t('total'), t('paid'), t('due'), t('status')].map(cell).join(','),
       ...rows.map(r => [r.date, r.no, r.partyName, r.partyCode, [...new Set(r.productNames)].join('; '), r.total, r.paid, r.due, statusLabel(t, r)].map(cell).join(',')),
-      ['', '', '', '', 'Filtered totals', sums.total, sums.paid, sums.due, ''].map(cell).join(','),
+      ['', '', '', '', tx('ফিল্টারকৃত মোট', 'Filtered totals'), sums.total, sums.paid, sums.due, ''].map(cell).join(','),
     ].join('\r\n');
     const filename = `${isSale ? 'sales' : 'purchases'}_${fromFilter || 'all'}_${toFilter || todayDate}.csv`;
-    if (!downloadCSV(filename, '\uFEFF' + csv)) Alert.alert(isSale ? 'Sales export' : 'Purchase export', 'Could not create the Excel compatible CSV file.');
+    if (!downloadCSV(filename, '\uFEFF' + csv)) Alert.alert(isSale ? tx('বিক্রয় প্রতিবেদন', 'Sales report') : tx('ক্রয় প্রতিবেদন', 'Purchase report'), tx('এক্সেল উপযোগী CSV ফাইল তৈরি করা যায়নি।', 'Could not create the Excel compatible CSV file.'));
   };
   const exportPdf = () => {
     const lines: ReportRow[] = rows.map(r => ({
       label: r.no,
-      sub: [r.date, r.partyName, r.partyCode ? `Code ${r.partyCode}` : '', [...new Set(r.productNames)].join(', ')].filter(Boolean).join(' · '),
-      right: `${m(r.total)} · Paid ${m(r.paid)} · Due ${m(r.due)} · ${statusLabel(t, r)}`,
+      sub: [fd(r.date), r.partyName, r.partyCode ? `${tx('কোড', 'Code')} ${r.partyCode}` : '', [...new Set(r.productNames)].join(', ')].filter(Boolean).join(' · '),
+      right: `${m(r.total)} · ${t('paid')} ${m(r.paid)} · ${t('due')} ${m(r.due)} · ${statusLabel(t, r)}`,
       neg: r.due > 0,
     }));
     const doc: ReportDoc = {
+      language: lang,
       shop: business.name,
-      title: isSale ? 'Sales report' : 'Purchase report',
+      title: isSale ? tx('বিক্রয় প্রতিবেদন', 'Sales report') : tx('ক্রয় প্রতিবেদন', 'Purchase report'),
       period: dateRangeLabel,
       meta: [
-        { label: 'Product', value: productQuery || 'All' },
-        { label: 'Memo / Invoice', value: memoQuery || 'All' },
-        { label: isSale ? 'Customer' : 'Supplier', value: partyNameQuery || 'All' },
-        { label: isSale ? 'Customer code' : 'Supplier code', value: partyCodeQuery || 'All' },
+        { label: tx('পণ্য', 'Product'), value: productQuery || tx('সব', 'All') },
+        { label: tx('মেমো / ইনভয়েস', 'Memo / Invoice'), value: memoQuery || tx('সব', 'All') },
+        { label: isSale ? t('customer') : t('vendor'), value: partyNameQuery || tx('সব', 'All') },
+        { label: isSale ? tx('কাস্টমার কোড', 'Customer code') : tx('সরবরাহকারী কোড', 'Supplier code'), value: partyCodeQuery || tx('সব', 'All') },
       ],
-      sections: [{ title: 'Filtered transactions', rows: lines }],
-      total: { label: 'Total / Paid / Due', value: `${m(sums.total)} / ${m(sums.paid)} / ${m(sums.due)}` },
+      sections: [{ title: tx('ফিল্টার করা লেনদেন', 'Filtered transactions'), rows: lines }],
+      total: { label: tx('মোট / পরিশোধিত / বাকি', 'Total / Paid / Due'), value: `${m(sums.total)} / ${m(sums.paid)} / ${m(sums.due)}` },
       printedAt: printedAtStamp(lang),
       printLabel: lang === 'bn' ? 'প্রিন্ট / PDF হিসেবে সংরক্ষণ' : 'Print / Save as PDF',
     };
-    if (!printReport(doc)) Alert.alert(isSale ? 'Sales report' : 'Purchase report', 'PDF export is available in the web app.');
+    if (!printReport(doc)) Alert.alert(isSale ? tx('বিক্রয় প্রতিবেদন', 'Sales report') : tx('ক্রয় প্রতিবেদন', 'Purchase report'), tx('PDF প্রতিবেদন ওয়েব অ্যাপে পাওয়া যাবে।', 'PDF export is available in the web app.'));
   };
   const filterInput = (label: string, value: string, onChangeText: (value: string) => void, placeholder: string, width: number) => (
     <View style={{ flex: 1, minWidth: width }}>
@@ -899,22 +902,26 @@ function NewPurchase({ onDone }: { onDone: () => void }) {
   const pick = (id: string) => { setPid(id); setRate(''); setUnit('kg'); setQv(''); };
   const entered = parseNum(qv);
   const addItem = () => {
-    if (!sel || !(entered > 0) || !(num(rate) > 0)) return Alert.alert(t('invalid'));
+    if (!sel) return showEntryError(lang, lang === 'bn' ? 'তালিকা থেকে একটি পণ্য নির্বাচন করুন।' : 'Select a product from the list.');
+    if (!(entered > 0)) return showEntryError(lang, lang === 'bn' ? 'পণ্যের পরিমাণ ০-এর বেশি দিন।' : 'Enter a quantity greater than zero.');
+    if (!(num(rate) > 0)) return showEntryError(lang, lang === 'bn' ? 'পণ্যের ক্রয়দর ০-এর বেশি দিন।' : 'Enter a purchase rate greater than zero.');
     const qtyKg = toKg(sel, unit, entered);
     const line: CartLine = { productId: sel.id, unit, enteredQty: entered, qtyKg, rate: num(rate) };
     setCart(cs => cs.some(l => l.productId === sel.id) ? cs.map(l => (l.productId === sel.id ? line : l)) : [...cs, line]);
     setQv(''); setPid(undefined); setUnit('kg');
   };
   const confirm = () => {
-    if (!cart.length || due < 0 || !party) return Alert.alert(t('invalid'));
-    if (paidAmt > 0 && !accountId) return Alert.alert(t('needAccount'));
+    if (!cart.length) return showEntryError(lang, lang === 'bn' ? 'ইনভয়েসে অন্তত একটি পণ্য যোগ করুন।' : 'Add at least one product to the invoice.');
+    if (due < 0) return showEntryError(lang, lang === 'bn' ? 'পরিশোধের পরিমাণ মোট ইনভয়েসের চেয়ে বেশি হতে পারে না।' : 'The payment cannot be greater than the invoice total.');
+    if (!party) return showEntryError(lang, lang === 'bn' ? 'ইনভয়েস তৈরির আগে একজন সরবরাহকারী নির্বাচন করুন।' : 'Select a supplier before creating the invoice.');
+    if (paidAmt > 0 && !accountId) return showEntryError(lang, t('needAccount'));
     (async () => {
       try {
         const r = await purchase({ vendorId: party!, lines: cart.map(l => ({ productId: l.productId, unit: l.unit, enteredQty: l.enteredQty, rate: l.rate })), paid: paidAmt, accountId, next: next || undefined });
         setCart([]); setPaid(''); setParty(undefined); setNext(''); setAccountId(undefined);
         setSuccess({ invoiceNo: r.invoiceNo ?? '', total: r.total, id: r.id });
       } catch (e) {
-        Alert.alert(e instanceof Error ? e.message : t('invalid'));
+        showEntryError(lang, e instanceof Error ? e.message : t('invalid'));
       }
     })();
   };
@@ -950,7 +957,7 @@ function NewPurchase({ onDone }: { onDone: () => void }) {
             {sel && unit !== 'kg' ? <Muted>{n(kgPerUnit(sel, unit))} {kg} / {label(unit)}</Muted> : null}
             <QtyInput unit={unit} value={qv} onChange={setQv} />
             {sel && entered > 0 ? <Muted>{t('totalWeight')}: {n(toKg(sel, unit, entered))} {kg}</Muted> : null}
-            <Field label={t('costPerKg')} value={rate} onChange={setRate} num />
+            <Field label={t('costPerKg')} value={rate} onChange={setRate} num required />
             <Btn kind="ghost" icon={icons.add} label={t('add')} onPress={addItem} />
           </Card>
         }
@@ -1008,19 +1015,19 @@ export function Products() {
       : { code: '', name: '', description: '', cost: '', price: '', opening: '', sb: '25', mb: '40', lb: '50' });
   };
   const save = () => {
-    if (!v.name.trim()) return Alert.alert(t('invalid'));
-    if (!(num(v.sb) > 0) || !(num(v.mb) > 0) || !(num(v.lb) > 0)) return Alert.alert(t('invalidBag'));
+    if (!v.name.trim()) return showEntryError(lang, lang === 'bn' ? 'পণ্যের নাম লিখুন।' : 'Enter a product name.');
+    if (!(num(v.sb) > 0) || !(num(v.mb) > 0) || !(num(v.lb) > 0)) return showEntryError(lang, t('invalidBag'));
     // New products may be created without a default selling rate. Existing
     // products can still set or clear their sale price here.
     const price = v.price.trim() ? parseNum(v.price) : 0;
-    if (v.price.trim() && (!Number.isFinite(price) || !(price > 0))) return Alert.alert(t('invalidSalePrice'));
+    if (v.price.trim() && (!Number.isFinite(price) || !(price > 0))) return showEntryError(lang, t('invalidSalePrice'));
     const o = num(v.opening), id = f!.id || 'p' + Date.now();
     (async () => {
       try {
         await saveProduct({ id, code: v.code.trim(), name: v.name, description: v.description.trim(), cost: num(v.cost), price: Math.round(price * 100) / 100, opening: o, qty: f!.id ? f!.qty + (o - f!.opening) : o, uom: f!.uom || 'kg', smallBagKg: num(v.sb), mediumBagKg: num(v.mb), largeBagKg: num(v.lb) });
         setF(null);
       } catch (e) {
-        Alert.alert(e instanceof Error ? e.message : t('invalid'));
+        showEntryError(lang, e instanceof Error ? e.message : t('invalid'));
       }
     })();
   };
@@ -1039,15 +1046,15 @@ export function Products() {
   };
   if (f) return <Screen><Card>
     <FormGrid>
-      <Field label={t('code')} value={v.code} onChange={x => setV({ ...v, code: x })} /><Field label={t('productName')} value={v.name} onChange={x => setV({ ...v, name: x })} />
+      <Field label={t('code')} value={v.code} onChange={x => setV({ ...v, code: x })} /><Field label={t('productName')} value={v.name} onChange={x => setV({ ...v, name: x })} required />
       <Field label={t('descNote')} value={v.description} onChange={x => setV({ ...v, description: x })} /><Field label={t('costPerKg')} value={v.cost} onChange={x => setV({ ...v, cost: x })} num />
       {f.id ? <Field label={t('pricePerKg')} value={v.price} onChange={x => setV({ ...v, price: x })} num /> : null}<Field label={`${t('openingStock')} (${kg})`} value={v.opening} onChange={x => setV({ ...v, opening: x })} num />
     </FormGrid>
     <Muted>{t('bagWeight')}</Muted>
     <FormGrid>
-      <Field label={`${t('smallBag')} (${kg})`} value={v.sb} onChange={x => setV({ ...v, sb: x })} num />
-      <Field label={`${t('mediumBag')} (${kg})`} value={v.mb} onChange={x => setV({ ...v, mb: x })} num />
-      <Field label={`${t('largeBag')} (${kg})`} value={v.lb} onChange={x => setV({ ...v, lb: x })} num />
+      <Field label={`${t('smallBag')} (${kg})`} value={v.sb} onChange={x => setV({ ...v, sb: x })} num required />
+      <Field label={`${t('mediumBag')} (${kg})`} value={v.mb} onChange={x => setV({ ...v, mb: x })} num required />
+      <Field label={`${t('largeBag')} (${kg})`} value={v.lb} onChange={x => setV({ ...v, lb: x })} num required />
     </FormGrid>
     <Btn icon={icons.save} label={t('save')} testID="save-product" onPress={save} /><Btn kind="ghost" icon={icons.cancel} label={t('cancel')} onPress={() => setF(null)} /></Card></Screen>;
   return <Screen>
@@ -1248,7 +1255,7 @@ export function Parties({ kind, focus, onFocusDone, onReturn, onEditTransaction 
       } else if (e instanceof ApiError && e.code?.endsWith('HAS_TRANSACTIONS')) {
         setBlocked({ title: isC ? 'delCustTitle' : 'delVendTitle', body: t(isC ? 'delCustBody' : 'delVendBody') });
       } else {
-        Alert.alert(e instanceof Error ? e.message : t('invalid'));
+        showEntryError(lang, e instanceof Error ? e.message : t('invalid'));
       }
     }
   };
@@ -1308,20 +1315,21 @@ export function Parties({ kind, focus, onFocusDone, onReturn, onEditTransaction 
   if (f) return <Screen scrollRef={scrollRef} onScrollY={onScrollY}><BackLink label={sel ? t('back') : backLabel} onPress={back} />
     <Card>
     <FormGrid>
-      <Field label={t('code')} accessibilityLabel="Party code" value={v.code} onChange={x => setV({ ...v, code: x })} />
-      <Field label={t('name')} accessibilityLabel="Party name" value={v.name} onChange={x => setV({ ...v, name: x })} />
+      <Field label={t('code')} accessibilityLabel="Party code" value={v.code} onChange={x => setV({ ...v, code: x })} required />
+      <Field label={t('name')} accessibilityLabel="Party name" value={v.name} onChange={x => setV({ ...v, name: x })} required />
       <Field label={t('mobile')} value={localeDigits(v.mobile, lang)} onChange={x => setV({ ...v, mobile: x })} num />
       <Field label={t('address')} value={v.address} onChange={x => setV({ ...v, address: x })} />
       <Field label={isC ? t('opening') : t('currentPayable')} value={v.opening} onChange={x => setV({ ...v, opening: x })} num />
     </FormGrid>
     <Btn icon={icons.save} label={t('save')} testID="save-party" onPress={() => {
-      if (!v.name.trim()) return Alert.alert(t('invalid'));
+      if (!v.code.trim()) return showEntryError(lang, lang === 'bn' ? (isC ? 'কাস্টমার কোড লিখুন।' : 'সরবরাহকারী কোড লিখুন।') : `Enter the ${isC ? 'customer' : 'supplier'} code.`);
+      if (!v.name.trim()) return showEntryError(lang, lang === 'bn' ? (isC ? 'কাস্টমারের নাম লিখুন।' : 'সাপ্লায়ারের নাম লিখুন।') : `Enter the ${isC ? 'customer' : 'supplier'} name.`);
       (async () => {
         try {
           await saveParty(kind, { ...f, id: f.id || kind + Date.now(), code: v.code.trim(), name: v.name, mobile: toEnDigits(v.mobile), address: v.address, opening: num(v.opening) });
           setF(null); setSel(null);
         } catch (e) {
-          Alert.alert(e instanceof Error ? e.message : t('invalid'));
+          showEntryError(lang, e instanceof Error ? e.message : t('invalid'));
         }
       })();
     }} />
@@ -1584,7 +1592,7 @@ export function Parties({ kind, focus, onFocusDone, onReturn, onEditTransaction 
 
 // Shared date-locked, keyboard-first Cash/Bank collection and supplier payment.
 export function Money({ kind, done }: { kind: 'c' | 'v'; done: () => void }) {
-  const { t, lang, moneyBalances, bal, customers, vendors, cTx, vTx, moneyAccounts, partyPaymentSplit } = useApp();
+  const { t, lang, business, moneyBalances, bal, customers, vendors, cTx, vTx, moneyAccounts, partyPaymentSplit } = useApp();
   const isC = kind === 'c';
   const m = useMoney(), fd = useDateStr();
   const parties = isC ? customers : vendors;
@@ -1592,6 +1600,11 @@ export function Money({ kind, done }: { kind: 'c' | 'v'; done: () => void }) {
   const cashAccounts = moneyAccounts.filter(a => a.active && a.type === 'cash');
   const bankAccounts = moneyAccounts.filter(a => a.active && a.type === 'bank');
   const [date, setDate] = useState(dhakaToday());
+  const [reportFrom, setReportFrom] = useState('');
+  const [reportTo, setReportTo] = useState('');
+  const [reportPartyName, setReportPartyName] = useState('');
+  const [reportPartyCode, setReportPartyCode] = useState('');
+  const [reportFilterOpen, setReportFilterOpen] = useState(false);
   const [dateLocked, setDateLocked] = useState(false);
   const [codeQuery, setCodeQuery] = useState('');
   const [partyId, setPartyId] = useState<string>();
@@ -1604,9 +1617,40 @@ export function Money({ kind, done }: { kind: 'c' | 'v'; done: () => void }) {
   const [busy, setBusy] = useState(false);
   const codeRef = useRef<TextInput>(null), cashRef = useRef<TextInput>(null), bankRef = useRef<TextInput>(null), noteRef = useRef<TextInput>(null);
   const party = parties.find(p => p.id === partyId);
-  const recentPayments = (isC ? cTx : vTx).filter(x => x.kind === 'payment')
-    .sort((a, b) => b.date.localeCompare(a.date) || String(b.createdAt ?? '').localeCompare(String(a.createdAt ?? '')))
-    .slice(0, 12);
+  const reportPayments = (isC ? cTx : vTx).filter(x => x.kind === 'payment'
+    && (!reportFrom || x.date >= reportFrom)
+    && (!reportTo || x.date <= reportTo)
+    && (!reportPartyName.trim() || (parties.find(p => p.id === x.partyId)?.name ?? '').toLocaleLowerCase().includes(reportPartyName.trim().toLocaleLowerCase()))
+    && (!reportPartyCode.trim() || (parties.find(p => p.id === x.partyId)?.code ?? '').toLocaleLowerCase().includes(reportPartyCode.trim().toLocaleLowerCase())))
+    .sort((a, b) => b.date.localeCompare(a.date) || String(b.createdAt ?? '').localeCompare(String(a.createdAt ?? '')));
+  const reportRows: ReportRow[] = reportPayments.map(tx => {
+    const txParty = parties.find(p => p.id === tx.partyId);
+    return {
+      label: tx.transactionNo ? `${tx.transactionNo} · ${txParty?.name ?? ''}` : (txParty?.name ?? ''),
+      sub: [fd(tx.date), txParty?.code ? `${lang === 'bn' ? 'কোড' : 'Code'} ${txParty.code}` : '', tx.account ?? '', tx.note ?? ''].filter(Boolean).join(' · '),
+      right: m(tx.amount),
+    };
+  });
+  const paymentReportDoc: ReportDoc = {
+    language: lang,
+    shop: business.name,
+    title: lang === 'bn' ? (isC ? 'কালেকশন রিপোর্ট' : 'পেমেন্ট রিপোর্ট') : (isC ? 'Collection report' : 'Payment report'),
+    period: reportFrom || reportTo ? `${reportFrom ? fd(reportFrom) : (lang === 'bn' ? 'শুরু থেকে' : 'Beginning')} – ${reportTo ? fd(reportTo) : (lang === 'bn' ? 'আজ পর্যন্ত' : 'Today')}` : (lang === 'bn' ? 'সব তারিখ' : 'All dates'),
+    meta: [
+      { label: lang === 'bn' ? (isC ? 'কাস্টমারের নাম' : 'সাপ্লায়ারের নাম') : (isC ? 'Customer name' : 'Supplier name'), value: reportPartyName || (lang === 'bn' ? 'সব' : 'All') },
+      { label: lang === 'bn' ? (isC ? 'কাস্টমার কোড' : 'সাপ্লায়ার কোড') : (isC ? 'Customer code' : 'Supplier code'), value: reportPartyCode || (lang === 'bn' ? 'সব' : 'All') },
+    ],
+    sections: [{ title: lang === 'bn' ? 'লেনদেন' : 'Transactions', rows: reportRows }],
+    total: { label: lang === 'bn' ? 'মোট' : 'Total', value: m(reportPayments.reduce((sum, tx) => sum + tx.amount, 0)) },
+    printedAt: printedAtStamp(lang),
+    printLabel: lang === 'bn' ? 'প্রিন্ট / PDF সংরক্ষণ' : 'Print / Save PDF',
+  };
+  const exportPaymentReportPDF = () => {
+    if (!printReport(paymentReportDoc)) Alert.alert(lang === 'bn' ? 'রিপোর্ট খোলা যায়নি' : 'Could not open report');
+  };
+  const exportPaymentReportExcel = () => {
+    downloadReportCSV(paymentReportDoc, `${isC ? 'collection' : 'payment'}_report_${today()}.csv`);
+  };
   const matches = codeQuery.trim() ? parties.filter(p => {
     const q = codeQuery.trim().toLocaleLowerCase();
     return codeOf(p).toLocaleLowerCase().includes(q) || p.name.toLocaleLowerCase().includes(q);
@@ -1621,7 +1665,7 @@ export function Money({ kind, done }: { kind: 'c' | 'v'; done: () => void }) {
     const exact = parties.find(p => codeOf(p).toLocaleLowerCase() === q || p.name.toLocaleLowerCase() === q);
     if (exact) { setParty(exact); return; }
     if (matches.length === 1) { setParty(matches[0]); return; }
-    setMessage(lang === 'bn' ? 'কোড বা নাম থেকে একজনকে নির্বাচন করুন।' : 'Select one customer or supplier by code or name.');
+    showEntryError(lang, lang === 'bn' ? 'কোড বা নাম থেকে একজনকে নির্বাচন করুন।' : 'Select one customer or supplier by code or name.');
   };
   useEffect(() => {
     if (!cashAccounts.some(a => a.id === cashAccountId)) setCashAccountId(cashAccounts[0]?.id ?? '');
@@ -1630,10 +1674,10 @@ export function Money({ kind, done }: { kind: 'c' | 'v'; done: () => void }) {
   const submit = async () => {
     if (busy) return;
     const cash = parseNum(cashAmount), bank = parseNum(bankAmount);
-    if (!party) { setMessage(lang === 'bn' ? 'কাস্টমার বা সাপ্লায়ার নির্বাচন করুন।' : `Select a ${isC ? 'customer' : 'supplier'}.`); codeRef.current?.focus(); return; }
-    if (!(cash > 0 || bank > 0)) { setMessage(lang === 'bn' ? 'ক্যাশ বা ব্যাংকের পরিমাণ লিখুন।' : 'Enter a cash amount, a bank amount, or both.'); cashRef.current?.focus(); return; }
-    if (cash > 0 && !cashAccountId) { setMessage(lang === 'bn' ? 'সক্রিয় ক্যাশ অ্যাকাউন্ট নেই।' : 'Choose an active cash account.'); return; }
-    if (bank > 0 && !bankAccountId) { setMessage(lang === 'bn' ? 'সক্রিয় ব্যাংক অ্যাকাউন্ট নেই।' : 'Choose an active bank account.'); return; }
+    if (!party) { showEntryError(lang, lang === 'bn' ? 'কাস্টমার বা সাপ্লায়ার নির্বাচন করুন।' : `Select a ${isC ? 'customer' : 'supplier'}.`); codeRef.current?.focus(); return; }
+    if (!(cash > 0 || bank > 0)) { showEntryError(lang, lang === 'bn' ? 'ক্যাশ বা ব্যাংকের পরিমাণ লিখুন।' : 'Enter a cash amount, a bank amount, or both.'); cashRef.current?.focus(); return; }
+    if (cash > 0 && !cashAccountId) { showEntryError(lang, lang === 'bn' ? 'সক্রিয় ক্যাশ অ্যাকাউন্ট নেই। অ্যাকাউন্ট যোগ বা সক্রিয় করুন।' : 'No active cash account. Add or activate a cash account.'); return; }
+    if (bank > 0 && !bankAccountId) { showEntryError(lang, lang === 'bn' ? 'সক্রিয় ব্যাংক অ্যাকাউন্ট নেই। অ্যাকাউন্ট যোগ বা সক্রিয় করুন।' : 'No active bank account. Add or activate a bank account.'); return; }
     const payments = [
       ...(cash > 0 ? [{ accountId: cashAccountId, amount: cash }] : []),
       ...(bank > 0 ? [{ accountId: bankAccountId, amount: bank }] : []),
@@ -1658,32 +1702,66 @@ export function Money({ kind, done }: { kind: 'c' | 'v'; done: () => void }) {
   };
   const fieldStyle = { borderWidth: 1, borderColor: color.line, borderRadius: 12, minHeight: 48, paddingHorizontal: 12, backgroundColor: '#FFFFFF', color: color.text, fontSize: 17 } as const;
   return <Screen>
-    <TouchableOpacity
-      accessibilityRole="button"
-      accessibilityLabel={lang === 'bn' ? 'Back to Accounts' : 'Back to Accounts'}
-      onPress={done}
-      style={{ alignSelf: 'flex-start', flexDirection: 'row', alignItems: 'center', gap: 8, minHeight: 44, paddingHorizontal: 14, marginBottom: 10, borderRadius: 10, backgroundColor: '#FFFFFF', borderWidth: 1, borderColor: '#CBD5E1' }}
-    >
-      <AppIcon name={icons.back} size={18} iconColor="#1D4ED8" />
-      <Text style={{ color: '#1D4ED8', fontSize: 15, fontWeight: '700' }}>{lang === 'bn' ? 'Back to Accounts' : 'Back to Accounts'}</Text>
-    </TouchableOpacity>
+    <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 10, marginBottom: 10 }}>
+      <TouchableOpacity
+        accessibilityRole="button"
+        accessibilityLabel={lang === 'bn' ? 'হিসাবে ফিরে যান' : 'Back to Accounts'}
+        onPress={done}
+        style={{ flexDirection: 'row', alignItems: 'center', gap: 8, minHeight: 44, paddingHorizontal: 14, borderRadius: 10, backgroundColor: '#FFFFFF', borderWidth: 1, borderColor: '#CBD5E1' }}
+      >
+        <AppIcon name={icons.back} size={18} iconColor="#1D4ED8" />
+        <Text style={{ color: '#1D4ED8', fontSize: 15, fontWeight: '700' }}>{lang === 'bn' ? 'হিসাবে ফিরুন' : 'Back to Accounts'}</Text>
+      </TouchableOpacity>
+      <Btn kind="ghost" icon={icons.report} label={lang === 'bn' ? 'রিপোর্ট ফিল্টার' : 'Report filters'} onPress={() => setReportFilterOpen(true)} />
+    </View>
+    <Modal visible={reportFilterOpen} transparent animationType="fade" onRequestClose={() => setReportFilterOpen(false)}>
+      <View style={{ flex: 1, backgroundColor: 'rgba(15,23,42,0.48)', justifyContent: 'center', padding: 16 }}>
+        <View style={{ width: '100%', maxWidth: 560, alignSelf: 'center', maxHeight: '90%', backgroundColor: '#FFFFFF', borderRadius: 18, padding: 18 }}>
+          <ScrollView keyboardShouldPersistTaps="handled">
+            <SectionHead icon={isC ? icons.collect : icons.pay}>{lang === 'bn' ? (isC ? 'কালেকশন রিপোর্ট ফিল্টার' : 'পেমেন্ট রিপোর্ট ফিল্টার') : (isC ? 'Collection report filters' : 'Payment report filters')}</SectionHead>
+            <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 10 }}>
+              <View style={{ flex: 1, minWidth: 190 }}><DateField label={lang === 'bn' ? 'শুরুর তারিখ' : 'From date'} value={reportFrom} onChange={setReportFrom} clearable /></View>
+              <View style={{ flex: 1, minWidth: 190 }}><DateField label={lang === 'bn' ? 'শেষ তারিখ' : 'To date'} value={reportTo} onChange={setReportTo} clearable minDate={reportFrom || undefined} /></View>
+            </View>
+            <View style={{ marginTop: 12 }}>
+              <Muted>{lang === 'bn' ? (isC ? 'কাস্টমারের নাম' : 'সাপ্লায়ারের নাম') : (isC ? 'Customer name' : 'Supplier name')}</Muted>
+              <TextInput value={reportPartyName} onChangeText={setReportPartyName} placeholder={lang === 'bn' ? 'নাম দিয়ে ফিল্টার করুন' : 'Filter by name'} style={fieldStyle} />
+            </View>
+            <View style={{ marginTop: 10 }}>
+              <Muted>{lang === 'bn' ? (isC ? 'কাস্টমার কোড' : 'সাপ্লায়ার কোড') : (isC ? 'Customer code' : 'Supplier code')}</Muted>
+              <TextInput value={reportPartyCode} onChangeText={setReportPartyCode} placeholder={lang === 'bn' ? 'কোড দিয়ে ফিল্টার করুন' : 'Filter by code'} style={fieldStyle} />
+            </View>
+            <Muted>{lang === 'bn' ? `${reportPayments.length}টি লেনদেন মিলে গেছে` : `${reportPayments.length} matching transactions`}</Muted>
+            <View style={{ flexDirection: 'row', gap: 8, marginTop: 14 }}>
+              <View style={{ flex: 1 }}><Btn kind="ghost" icon={icons.print} label={lang === 'bn' ? 'PDF ডাউনলোড' : 'Download PDF'} onPress={() => { setReportFilterOpen(false); exportPaymentReportPDF(); }} /></View>
+              <View style={{ flex: 1 }}><Btn kind="ghost" icon={icons.excel} label={lang === 'bn' ? 'Excel ডাউনলোড' : 'Download Excel'} onPress={() => { setReportFilterOpen(false); exportPaymentReportExcel(); }} /></View>
+            </View>
+            <View style={{ flexDirection: 'row', gap: 8, marginTop: 8 }}>
+              <View style={{ flex: 1 }}><Btn kind="ghost" label={lang === 'bn' ? 'ফিল্টার মুছুন' : 'Clear filters'} onPress={() => { setReportFrom(''); setReportTo(''); setReportPartyName(''); setReportPartyCode(''); }} /></View>
+              <View style={{ flex: 1 }}><Btn label={lang === 'bn' ? 'বন্ধ করুন' : 'Close'} onPress={() => setReportFilterOpen(false)} /></View>
+            </View>
+          </ScrollView>
+        </View>
+      </View>
+    </Modal>
     <MoneyBalanceCard balances={moneyBalances.filter(b => b.method === 'cash' || b.method === 'bank')} />
     <Card>
       <SectionHead icon={isC ? icons.collect : icons.pay}>{t(isC ? 'receivePayment' : 'payPayment')}</SectionHead>
       <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10 }}>
-        <View style={{ flex: 1 }}>{!dateLocked ? <DateField label={t('date')} value={date} onChange={setDate} allowPast /> : <><Muted>{t('date')}</Muted><Text style={{ minHeight: 48, paddingTop: 12, color: color.text, fontSize: 16 }}>{fd(date)}</Text></>}</View>
+        <View style={{ flex: 1 }}>{!dateLocked ? <DateField label={t('date')} value={date} onChange={setDate} allowPast required /> : <><RequiredLabel text={t('date')} required /><Text style={{ minHeight: 48, paddingTop: 12, color: color.text, fontSize: 16 }}>{fd(date)}</Text></>}</View>
         <TouchableOpacity onPress={() => { if (dateLocked && (party || codeQuery || cashAmount || bankAmount || note)) { setMessage(lang === 'bn' ? 'চলমান এন্ট্রি বাতিল করে তারিখ আনলক করুন।' : 'Clear the current entry before unlocking the date.'); return; } setDateLocked(v => !v); setMessage(''); if (!dateLocked) requestAnimationFrame(() => codeRef.current?.focus()); }} accessibilityRole="button" style={{ marginTop: 18, minHeight: 44, paddingHorizontal: 14, borderRadius: 10, justifyContent: 'center', backgroundColor: dateLocked ? '#DCFCE7' : '#EFF6FF', borderWidth: 1, borderColor: dateLocked ? '#86EFAC' : '#BFDBFE' }}>
           <Text style={{ color: dateLocked ? '#166534' : '#1D4ED8', fontWeight: '800' }}>{dateLocked ? (lang === 'bn' ? 'তারিখ লকড · আনলক' : 'Date locked · Unlock') : (lang === 'bn' ? 'তারিখ লক করুন' : 'Lock date')}</Text>
         </TouchableOpacity>
       </View>
       <View style={{ marginTop: 8 }}>
-        <Muted>{lang === 'bn' ? (isC ? 'কাস্টমার কোড / নাম' : 'সাপ্লায়ার কোড / নাম') : `${isC ? 'Customer' : 'Supplier'} code / name`}</Muted>
+        <RequiredLabel text={lang === 'bn' ? (isC ? 'কাস্টমার কোড / নাম' : 'সাপ্লায়ার কোড / নাম') : `${isC ? 'Customer' : 'Supplier'} code / name`} required />
         <TextInput ref={codeRef} value={codeQuery} onChangeText={v => { setCodeQuery(v); setPartyId(undefined); setMessage(''); }} onSubmitEditing={selectByEnter} returnKeyType="next" editable={!busy} placeholder={lang === 'bn' ? 'কোড লিখে Enter চাপুন' : 'Enter code, then press Enter'} style={fieldStyle} />
         {party ? <Text style={{ color: '#166534', fontWeight: '700', marginTop: 6 }}>{party.name}{party.code ? ` · ${codeOf(party)}` : ''}</Text> : null}
         {!party && matches.length > 0 ? <View style={{ marginTop: 4, borderWidth: 1, borderColor: color.line, borderRadius: 10, overflow: 'hidden' }}>{matches.map(p => <TouchableOpacity key={p.id} onPress={() => setParty(p)} style={{ minHeight: 46, paddingHorizontal: 12, justifyContent: 'center', borderBottomWidth: 1, borderBottomColor: color.line, backgroundColor: '#FFFFFF' }}><Text style={{ color: color.text, fontWeight: '700' }}>{codeOf(p) ? `${codeOf(p)} · ` : ''}{p.name}</Text></TouchableOpacity>)}</View> : null}
       </View>
       {party ? <View style={{ backgroundColor: '#F8FAFC', borderRadius: 12, padding: 12, marginTop: 10 }}><Text style={{ color: color.muted }}>{isC ? t('currentDue') : t('currentPayable')}</Text><Text style={{ color: bal(kind, party.id).balance < 0 ? '#047857' : color.red, fontSize: 20, fontWeight: '800' }}>{m(Math.abs(bal(kind, party.id).balance))}</Text></View> : null}
       <View style={{ marginTop: 12 }}>
+        <RequiredLabel text={lang === 'bn' ? 'ক্যাশ বা ব্যাংকের পরিমাণ' : 'Cash or bank amount'} required />
         <Muted>{lang === 'bn' ? 'ক্যাশের পরিমাণ' : 'Cash amount'}</Muted>
         <TextInput ref={cashRef} value={cashAmount} onChangeText={setCashAmount} keyboardType="decimal-pad" returnKeyType="next" onSubmitEditing={() => bankRef.current?.focus()} editable={!!party && !busy} placeholder="0" style={fieldStyle} />
         {accountPicker('cash', cashAccountId, setCashAccountId)}
@@ -1703,7 +1781,8 @@ export function Money({ kind, done }: { kind: 'c' | 'v'; done: () => void }) {
     </Card>
     <Card>
       <SectionHead icon={isC ? icons.collect : icons.pay}>{lang === 'bn' ? (isC ? 'সাম্প্রতিক কালেকশন' : 'সাম্প্রতিক পেমেন্ট') : (isC ? 'Recent collections' : 'Recent payments')}</SectionHead>
-      {recentPayments.length ? recentPayments.map(tx => {
+      <Muted>{lang === 'bn' ? `${reportPayments.length}টি ফিল্টার মিলে গেছে` : `${reportPayments.length} matching transactions`}</Muted>
+      {reportPayments.length ? reportPayments.map(tx => {
         const txParty = parties.find(p => p.id === tx.partyId);
         return <View key={tx.id} style={{ paddingVertical: 10, borderBottomWidth: 1, borderBottomColor: color.line }}>
           <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 12 }}>
@@ -1739,11 +1818,11 @@ function QuickPaymentModal({ kind, partyId, partyName, onClose }: { kind: 'c' | 
   const submit = async () => {
     if (busy) return;
     const a = num(amt);
-    if (!(a > 0)) return Alert.alert(t('invalidAmount'));
-    if (!accountId) return Alert.alert(t('needAccount'));
+    if (!(a > 0)) return showEntryError(lang, t('invalidAmount'));
+    if (!accountId) return showEntryError(lang, t('needAccount'));
     if (!isC) {
       const acc = moneyAccounts.find(x => x.id === accountId);
-      if (acc && acc.balance < a) return Alert.alert(tp(lang, 'notEnoughInAcc', { account: acc.name }));
+      if (acc && acc.balance < a) return showEntryError(lang, tp(lang, 'notEnoughInAcc', { account: acc.name }));
     }
     setBusy(true);
     try {
@@ -1751,7 +1830,7 @@ function QuickPaymentModal({ kind, partyId, partyName, onClose }: { kind: 'c' | 
       Alert.alert(t('done'));
       onClose();
     } catch (e) {
-      Alert.alert(e instanceof Error ? e.message : t('invalid'));
+      showEntryError(lang, e instanceof Error ? e.message : t('invalid'));
       setBusy(false);
     }
   };
@@ -1769,8 +1848,8 @@ function QuickPaymentModal({ kind, partyId, partyName, onClose }: { kind: 'c' | 
       </Card>
       <Card>
         <FormGrid>
-          <Field label={t(isC ? 'receiveAmount' : 'payAmount')} value={amt} onChange={setAmt} num />
-          <DateField label={t('date')} value={date} onChange={setDate} allowPast={false} />
+          <Field label={t(isC ? 'receiveAmount' : 'payAmount')} value={amt} onChange={setAmt} num required />
+          <DateField label={t('date')} value={date} onChange={setDate} allowPast={false} required />
           <Field label={t('note')} value={note} onChange={setNote} />
         </FormGrid>
       </Card>
@@ -1940,13 +2019,13 @@ export function Accounts({ go, focus, onFocusDone }: { go?: Nav; focus?: { kind:
 }
 
 export function FilterModal({ init, onClose, onApply }: { init: AcctFilter; onClose: () => void; onApply: (f: AcctFilter) => void }) {
-  const { t } = useApp();
+  const { t, lang } = useApp();
   const td = today();
   const [from, setFrom] = useState(init.from);
   const [to, setTo] = useState(init.to);
   const invalid = from > to;
   const apply = () => {
-    if (invalid) return Alert.alert(t('invalidRange'));
+    if (invalid) return showEntryError(lang, t('invalidRange'));
     onApply({ from, to });
   };
   const quick = (id: 'today' | 'last7' | 'thisMonth' | 'last3m' | 'thisYear') => {
@@ -2097,9 +2176,9 @@ export function MonthCal({ selected, onPick, minDate, maxDate }: {
  *   forwarded to `onChange` (never saved).
  * - `minDate` / `maxDate` override or narrow the range explicitly.
  */
-export function DateField({ label, value, onChange, clearable, allowPast = true, minDate, maxDate }: {
+export function DateField({ label, value, onChange, clearable, allowPast = true, minDate, maxDate, required = false }: {
   label: string; value: string; onChange: (v: string) => void; clearable?: boolean;
-  allowPast?: boolean; minDate?: string; maxDate?: string;
+  allowPast?: boolean; minDate?: string; maxDate?: string; required?: boolean;
 }) {
   const { t } = useApp();
   const fs = useFs(17, 15);
@@ -2125,7 +2204,7 @@ export function DateField({ label, value, onChange, clearable, allowPast = true,
   };
   return (
     <View style={{ marginBottom: 10 }}>
-      <Muted>{label}</Muted>
+      <RequiredLabel text={label} required={required} />
       <TouchableOpacity onPress={openCal} accessibilityRole="button" style={{ borderWidth: 1, borderColor: color.line, borderRadius: 12, minHeight: 48, paddingHorizontal: 12, backgroundColor: '#fff', flexDirection: 'row', alignItems: 'center', gap: 8 }}>
         <Text style={{ flex: 1, fontSize: fs, color: value ? color.text : color.muted }}>{value || t('chooseDate')}</Text>
         {clearable && value ? (
@@ -2201,15 +2280,15 @@ export function ExpenseModal({ init, onClose, onSave, onTrash }: {
     return () => { live = false; };
   }, [init?.category, init?.customName]);
   const save = () => {
-    if (!cat) return Alert.alert(t('selectType'));
-    if (!(num(amt) > 0)) return Alert.alert(t('invalidAmount'));
-    if (cat === 'other' && !customCategoryName && !name.trim()) return Alert.alert(t('needExpName'));
-    if (!accountId) return Alert.alert(t('needAccount'));
+    if (!cat) return showEntryError(lang, t('selectType'));
+    if (!(num(amt) > 0)) return showEntryError(lang, t('invalidAmount'));
+    if (cat === 'other' && !customCategoryName && !name.trim()) return showEntryError(lang, t('needExpName'));
+    if (!accountId) return showEntryError(lang, t('needAccount'));
     (async () => {
       try {
         await onSave({ id: init?.id, category: cat, customName: cat === 'other' ? (customCategoryName || name.trim()) : undefined, amount: num(amt), accountId, date: date || today(), note: note.trim() || undefined });
       } catch (e) {
-        Alert.alert(e instanceof Error ? e.message : t('invalid'));
+        showEntryError(lang, e instanceof Error ? e.message : t('invalid'));
       }
     })();
   };
@@ -2227,8 +2306,8 @@ export function ExpenseModal({ init, onClose, onSave, onTrash }: {
   return (
     <DetailShell title={init ? (init.category === 'other' && init.customName ? init.customName : t(exKey(init.category))) : t('addExpense')} onClose={onClose}>
       <Card>
-        <DateField label={t('date')} value={date} onChange={setDate} allowPast={false} />
-        <Muted>{t('expenseType')}</Muted>
+        <DateField label={t('date')} value={date} onChange={setDate} allowPast={false} required />
+        <RequiredLabel text={t('expenseType')} required />
         <TouchableOpacity accessibilityRole="button" accessibilityLabel={t('expenseType')} onPress={() => setCategoryListOpen(open => !open)} style={{ minHeight: 48, paddingHorizontal: 12, borderWidth: 1, borderColor: categoryListOpen ? color.primary : color.line, borderRadius: 10, backgroundColor: '#FFFFFF', flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }}>
           <Text style={{ color: cat ? color.text : color.muted, fontSize: 16 }}>{customCategoryName || (cat ? t(exKey(cat)) : t('expenseType'))}</Text>
           <AppIcon name={categoryListOpen ? 'chevron-up' : 'chevron-down'} size={18} iconColor={color.muted} />
@@ -2241,10 +2320,10 @@ export function ExpenseModal({ init, onClose, onSave, onTrash }: {
             <Text style={{ color: color.text, fontWeight: customCategoryName === c.name ? '700' : '500' }}>{c.name}</Text>
           </TouchableOpacity>)}
         </ScrollView> : null}
-        {cat === 'other' && !customCategoryName ? <Field inputRef={nameInput} label={t('expenseName')} value={name} onChange={setName} /> : null}
+        {cat === 'other' && !customCategoryName ? <Field inputRef={nameInput} label={t('expenseName')} value={name} onChange={setName} required /> : null}
         <Field label={lang === 'bn' ? 'বিবরণ (ঐচ্ছিক)' : 'Description (optional)'} value={note} onChange={setNote} />
         <FormGrid>
-          <Field inputRef={amountInput} label={t('amount')} value={amt} onChange={setAmt} num />
+          <Field inputRef={amountInput} label={t('amount')} value={amt} onChange={setAmt} num required />
         </FormGrid>
         <AccountPicker accountId={accountId} onPick={setAccountId} label={t('paymentAccount')} required />
         <Btn icon={icons.save} label={t('saveExpense')} onPress={save} />
@@ -2284,9 +2363,9 @@ export function MoneyTransferModal({ onClose }: { onClose: () => void }) {
 
   const submit = () => {
     if (busy) return;
-    if (!fromId || !toId) return Alert.alert(t('needAccount'));
-    if (fromId === toId) return Alert.alert(t('sameAccount'));
-    if (!(amount > 0)) return Alert.alert(t('needAmount'));
+    if (!fromId || !toId) return showEntryError(lang, t('needAccount'));
+    if (fromId === toId) return showEntryError(lang, t('sameAccount'));
+    if (!(amount > 0)) return showEntryError(lang, t('needAmount'));
     // Fast local guard (boundary: exactly-available is allowed). The backend
     // TRANSFER_FUNDS check stays authoritative for races/stale balances.
     if (amount > available) return showInsuf();
@@ -2302,7 +2381,7 @@ export function MoneyTransferModal({ onClose }: { onClose: () => void }) {
         // through the same popup instead of a technical error. Anything else
         // keeps the previous generic alert.
         if (e instanceof ApiError && e.code === 'TRANSFER_FUNDS') showInsuf();
-        else Alert.alert(e instanceof Error ? e.message : t('invalid'));
+        else showEntryError(lang, e instanceof Error ? e.message : t('invalid'));
       } finally {
         setBusy(false);
       }
@@ -2316,7 +2395,7 @@ export function MoneyTransferModal({ onClose }: { onClose: () => void }) {
   return (
     <DetailShell title={t('transferMoney')} onClose={onClose}>
       <Card>
-        <Muted>{t('fromAccount')}</Muted>
+        <RequiredLabel text={t('fromAccount')} required />
         <View style={{ marginVertical: 6 }}>
           {active.map(a => (
             <TouchableOpacity key={a.id} onPress={() => setFromId(a.id)} style={{ flexDirection: 'row', alignItems: 'center', gap: 8, minHeight: 48, paddingHorizontal: 12, borderRadius: 12, marginBottom: 6, backgroundColor: fromId === a.id ? color.primaryLight : '#fff', borderWidth: 1.5, borderColor: fromId === a.id ? color.primary : color.line }}>
@@ -2328,7 +2407,7 @@ export function MoneyTransferModal({ onClose }: { onClose: () => void }) {
         </View>
         <Muted>{`${t('currentBalance')}: ${m(available)}`}</Muted>
         <View style={{ height: 12 }} />
-        <Muted>{t('toAccount')}</Muted>
+        <RequiredLabel text={t('toAccount')} required />
         <View style={{ marginVertical: 6 }}>
           {active.filter(a => a.id !== fromId).map(a => (
             <TouchableOpacity key={a.id} onPress={() => setToId(a.id)} style={{ flexDirection: 'row', alignItems: 'center', gap: 8, minHeight: 48, paddingHorizontal: 12, borderRadius: 12, marginBottom: 6, backgroundColor: toId === a.id ? color.primaryLight : '#fff', borderWidth: 1.5, borderColor: toId === a.id ? color.primary : color.line }}>
@@ -2339,8 +2418,8 @@ export function MoneyTransferModal({ onClose }: { onClose: () => void }) {
           ))}
         </View>
         <FormGrid>
-          <Field label={t('amount')} value={amt} onChange={setAmt} num />
-          <DateField label={t('date')} value={date} onChange={setDate} allowPast={false} />
+          <Field label={t('amount')} value={amt} onChange={setAmt} num required />
+          <DateField label={t('date')} value={date} onChange={setDate} allowPast={false} required />
         </FormGrid>
         <Field label={t('note')} value={note} onChange={setNote} />
         <Btn icon={icons.transfer} label={t('doTransfer')} onPress={submit} />
@@ -2380,21 +2459,21 @@ export function MoneyEntry({ direction, onClose, onSaved }: { direction: 'in' | 
   const [saved, setSaved] = useState(false);
   const submit = async () => {
     if (lock.current) return;
-    if (!accountId || !(parseNum(amount) > 0)) { setError(label('একাউন্ট ও সঠিক পরিমাণ দিন', 'Select an account and enter a valid amount')); return; }
+    if (!accountId || !(parseNum(amount) > 0)) { const msg = label('একাউন্ট ও সঠিক পরিমাণ দিন', 'Select an account and enter a valid amount'); showEntryError(lang, msg); return; }
     lock.current = true; setBusy(true); setError('');
     try {
       if (!saved) { await api.moneyEntry({ accountId, direction, amount: parseNum(amount), date: toEnDigits(date), note, requestId }); setSaved(true); }
       await onSaved(); onClose();
     } catch (e) {
-      setError((e as { code?: string }).code === 'INSUFFICIENT_FUNDS' ? label('এই একাউন্টে পর্যাপ্ত টাকা নেই', 'Insufficient account balance') : label('সংরক্ষণ বা হালনাগাদ করা যায়নি। আবার চেষ্টা করুন।', 'Could not save or refresh. Please try again.'));
+      const msg = (e as { code?: string }).code === 'INSUFFICIENT_FUNDS' ? label('এই একাউন্টে পর্যাপ্ত টাকা নেই', 'Insufficient account balance') : label('সংরক্ষণ বা হালনাগাদ করা যায়নি। আবার চেষ্টা করুন।', 'Could not save or refresh. Please try again.'); showEntryError(lang, msg);
     } finally { lock.current = false; setBusy(false); }
   };
   return <DetailShell title={direction === 'in' ? label('টাকা জমা', 'Deposit') : label('টাকা উত্তোলন', 'Withdraw')} onClose={onClose}>
     <Card>
       <View pointerEvents={busy || saved ? 'none' : 'auto'}>
-        <AccountPicker accountId={accountId} onPick={setAccountId} required />
-        <Field label={label('পরিমাণ', 'Amount')} value={amount} onChange={setAmount} num />
-        <DateField label={label('তারিখ', 'Date')} value={date} onChange={setDate} allowPast />
+        <AccountPicker accountId={accountId} onPick={setAccountId} label={label('Account', 'অ্যাকাউন্ট')} required />
+        <Field label={label('পরিমাণ', 'Amount')} value={amount} onChange={setAmount} num required />
+        <DateField label={label('তারিখ', 'Date')} value={date} onChange={setDate} allowPast required />
         <Field label={label('বিবরণ', 'Note')} value={note} onChange={setNote} />
       </View>
       {error ? <Text accessibilityRole="alert" style={{ color: color.red, marginBottom: 12 }}>{error}</Text> : null}
@@ -2439,23 +2518,23 @@ export function JournalEntryModal({ onClose, onSaved, initial }: { onClose: () =
   useEffect(() => { api.chartAccounts().then(rows => { setAccounts(rows.filter(a => a.active)); setLines(current => current.map(l => ({ ...l, accountId: l.accountId || rows.find(a => a.active)?.id || '' }))); }).catch(e => Alert.alert('Chart of accounts', e.message)); }, []);
   const setLine = (index: number, update: Partial<JournalDraftLine>) => setLines(current => current.map((line, i) => i === index ? { ...line, ...update } : line));
   const save = async () => {
-    if (!date.match(/^\d{4}-\d{2}-\d{2}$/) || !memo.trim()) return Alert.alert(label('Date and memo are required.', 'তারিখ ও বিবরণ আবশ্যক।'));
+    if (!date.match(/^\d{4}-\d{2}-\d{2}$/) || !memo.trim()) return showEntryError(lang, label('Date and memo are required.', 'তারিখ ও বিবরণ আবশ্যক।'), label('Enter a valid date and add a memo, then save again.', 'সঠিক তারিখ দিন এবং বিবরণ লিখে আবার সংরক্ষণ করুন।'));
     const payload: JournalWrite = { date, memo: memo.trim(), sourceType: 'manual',
       lines: lines.map(l => ({ accountId: l.accountId, description: l.description.trim(), debit: parseNum(l.debit), credit: parseNum(l.credit) })) };
     try { setBusy(true); if (initial) await api.updateJournalEntry(initial.id, payload); else await api.createJournalEntry(payload); onSaved?.(); onClose(); }
-    catch (e) { Alert.alert(label('Could not save journal entry', 'জার্নাল এন্ট্রি সংরক্ষণ করা যায়নি'), e instanceof Error ? e.message : undefined); }
+    catch (e) { showEntryError(lang, e instanceof Error ? e.message : label('Could not save journal entry.', 'জার্নাল এন্ট্রি সংরক্ষণ করা যায়নি।')); }
     finally { setBusy(false); }
   };
   return <Modal visible transparent animationType="slide" onRequestClose={onClose}><View style={{ flex: 1, backgroundColor: '#0F172A88', justifyContent: 'center', padding: 14 }}><View style={{ maxHeight: '94%', backgroundColor: '#F8FAFC', borderRadius: 18, overflow: 'hidden' }}>
     <View style={{ padding: 16, backgroundColor: '#123D64', flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }}><Text style={{ color: '#fff', fontSize: 19, fontWeight: '800' }}>{label(initial ? 'Edit journal entry' : 'New journal entry', initial ? 'জার্নাল এন্ট্রি সম্পাদনা' : 'নতুন জার্নাল এন্ট্রি')}</Text><TouchableOpacity onPress={onClose}><Text style={{ color: '#fff', fontSize: 24 }}>×</Text></TouchableOpacity></View>
     <ScrollView keyboardShouldPersistTaps="handled" contentContainerStyle={{ padding: 16, gap: 10 }}>
-      <DateField label={label('Date', 'তারিখ')} value={date} onChange={setDate} allowPast /><Field label={label('Memo', 'বিবরণ')} value={memo} onChange={setMemo} />
+      <DateField label={label('Date', 'তারিখ')} value={date} onChange={setDate} allowPast required /><Field label={label('Memo', 'বিবরণ')} value={memo} onChange={setMemo} required />
       {lines.map((line, index) => { const selected = accounts.find(a => a.id === line.accountId); const current = Math.max(0, accounts.findIndex(a => a.id === line.accountId)); return <Card key={index}>
         <Text style={{ color: '#123D64', fontWeight: '800', marginBottom: 7 }}>{label('Line', 'লাইন')} {index + 1}</Text>
-        <TouchableOpacity onPress={() => setLine(index, { accountId: accounts[(current + 1) % Math.max(accounts.length, 1)]?.id ?? '' })} style={{ padding: 10, borderRadius: 8, backgroundColor: '#EFF6FF', marginBottom: 7 }}><Text style={{ color: '#1D4ED8', fontWeight: '700' }}>{selected ? `${selected.code} · ${selected.name} (${selected.type})` : label('Tap to choose account', 'অ্যাকাউন্ট বাছাই করতে চাপুন')}</Text></TouchableOpacity>
+        <RequiredLabel text={label('Account', 'অ্যাকাউন্ট')} required /><TouchableOpacity onPress={() => setLine(index, { accountId: accounts[(current + 1) % Math.max(accounts.length, 1)]?.id ?? '' })} style={{ padding: 10, borderRadius: 8, backgroundColor: '#EFF6FF', marginBottom: 7 }}><Text style={{ color: '#1D4ED8', fontWeight: '700' }}>{selected ? `${selected.code} · ${selected.name} (${selected.type})` : label('Tap to choose account', 'অ্যাকাউন্ট বাছাই করতে চাপুন')}</Text></TouchableOpacity>
         {accounts.length > 1 ? <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 5, marginBottom: 8 }}>{accounts.map(a => <TouchableOpacity key={a.id} onPress={() => setLine(index, { accountId: a.id })} style={{ paddingHorizontal: 7, paddingVertical: 5, borderRadius: 14, backgroundColor: a.id === line.accountId ? '#DBEAFE' : '#F1F5F9' }}><Text style={{ color: '#334155', fontSize: 11 }}>{a.code}</Text></TouchableOpacity>)}</View> : null}
         <Field label={label('Line description', 'লাইনের বিবরণ')} value={line.description} onChange={v => setLine(index, { description: v })} />
-        <View style={{ flexDirection: 'row', gap: 8 }}><View style={{ flex: 1 }}><Field label="Debit" value={line.debit} onChange={v => setLine(index, { debit: v, credit: '' })} num /></View><View style={{ flex: 1 }}><Field label="Credit" value={line.credit} onChange={v => setLine(index, { credit: v, debit: '' })} num /></View></View>
+        <RequiredLabel text={label('Debit or credit amount', 'ডেবিট বা ক্রেডিটের পরিমাণ')} required /><View style={{ flexDirection: 'row', gap: 8 }}><View style={{ flex: 1 }}><Field label="Debit" value={line.debit} onChange={v => setLine(index, { debit: v, credit: '' })} num /></View><View style={{ flex: 1 }}><Field label="Credit" value={line.credit} onChange={v => setLine(index, { credit: v, debit: '' })} num /></View></View>
       </Card>; })}
       <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8 }}><Btn kind="ghost" label={label('Add line', 'লাইন যোগ')} onPress={() => setLines(current => [...current, { accountId: accounts[0]?.id ?? '', description: '', debit: '', credit: '' }])} /><Btn label={busy ? label('Saving…', 'সংরক্ষণ হচ্ছে…') : label('Save balanced entry', 'সুষম এন্ট্রি সংরক্ষণ')} onPress={() => { if (!busy) void save(); }} /></View>
     </ScrollView>
@@ -2468,10 +2547,10 @@ export function ChartOfAccountsModal({ onClose, onSaved }: { onClose: () => void
   const label = (en: string, bn: string) => lang === 'bn' ? bn : en;
   const reload = () => api.chartAccounts().then(setRows).catch(e => Alert.alert('Chart of accounts', e.message));
   useEffect(() => { void reload(); }, []);
-  const create = async () => { try { if (editId) { const row = rows.find(x => x.id === editId)!; await api.updateChartAccount(editId, { ...row, code, name, type, active: row.active }); } else await api.createChartAccount({ code, name, type }); setCode(''); setName(''); setEditId(null); reload(); onSaved?.(); } catch (e) { Alert.alert(label('Could not save account', 'অ্যাকাউন্ট সংরক্ষণ করা যায়নি'), e instanceof Error ? e.message : undefined); } };
+  const create = async () => { if (!code.trim() || !name.trim()) return showEntryError(lang, label('Enter both an account code and account name.', 'অ্যাকাউন্ট কোড ও অ্যাকাউন্টের নাম লিখুন।')); try { if (editId) { const row = rows.find(x => x.id === editId)!; await api.updateChartAccount(editId, { ...row, code, name, type, active: row.active }); } else await api.createChartAccount({ code, name, type }); setCode(''); setName(''); setEditId(null); reload(); onSaved?.(); } catch (e) { showEntryError(lang, e instanceof Error ? e.message : label('Could not save account.', 'অ্যাকাউন্ট সংরক্ষণ করা যায়নি।')); } };
   const typesList: ChartAccountRow['type'][] = ['asset','liability','equity','income','expense'];
   return <Modal visible transparent animationType="slide" onRequestClose={onClose}><View style={{ flex: 1, backgroundColor: '#0F172A88', justifyContent: 'center', padding: 14 }}><View style={{ maxHeight: '94%', backgroundColor: '#F8FAFC', borderRadius: 18, padding: 16 }}><View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}><Text style={{ fontSize: 20, fontWeight: '800', color: '#123D64' }}>{label('Chart of accounts', 'হিসাবের চার্ট')}</Text><TouchableOpacity onPress={onClose}><Text style={{ fontSize: 24 }}>×</Text></TouchableOpacity></View>
-    <Field label={label('Code', 'কোড')} value={code} onChange={setCode} /><Field label={label('Account name', 'অ্যাকাউন্টের নাম')} value={name} onChange={setName} /><View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 6, marginVertical: 8 }}>{typesList.map(x => <TouchableOpacity key={x} onPress={() => setType(x)} style={{ padding: 8, borderRadius: 16, backgroundColor: type === x ? '#2563EB' : '#E2E8F0' }}><Text style={{ color: type === x ? '#fff' : '#334155' }}>{x}</Text></TouchableOpacity>)}</View><Btn label={label(editId ? 'Save changes' : 'Add account', editId ? 'পরিবর্তন সংরক্ষণ' : 'অ্যাকাউন্ট যোগ করুন')} onPress={() => { void create(); }} />
+    <Field label={label('Code', 'কোড')} value={code} onChange={setCode} required /><Field label={label('Account name', 'অ্যাকাউন্টের নাম')} value={name} onChange={setName} required /><View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 6, marginVertical: 8 }}>{typesList.map(x => <TouchableOpacity key={x} onPress={() => setType(x)} style={{ padding: 8, borderRadius: 16, backgroundColor: type === x ? '#2563EB' : '#E2E8F0' }}><Text style={{ color: type === x ? '#fff' : '#334155' }}>{x}</Text></TouchableOpacity>)}</View><Btn label={label(editId ? 'Save changes' : 'Add account', editId ? 'পরিবর্তন সংরক্ষণ' : 'অ্যাকাউন্ট যোগ করুন')} onPress={() => { void create(); }} />
     <ScrollView style={{ marginTop: 12 }}>{rows.map(a => <View key={a.id} style={{ flexDirection: 'row', alignItems: 'center', paddingVertical: 9, borderBottomWidth: 1, borderBottomColor: '#E2E8F0', gap: 8 }}><Text style={{ flex: 1, color: a.active ? '#0F172A' : '#94A3B8' }}>{a.code} · {a.name} · {a.type}</Text><TouchableOpacity onPress={() => { setEditId(a.id); setCode(a.code); setName(a.name); setType(a.type); }}><Text style={{ color: '#1D4ED8', fontWeight: '700' }}>{label('Edit', 'সম্পাদনা')}</Text></TouchableOpacity><TouchableOpacity onPress={() => { void api.updateChartAccount(a.id, { ...a, active: !a.active }).then(reload).catch(e => Alert.alert('Account', e.message)); }}><Text style={{ color: '#2563EB', fontWeight: '700' }}>{a.active ? label('Archive', 'আর্কাইভ') : label('Restore', 'ফিরিয়ে আনুন')}</Text></TouchableOpacity></View>)}</ScrollView>
   </View></View></Modal>;
 }
@@ -2495,17 +2574,17 @@ export function AccountFormModal({ id, onClose }: { id?: string; onClose: () => 
   const isBank = type === 'bank';
 
   const save = () => {
-    if (!name.trim()) return Alert.alert(t('accountName'));
+    if (!name.trim()) return showEntryError(lang, t('accountName'));
     if (busy) return;
     const dateValue = toEnDigits(openingDate).trim();
     if (!/^\d{4}-\d{2}-\d{2}$/.test(dateValue) || !Number.isFinite(Date.parse(dateValue)) || new Date(dateValue).toISOString().slice(0, 10) !== dateValue) {
-      return Alert.alert(label('শুরুর তারিখ সঠিকভাবে দিন (YYYY-MM-DD)', 'Enter a valid opening date (YYYY-MM-DD)'));
+      return showEntryError(lang, label('শুরুর তারিখ সঠিকভাবে দিন (YYYY-MM-DD)', 'Enter a valid opening date (YYYY-MM-DD)'));
     }
     setBusy(true);
     (async () => {
       try {
         const openingVal = opening.trim() === '' ? 0 : parseNum(opening);
-        if (openingVal < 0) return Alert.alert(t('invalidAmount'));
+        if (openingVal < 0) return showEntryError(lang, t('invalidAmount'));
         const payload = {
           name: name.trim(), type: (type === 'bank' ? 'bank' : 'cash') as AccountType,
           openingDate: dateValue,
@@ -2526,7 +2605,7 @@ export function AccountFormModal({ id, onClose }: { id?: string; onClose: () => 
         Alert.alert(t('done'));
         onClose();
       } catch (e) {
-        Alert.alert(e instanceof Error ? e.message : t('invalid'));
+        showEntryError(lang, e instanceof Error ? e.message : t('invalid'));
       } finally {
         setBusy(false);
       }
@@ -2536,8 +2615,8 @@ export function AccountFormModal({ id, onClose }: { id?: string; onClose: () => 
   return (
     <DetailShell title={cur ? t('editAccount') : t('addAccount')} onClose={onClose}>
       <Card>
-        <Field label={`${t('accountName')} *`} value={name} onChange={setName} />
-        <Muted>{`${t('accountType')} *`}</Muted>
+        <Field label={t('accountName')} value={name} onChange={setName} required />
+        <RequiredLabel text={t('accountType')} required />
         <View style={{ flexDirection: 'row', gap: 12, marginVertical: 10 }}>
           {(['cash', 'bank'] as AccountType[]).map(ty => {
             const on = type === ty;
@@ -2563,8 +2642,8 @@ export function AccountFormModal({ id, onClose }: { id?: string; onClose: () => 
             );
           })}
         </View>
-        <Field label={`${t('openingBalanceLabel')} *`} value={opening} onChange={setOpening} num />
-        <DateField label={`${label('Opening date', 'Opening balance date')} *`} value={openingDate} onChange={setOpeningDate} allowPast />
+        <Field label={t('openingBalanceLabel')} value={opening} onChange={setOpening} num required />
+        <DateField label={label('Opening date', 'Opening balance date')} value={openingDate} onChange={setOpeningDate} allowPast required />
         {isBank ? (
           <>
             <Field label={t('bankName')} value={bankName} onChange={setBankName} />
@@ -2940,11 +3019,27 @@ export function InvoiceModal({ kind, id, onClose, onReturn, onBack, onEdit }: {
   /** Set when the document was opened from its module list: shows Back to list. */
   onBack?: () => void;
 }) {
-  const { t, lang } = useApp(); const m = useMoney(); const fd = useDateStr();
+  const { t, lang, refresh } = useApp(); const m = useMoney(); const fd = useDateStr();
   const { fetchDoc, printTxn, previewTxn, shareTxn } = useInvoice();
   const [doc, setDoc] = useState<InvData | null>(null);
   const [rets, setRets] = useState<{ id: string; returnNo?: string; date: string; amount: number }[]>([]);
   const [extra, setExtra] = useState<{ discount?: number; payment?: TxnPayment; payments?: import('./api').InvoicePayment[] }>({});
+  const [deleting, setDeleting] = useState(false);
+  const [deleteError, setDeleteError] = useState('');
+  const [confirmDelete, setConfirmDelete] = useState(false);
+  const deleteInvoice = async () => {
+    if (deleting) return;
+    setDeleting(true); setDeleteError('');
+    try {
+      if (kind === 'sale') await api.deleteSale(id);
+      else await api.deletePurchase(id);
+      try { await refresh(); } catch {}
+      onClose();
+    } catch (error) {
+      setDeleteError(error instanceof Error ? error.message : (lang === 'bn' ? 'ইনভয়েস মুছতে সমস্যা হয়েছে।' : 'Could not delete the invoice.'));
+      setConfirmDelete(false);
+    } finally { setDeleting(false); }
+  };
   useEffect(() => {
     let on = true;
     fetchDoc(kind, id).then(d => { if (on) setDoc(d); }).catch(() => {});
@@ -2998,6 +3093,16 @@ export function InvoiceModal({ kind, id, onClose, onReturn, onBack, onEdit }: {
           <Btn kind="ghost" icon={icons.print} label={t('preview')} onPress={() => previewTxn(kind, id)} />
           <Btn kind="ghost" icon={icons.share} label={t('share')} onPress={() => shareTxn(kind, id)} />
           {onEdit && !rets.length ? <Btn kind="ghost" icon={icons.edit} label={t('edit')} onPress={onEdit} /> : null}
+          {onEdit && !rets.length ? <Btn kind="danger" icon={icons.del} testID="delete-invoice" label={lang === 'bn' ? 'ইনভয়েস মুছুন' : 'Delete invoice'} onPress={() => { setDeleteError(''); setConfirmDelete(true); }} /> : null}
+          {deleteError ? <Text accessibilityRole="alert" style={{ color: color.red, marginVertical: 8 }}>{deleteError}</Text> : null}
+          {confirmDelete ? <Card>
+            <Text style={{ fontSize: 17, fontWeight: '700', color: color.text, marginBottom: 6 }}>{lang === 'bn' ? 'ইনভয়েস মুছে ফেলবেন?' : 'Delete this invoice?'}</Text>
+            <Text style={{ color: color.muted, marginBottom: 12 }}>{lang === 'bn'
+              ? 'ইনভয়েসের স্টক ও পেমেন্ট সমন্বয় করা হবে এবং কাজটি লগে সংরক্ষিত হবে।'
+              : 'Related stock and payment entries will be reversed, and this action will be recorded in the activity log.'}</Text>
+            <Btn kind="danger" testID="confirm-delete-invoice" label={deleting ? (lang === 'bn' ? 'মুছছে…' : 'Deleting…') : (lang === 'bn' ? 'হ্যাঁ, মুছে ফেলুন' : 'Yes, delete invoice')} onPress={() => { void deleteInvoice(); }} />
+            <Btn kind="ghost" label={lang === 'bn' ? 'বাতিল' : 'Cancel'} onPress={() => setConfirmDelete(false)} />
+          </Card> : null}
           {rets.length ? (
             <Card>
               <SectionHead icon={icons.history}>{t('returns')}</SectionHead>
@@ -3184,7 +3289,7 @@ function useKpiReport(kind: KpiKind, period: KpiPeriod, fin: PeriodFinance | nul
   // the three can never disagree.
   const build = React.useCallback((): ReportDoc => {
     const printedAt = printedAtStamp(lang === 'bn');
-    const base = { shop: SHOP_NAME, period: period.label, printedAt, printLabel: t('print'), closeLabel: t('cancel') };
+    const base = { language: lang, shop: SHOP_NAME, period: period.label, printedAt, printLabel: t('print'), closeLabel: t('cancel') };
     const inP = period.inPeriod;
 
     if (kind === 'recv' || kind === 'pay') {
@@ -3619,7 +3724,7 @@ export function ReturnHome({ focus, onFocusDone, initialKind }: {
   /** Sidebar entry that opened this screen (Sales Return / Purchase Return). */
   initialKind?: 'sale' | 'purchase';
 }) {
-  const { t, products, saveReturn } = useApp();
+  const { t, lang, products, saveReturn } = useApp();
   const m = useMoney(); const n = useNum(); const fd = useDateStr();
   const { kg } = useUnitLabel();
   const [kind, setKind] = useState<'sale' | 'purchase'>(initialKind ?? 'sale');
@@ -3810,7 +3915,7 @@ export function ReturnHome({ focus, onFocusDone, initialKind }: {
         </View>
       </Card>
       <Card>
-        <Muted>{t('searchInvoice')}</Muted>
+        <RequiredLabel text={t('searchInvoice')} required />
         <SearchDropdown
           items={invoices.map(v => ({ ...v, name: v.no }))}
           query={iq}
@@ -3857,23 +3962,26 @@ export function ReturnHome({ focus, onFocusDone, initialKind }: {
                     {l.unit === 'others' ? (
                       <View>
                         <Field label={t('descNote')} value={l.note} onChange={x => upd(l.lineId, { note: x })} />
-                        <Field label={t('actualKg')} value={l.manual} onChange={x => upd(l.lineId, { manual: x.replace(/[^0-9.]/g, '') })} num />
+                        <Field label={t('actualKg')} value={l.manual} onChange={x => upd(l.lineId, { manual: x.replace(/[^0-9.]/g, '') })} num required />
                       </View>
                     ) : (
+                      <>
+                      <RequiredLabel text={lang === 'bn' ? 'ফেরতের পরিমাণ' : 'Return quantity'} required />
                       <QtyInput unit={l.unit as BagUnit} value={l.qv} onChange={x => upd(l.lineId, { qv: x })} />
+                      </>
                     )}
                     {l.unit !== 'kg' && l.unit !== 'others' ? <Muted>{n(perBag(l))} {kg} / {unitName(l.unit)}</Muted> : null}
                     <Muted>{t('cond')}</Muted>
                     <MiniChips options={[{ id: 'good', label: t('good') }, { id: 'damaged', label: t('damaged') }, { id: 'partial', label: t('partialDamaged') }]} value={l.cond} onPick={x => upd(l.lineId, { cond: x as RetLine['cond'] })} />
                     {l.cond === 'partial' ? (
                       <FormGrid>
-                        <Field label={`${t('goodQty')} (${kg})`} value={l.good} onChange={x => upd(l.lineId, { good: x.replace(/[^0-9.]/g, '') })} num />
-                        <Field label={`${t('dmgQty')} (${kg})`} value={l.dmg} onChange={x => upd(l.lineId, { dmg: x.replace(/[^0-9.]/g, '') })} num />
+                        <Field label={`${t('goodQty')} (${kg})`} value={l.good} onChange={x => upd(l.lineId, { good: x.replace(/[^0-9.]/g, '') })} num required />
+                        <Field label={`${t('dmgQty')} (${kg})`} value={l.dmg} onChange={x => upd(l.lineId, { dmg: x.replace(/[^0-9.]/g, '') })} num required />
                       </FormGrid>
                     ) : null}
                     {l.cond !== 'good' ? (
                       <View>
-                        <Muted>{t('dmgReason')}</Muted>
+                        <RequiredLabel text={t('dmgReason')} required />
                         <MiniChips
                           options={[{ id: 'torn', label: t('dmgTorn') }, { id: 'wet', label: t('dmgWet') }, { id: 'pest', label: t('dmgPest') }, { id: 'spoiled', label: t('dmgSpoiled') }, { id: 'transport', label: t('dmgTransport') }, { id: 'other', label: t('exOther') }]}
                           value={l.reason}
@@ -3909,7 +4017,7 @@ export function ReturnHome({ focus, onFocusDone, initialKind }: {
               onPick={x => { setSettlement(x as 'credit' | 'refund'); if (x === 'credit') setAccountId(undefined); }}
             />
             {settlement === 'refund' ? <AccountPicker accountId={accountId} onPick={setAccountId} label={t('paymentAccount')} required /> : null}
-            <DateField label={t('date')} value={rdate} onChange={setRdate} allowPast={false} />
+            <DateField label={t('date')} value={rdate} onChange={setRdate} allowPast={false} required />
             <Btn icon={icons.save} label={t('completeReturn')} onPress={tryConfirm} />
           </Card>
         </View>

@@ -12,6 +12,7 @@ import {
   ListTable,
   Muted,
   PageHeader,
+  RequiredLabel,
   Screen,
   Title,
   color,
@@ -26,6 +27,7 @@ import { RGrid, useBreakpoint, useFs } from '../responsive';
 import { parseNum, toEnDigits } from '../bn';
 import { SearchField } from '../search';
 import { downloadCSV } from '../stockReport';
+import { showEntryError } from '../entryDialog';
 import { DetailShell, DateField } from '../screens';
 
 type Cat = { id: string; name: string; kind: ExpenseCategoryKind; key?: string; custom?: boolean; customName?: string };
@@ -253,10 +255,10 @@ export function ExpenseDashboard(_props: ExpenseDashboardProps) {
   const save = async () => {
     const cat = allCategories.find(c => c.id === catId);
     const value = parseNum(amount);
-    if (!cat) { setFormError(tx('একটি ক্যাটাগরি বাছুন।', 'Choose a category.')); return; }
-    if (cat.key === 'other' && !cat.custom && !expenseName.trim()) { setFormError(tx('খরচের নাম লিখুন।', 'Enter an expense name.')); return; }
-    if (value <= 0) { setFormError(tx('সঠিক পরিমাণ লিখুন।', 'Enter a valid amount.')); return; }
-    if (!accountId) { setFormError(tx('টাকার অ্যাকাউন্ট বাছুন।', 'Choose a money account.')); return; }
+    if (!cat) { showEntryError(lang, tx('একটি ক্যাটাগরি বাছুন।', 'Choose a category.')); return; }
+    if (cat.key === 'other' && !cat.custom && !expenseName.trim()) { showEntryError(lang, tx('খরচের নাম লিখুন।', 'Enter an expense name.')); return; }
+    if (value <= 0) { showEntryError(lang, tx('সঠিক পরিমাণ লিখুন।', 'Enter a valid amount.')); return; }
+    if (!accountId) { showEntryError(lang, tx('টাকার অ্যাকাউন্ট বাছুন।', 'Choose a money account.')); return; }
     setSaving(true);
     setFormError('');
     try {
@@ -271,7 +273,7 @@ export function ExpenseDashboard(_props: ExpenseDashboardProps) {
       });
       setFormOpen(false);
     } catch (e: any) {
-      setFormError(e?.message ?? tx('খরচ সংরক্ষণ করা যায়নি।', 'Could not save the expense.'));
+      showEntryError(lang, e?.message ?? tx('খরচ সংরক্ষণ করা যায়নি।', 'Could not save the expense.'));
     } finally {
       setSaving(false);
     }
@@ -302,9 +304,9 @@ export function ExpenseDashboard(_props: ExpenseDashboardProps) {
 
   const createCategory = async () => {
     const name = catName.trim();
-    if (!name) { setCatError(tx('ক্যাটাগরির নাম লিখুন।', 'Enter a category name.')); return; }
+    if (!name) { showEntryError(lang, tx('ক্যাটাগরির নাম লিখুন।', 'Enter a category name.')); return; }
     if (allCategories.some(c => c.id !== `custom:${catEditId}` && c.name.trim().toLowerCase() === name.toLowerCase())) {
-      setCatError(tx('এই নামে ক্যাটাগরি আছে।', 'A category with this name already exists.'));
+      showEntryError(lang, tx('এই নামে ক্যাটাগরি আছে।', 'A category with this name already exists.'));
       return;
     }
     setCatBusy(true);
@@ -320,7 +322,7 @@ export function ExpenseDashboard(_props: ExpenseDashboardProps) {
       else setCatFilter(id);
       setCatEditId(null);
     } catch (e: any) {
-      setCatError(e?.message ?? tx('ক্যাটাগরি তৈরি করা যায়নি।', 'Could not create the category.'));
+      showEntryError(lang, e?.message ?? tx('ক্যাটাগরি তৈরি করা যায়নি।', 'Could not create the category.'));
     } finally {
       setCatBusy(false);
     }
@@ -456,7 +458,7 @@ export function ExpenseDashboard(_props: ExpenseDashboardProps) {
           onClose={() => { setCatOpen(false); setCatEditId(null); }}
           footer={<Btn label={catBusy ? tx('\u09b8\u0982\u09b0\u0995\u09cd\u09b7\u09a3 \u09b9\u099a\u09cd\u099b\u09c7...', 'Saving...') : catEditId ? tx('\u0995\u09cd\u09af\u09be\u099f\u09be\u0997\u09b0\u09bf \u09b8\u0982\u09b0\u0995\u09cd\u09b7\u09a3', 'Save Category') : tx('\u0995\u09cd\u09af\u09be\u099f\u09be\u0997\u09b0\u09bf \u09a4\u09c8\u09b0\u09bf \u0995\u09b0\u09c1\u09a8', 'Create Category')} onPress={createCategory} />}
         >
-          <Field label={tx('\u0995\u09cd\u09af\u09be\u099f\u09be\u0997\u09b0\u09bf\u09b0 \u09a8\u09be\u09ae', 'Category Name')} value={catName} onChange={setCatName} />
+          <Field label={tx('\u0995\u09cd\u09af\u09be\u099f\u09be\u0997\u09b0\u09bf\u09b0 \u09a8\u09be\u09ae', 'Category Name')} value={catName} onChange={setCatName} required />
           <Muted>{tx('\u09a7\u09b0\u09a8', 'Type')}</Muted>
           <Chips items={KIND_OPTIONS.map(k => ({ id: k.id, name: lang === 'bn' ? k.bn : k.en }))} value={catKind} onPick={id => setCatKind(id as ExpenseCategoryKind)} />
           {catError ? <Text style={{ color: color.red, marginTop: 4, fontSize: fs }}>{catError}</Text> : null}
@@ -565,8 +567,8 @@ export function ExpenseDashboard(_props: ExpenseDashboardProps) {
           }
         >
           {voucher ? <Muted>{tx('ভাউচার', 'Voucher')}: #{voucher}</Muted> : null}
-          <DateField label={tx('তারিখ', 'Date')} value={date} onChange={setDate} allowPast />
-          <Muted>{tx('ক্যাটাগরি', 'Category')} *</Muted>
+          <DateField label={tx('তারিখ', 'Date')} value={date} onChange={setDate} allowPast required />
+          <RequiredLabel text={tx('ক্যাটাগরি বাছুন', 'Choose expense category')} required />
           <TouchableOpacity accessibilityRole="button" accessibilityLabel={tx('ক্যাটাগরি বাছুন', 'Choose expense category')} onPress={() => setCategoryPickerOpen(open => !open)} style={{ minHeight: 48, paddingHorizontal: 12, borderWidth: 1, borderColor: categoryPickerOpen ? color.primary : color.line, borderRadius: 10, backgroundColor: '#FFFFFF', flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }}>
             <Text style={{ color: catId ? color.text : color.muted, fontSize: 16 }}>{allCategories.find(c => c.id === catId)?.name ?? tx('ক্যাটাগরি বাছুন', 'Select a category')}</Text>
             <AppIcon name={categoryPickerOpen ? 'chevron-up' : 'chevron-down'} size={18} iconColor={color.muted} />
@@ -576,9 +578,9 @@ export function ExpenseDashboard(_props: ExpenseDashboardProps) {
               <Text style={{ color: color.text, fontWeight: catId === category.id ? '700' : '500' }}>{category.name}</Text>
             </TouchableOpacity>)}
           </ScrollView> : null}
-          {(() => { const selected = allCategories.find(c => c.id === catId); return selected?.key === 'other' && !selected.custom ? <Field inputRef={expenseNameInput} label={tx('খরচের নাম', 'Expense name')} value={expenseName} onChange={setExpenseName} /> : null; })()}
+          {(() => { const selected = allCategories.find(c => c.id === catId); return selected?.key === 'other' && !selected.custom ? <Field inputRef={expenseNameInput} label={tx('খরচের নাম', 'Expense name')} value={expenseName} onChange={setExpenseName} required /> : null; })()}
           <Field label={tx('বিবরণ (ঐচ্ছিক)', 'Description (optional)')} value={note} onChange={setNote} />
-          <Field inputRef={amountInput} label={tx('পরিমাণ', 'Amount')} value={amount} onChange={setAmount} num />
+          <Field inputRef={amountInput} label={tx('পরিমাণ', 'Amount')} value={amount} onChange={setAmount} num required />
           <AccountPicker accountId={accountId} onPick={setAccountId} label={tx('টাকার অ্যাকাউন্ট', 'Money Account')} required />
           {formError ? <Text style={{ color: color.red, marginTop: 4, fontSize: fs }}>{formError}</Text> : null}
         </DetailShell>
@@ -590,7 +592,7 @@ export function ExpenseDashboard(_props: ExpenseDashboardProps) {
           onClose={() => { setCatOpen(false); setCatEditId(null); }}
           footer={<Btn label={catBusy ? tx('তৈরি হচ্ছে...', 'Creating...') : catEditId ? 'Save Category' : 'Create Category'} onPress={createCategory} />}
         >
-          <Field label={tx('ক্যাটাগরির নাম', 'Category Name')} value={catName} onChange={setCatName} />
+          <Field label={tx('ক্যাটাগরির নাম', 'Category Name')} value={catName} onChange={setCatName} required />
           <Muted>{tx('ধরন', 'Type')}</Muted>
           <Chips
             items={KIND_OPTIONS.map(k => ({ id: k.id, name: lang === 'bn' ? k.bn : k.en }))}

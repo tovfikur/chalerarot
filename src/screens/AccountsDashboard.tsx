@@ -41,6 +41,7 @@ import { AppIcon, icons } from '../icons';
 import { useBreakpoint } from '../responsive';
 import { printReport, previewReport, printedAtStamp, downloadReportCSV, type ReportDoc, type ReportRow } from '../report';
 import { api } from '../api';
+import { showEntryError } from '../entryDialog';
 import type { GeneralLedger, JournalEntries, SavedJournalEntry, HouseExpenseRow } from '../api';
 import type { Key } from '../i18n';
 import {
@@ -80,7 +81,7 @@ function HouseExpenseEntryForm({ onCancel, onSaved }: { onCancel: () => void; on
   }, [moneyAccounts, accountId]);
   const save = async () => {
     if (!accountId || !(parseNum(amount) > 0) || !description.trim()) {
-      setError(label('Choose an account, enter an amount, and add a description.', 'অ্যাকাউন্ট নির্বাচন করুন, পরিমাণ লিখুন এবং বিবরণ দিন।'));
+      const message = label('Choose an account, enter an amount, and add a description.', 'অ্যাকাউন্ট নির্বাচন করুন, পরিমাণ লিখুন এবং বিবরণ দিন।'); showEntryError(lang, message);
       return;
     }
     setBusy(true); setError('');
@@ -88,15 +89,15 @@ function HouseExpenseEntryForm({ onCancel, onSaved }: { onCancel: () => void; on
       await api.createHouseExpense({ accountId, amount: parseNum(amount), date: toEnDigits(date), description: description.trim(), note: note.trim(), requestId: requestId.current });
       await onSaved();
     } catch (e) {
-      setError(e instanceof Error ? e.message : label('Could not save house expense.', 'বাসার খরচ সংরক্ষণ করা যায়নি।'));
+      const message = e instanceof Error ? e.message : label('Could not save house expense.', 'বাসার খরচ সংরক্ষণ করা যায়নি।'); showEntryError(lang, message);
     } finally { setBusy(false); }
   };
   return <View style={{ backgroundColor: '#F8FAFC', borderWidth: 1, borderColor: '#DBEAFE', borderRadius: 14, padding: 14, marginBottom: 14 }}>
     <Text style={{ fontSize: 17, fontWeight: '800', color: '#123D64', marginBottom: 8 }}>{label('Record house expense withdrawal', 'বাসার খরচ উত্তোলন নথিভুক্ত করুন')}</Text>
     <AccountPicker accountId={accountId} onPick={setAccountId} label={label('Withdraw from account', 'যে অ্যাকাউন্ট থেকে উত্তোলন')} required />
-    <Field label={label('Amount', 'পরিমাণ')} value={amount} onChange={setAmount} num />
-    <DateField label={label('Date', 'তারিখ')} value={date} onChange={setDate} allowPast />
-    <Field label={label('Description', 'বিবরণ')} value={description} onChange={setDescription} />
+    <Field label={label('Amount', 'পরিমাণ')} value={amount} onChange={setAmount} num required />
+    <DateField label={label('Date', 'তারিখ')} value={date} onChange={setDate} allowPast required />
+    <Field label={label('Description', 'বিবরণ')} value={description} onChange={setDescription} required />
     <Field label={label('Log note (optional)', 'লগ নোট (ঐচ্ছিক)')} value={note} onChange={setNote} />
     {error ? <Text accessibilityRole="alert" style={{ color: '#DC2626', marginBottom: 8 }}>{error}</Text> : null}
     <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginTop: 8 }}>
@@ -156,6 +157,7 @@ export function AccountsDashboard({ go, focus, onFocusDone }: AccountsDashboardP
     financePeriod,
     refresh,
   } = useApp();
+  const label = (en: string, bn: string) => lang === 'bn' ? bn : en;
 
   const m = useMoney();
   const n = useNum();
@@ -360,26 +362,27 @@ export function AccountsDashboard({ go, focus, onFocusDone }: AccountsDashboardP
   const printAging = (kind: 'receivable' | 'payable') => {
     const sections = agingRows(kind);
     setReportViewDoc({
+      language: lang,
       shop: business.name,
-      title: kind === 'receivable' ? 'Aged Receivables' : 'Aged Payables',
-      period: `As of ${td}`,
-      meta: [{ label: 'Basis', value: 'Open invoice balances grouped by invoice date; opening balances shown as 90+ days' }],
+      title: kind === 'receivable' ? label('Aged Receivables', 'বয়সভিত্তিক পাওনা') : label('Aged Payables', 'বয়সভিত্তিক দেনা'),
+      period: `${label('As of', 'তারিখ')} ${td}`,
+      meta: [{ label: label('Basis', 'ভিত্তি'), value: label('Open invoice balances grouped by invoice date; opening balances shown as 90+ days', 'খোলা ইনভয়েসের বয়স অনুযায়ী বাকি ভাগ করা হয়েছে; প্রারম্ভিক বাকি ৯০ দিনের বেশি হিসেবে দেখানো হয়েছে') }],
       sections,
-      total: { label: 'Total outstanding', value: m(kind === 'receivable' ? totalDueAmount : totalPayableAmount) },
+      total: { label: label('Total outstanding', 'মোট বকেয়া'), value: m(kind === 'receivable' ? totalDueAmount : totalPayableAmount) },
       printedAt: printedAtStamp(lang), printLabel: lang === 'bn' ? 'প্রিন্ট করুন' : 'Print',
     });
   };
 
   const profitLossReportDoc = (finance: PeriodFinance): ReportDoc => {
     const sale = finance.netSales; const cogs = finance.cogs; const gross = finance.grossProfit; const expense = finance.expense; const profit = finance.netProfit;
-    return { shop: business.name, title: 'Profit & Loss Statement', period: formatPeriodLabel(finance.start || profitFrom, finance.end || profitTo),
+    return { language: lang, shop: business.name, title: label('Profit & Loss Statement', 'লাভ-ক্ষতির বিবরণী'), period: formatPeriodLabel(finance.start || profitFrom, finance.end || profitTo),
       meta: [{ label: lang === 'bn' ? 'মজুদে অন্তর্ভুক্ত ল্যান্ডিং খরচ' : 'Landed cost capitalized into inventory', value: m(finance.capitalizedLandedCost) }],
-      sections: [{ title: 'Trading result', rows: [
-        { label: 'Net sales', right: m(sale) }, { label: 'Cost of goods sold', right: m(cogs), neg: true },
-        { label: 'Gross profit', right: m(gross), bold: true }, { label: 'Operating expenses', right: m(expense), neg: true },
-        { label: 'Other income / (expense)', right: m(-(finance.otherIncomeExpense ?? 0)), neg: finance.otherIncomeExpense > 0 },
-        { label: 'Net profit / (loss)', right: m(profit), bold: true },
-      ] }], total: { label: 'Net profit / (loss)', value: m(profit), neg: profit < 0 },
+      sections: [{ title: label('Trading result', 'বাণিজ্যিক ফলাফল'), rows: [
+        { label: label('Net sales', 'নিট বিক্রয়'), right: m(sale) }, { label: label('Cost of goods sold', 'বিক্রিত পণ্যের ক্রয়মূল্য'), right: m(cogs), neg: true },
+        { label: label('Gross profit', 'মোট মুনাফা'), right: m(gross), bold: true }, { label: label('Operating expenses', 'পরিচালন ব্যয়'), right: m(expense), neg: true },
+        { label: label('Other income / (expense)', 'অন্যান্য আয় / (ব্যয়)'), right: m(-(finance.otherIncomeExpense ?? 0)), neg: finance.otherIncomeExpense > 0 },
+        { label: label('Net profit / (loss)', 'নিট মুনাফা / (ক্ষতি)'), right: m(profit), bold: true },
+      ] }], total: { label: label('Net profit / (loss)', 'নিট মুনাফা / (ক্ষতি)'), value: m(profit), neg: profit < 0 },
       printedAt: printedAtStamp(lang), printLabel: lang === 'bn' ? 'প্রিন্ট করুন' : 'Print' };
   };
 
@@ -394,19 +397,19 @@ export function AccountsDashboard({ go, focus, onFocusDone }: AccountsDashboardP
       const finance = await loadFinance('range', profitFrom, profitTo);
       setReportViewDoc(profitLossReportDoc(finance));
     } catch {
-      Alert.alert(lang === 'bn' ? 'তারিখ যাচাই করুন' : 'Check the dates', lang === 'bn' ? 'YYYY-MM-DD ফরম্যাটে শুরু ও শেষ তারিখ দিন।' : 'Enter valid start and end dates in YYYY-MM-DD format.');
+      showEntryError(lang, lang === 'bn' ? 'YYYY-MM-DD ফরম্যাটে শুরু ও শেষ তারিখ দিন।' : 'Enter valid start and end dates in YYYY-MM-DD format.');
     }
   };
 
-  const printCashStatement = () => setReportViewDoc({ shop: business.name, title: 'Cash & Bank Statement', period: `Balances as of ${td}`,
-    sections: [{ title: 'Cash and bank accounts', rows: moneyAccounts.map(a => ({ label: a.name, sub: `${a.type.toUpperCase()} · ${lang === 'bn' ? 'শুরুর ব্যালেন্স' : 'Opening'} ${m(a.adjustedOpeningBalance ?? a.openingBalance)} · ${fd(a.openingDate)}`, right: m(a.balance), neg: a.balance < 0 })) }],
-    total: { label: 'Total cash and bank', value: m(totalLiquidMoney), neg: totalLiquidMoney < 0 },
-    note: 'This statement shows current account balances. Use each account ledger for dated money movements.',
+  const printCashStatement = () => setReportViewDoc({ language: lang, shop: business.name, title: label('Cash & Bank Statement', 'নগদ ও ব্যাংক বিবরণী'), period: `${label('Balances as of', 'স্থিতি তারিখ')} ${td}`,
+    sections: [{ title: label('Cash and bank accounts', 'নগদ ও ব্যাংক অ্যাকাউন্ট'), rows: moneyAccounts.map(a => ({ label: a.name, sub: `${a.type.toUpperCase()} · ${label('Opening balance', 'প্রারম্ভিক স্থিতি')} ${m(a.adjustedOpeningBalance ?? a.openingBalance)} · ${fd(a.openingDate)}`, right: m(a.balance), neg: a.balance < 0 })) }],
+    total: { label: label('Total cash and bank', 'মোট নগদ ও ব্যাংক'), value: m(totalLiquidMoney), neg: totalLiquidMoney < 0 },
+    note: label('This statement shows current account balances. Use each account ledger for dated money movements.', 'এই বিবরণীতে বর্তমান অ্যাকাউন্টের স্থিতি দেখানো হয়েছে। তারিখভিত্তিক লেনদেন দেখতে প্রতিটি অ্যাকাউন্টের খতিয়ান দেখুন।'),
     printedAt: printedAtStamp(lang), printLabel: lang === 'bn' ? 'প্রিন্ট করুন' : 'Print' });
 
   const printCashFlow = async () => {
     const flow = await api.cashflow(flt.from, flt.to);
-    setReportViewDoc({ shop: business.name, title: lang === 'bn' ? 'নগদ প্রবাহ বিবরণী' : 'Cash Flow Statement', period: formatPeriodLabel(flt.from, flt.to),
+    setReportViewDoc({ language: lang, shop: business.name, title: label('Cash Flow Statement', 'নগদ প্রবাহ বিবরণী'), period: formatPeriodLabel(flt.from, flt.to),
       sections: [{ title: lang === 'bn' ? 'পরিচালন নগদ প্রবাহ' : 'Operating cash flows', rows: [
         { label: lang === 'bn' ? 'গ্রাহকের কাছ থেকে আদায়' : 'Receipts from customers', right: m(flow.customerReceipts) },
         { label: lang === 'bn' ? 'সরবরাহকারীকে পরিশোধ' : 'Payments to suppliers', right: m(flow.supplierPayments), neg: true },
@@ -422,7 +425,7 @@ export function AccountsDashboard({ go, focus, onFocusDone }: AccountsDashboardP
 
   const printBalanceSheet = async () => {
     const b = await api.balanceSheet(td);
-    setReportViewDoc({ shop: business.name, title: lang === 'bn' ? 'উদ্বৃত্তপত্র' : 'Balance sheet', period: `${lang === 'bn' ? 'তারিখ' : 'As of'} ${b.asOf}`,
+    setReportViewDoc({ language: lang, shop: business.name, title: label('Balance sheet', 'উদ্বৃত্তপত্র'), period: `${label('As of', 'তারিখ')} ${b.asOf}`,
       sections: [
         { title: lang === 'bn' ? 'সম্পদ' : 'Assets', rows: [
           ...(b.accounts ? b.accounts.assets.map(account => ({ label: `${account.code} · ${account.name}`, right: m(account.balance) })) : [
@@ -456,7 +459,7 @@ export function AccountsDashboard({ go, focus, onFocusDone }: AccountsDashboardP
       ...e.lines.map(l => ({ label: l.account, sub: l.description, right: l.debit ? `${lang === 'bn' ? 'ডেবিট' : 'Dr'} ${m(l.debit)}` : `${lang === 'bn' ? 'ক্রেডিট' : 'Cr'} ${m(l.credit)}` })),
       { label: lang === 'bn' ? 'এন্ট্রি মোট (ডেবিট / ক্রেডিট)' : 'Entry total (debit / credit)', right: `${m(e.debitTotal)} / ${m(e.creditTotal)}`, bold: true },
     ] }));
-    return { shop: business.name, title: lang === 'bn' ? 'জার্নাল এন্ট্রি' : 'Journal entries', period: formatPeriodLabel(j.from, j.to), sections,
+    return { language: lang, shop: business.name, title: label('Journal entries', 'জার্নাল এন্ট্রি'), period: formatPeriodLabel(j.from, j.to), sections,
       note: j.balanced ? (lang === 'bn' ? 'প্রতিটি জার্নাল এন্ট্রিতে ডেবিট ও ক্রেডিট সমান।' : 'Each journal entry balances: total debits equal total credits.') : (lang === 'bn' ? 'কিছু এন্ট্রিতে ডেবিট ও ক্রেডিট মিলছে না; উৎস লেনদেন যাচাই করুন।' : 'Some entries do not balance. Review the source transactions.'),
       total: { label: lang === 'bn' ? 'সর্বমোট ডেবিট / ক্রেডিট' : 'Total debits / credits', value: `${m(j.debitTotal)} / ${m(j.creditTotal)}`, neg: !j.balanced }, printedAt: printedAtStamp(lang), printLabel: lang === 'bn' ? 'প্রিন্ট / PDF সংরক্ষণ' : 'Print / Save PDF' };
   };
@@ -474,21 +477,21 @@ export function AccountsDashboard({ go, focus, onFocusDone }: AccountsDashboardP
       setJournalData(j);
       setReportViewDoc(journalEntriesReportDoc(j));
     } catch {
-      Alert.alert(lang === 'bn' ? 'তারিখ যাচাই করুন' : 'Check the dates', lang === 'bn' ? 'YYYY-MM-DD ফরম্যাটে শুরু ও শেষ তারিখ দিন।' : 'Enter valid start and end dates in YYYY-MM-DD format.');
+      showEntryError(lang, lang === 'bn' ? 'YYYY-MM-DD ফরম্যাটে শুরু ও শেষ তারিখ দিন।' : 'Enter valid start and end dates in YYYY-MM-DD format.');
     }
   };
 
   const ledgerReportDoc = (g: GeneralLedger, account?: GeneralLedger['accounts'][number]): ReportDoc => {
-    const sideAmount = (amount: number) => `${m(Math.abs(amount))} ${amount < 0 ? 'Cr' : 'Dr'}`;
+    const sideAmount = (amount: number) => `${m(Math.abs(amount))} ${amount < 0 ? label('Cr', 'ক্রেডিট') : label('Dr', 'ডেবিট')}`;
     const sections: ReportDoc['sections'] = account ? [{ title: `${account.code} · ${account.account}`, rows: [
       { label: lang === 'bn' ? 'প্রারম্ভিক স্থিতি' : 'Opening balance', right: sideAmount(account.openingBalance), bold: true },
-      ...account.rows.map(r => ({ label: r.journalNo, sub: `${r.date} · ${r.reference} · ${r.description}`, right: `${r.debit ? `Dr ${m(r.debit)}` : `Cr ${m(r.credit)}`} · ${sideAmount(r.runningBalance)}` })),
+      ...account.rows.map(r => ({ label: r.journalNo, sub: `${r.date} · ${r.reference} · ${r.description}`, right: `${r.debit ? `${label('Dr', 'ডেবিট')} ${m(r.debit)}` : `${label('Cr', 'ক্রেডিট')} ${m(r.credit)}`} · ${sideAmount(r.runningBalance)}` })),
       { label: lang === 'bn' ? 'সমাপনী স্থিতি' : 'Closing balance', right: sideAmount(account.closingBalance), bold: true },
     ] }] : [{ title: lang === 'bn' ? 'অ্যাকাউন্ট সারাংশ' : 'Account summary', rows: g.accounts.map(a => ({
       label: `${a.code} · ${a.account}`, sub: `${lang === 'bn' ? 'প্রারম্ভিক' : 'Opening'} ${sideAmount(a.openingBalance)} · ${lang === 'bn' ? 'ডেবিট' : 'Dr'} ${m(a.periodDebit)} · ${lang === 'bn' ? 'ক্রেডিট' : 'Cr'} ${m(a.periodCredit)}`,
       right: sideAmount(a.closingBalance),
     })) }];
-    return { shop: business.name, title: 'General ledger', period: formatPeriodLabel(g.from, g.to), sections,
+    return { language: lang, shop: business.name, title: label('General ledger', 'সাধারণ খতিয়ান'), period: formatPeriodLabel(g.from, g.to), sections,
       note: account ? (lang === 'bn' ? 'প্রতিটি লাইনে জার্নাল নম্বর, লেনদেন এবং চলতি স্থিতি দেখানো হয়েছে।' : 'Each posting shows its journal number, transaction details, and running balance.') : (lang === 'bn' ? 'অ্যাকাউন্ট নির্বাচন করলে ওই অ্যাকাউন্টের জার্নালভিত্তিক লেনদেন দেখা যাবে।' : 'Select an account to review its journal postings.'),
       printedAt: printedAtStamp(lang), printLabel: lang === 'bn' ? 'প্রিন্ট / PDF সংরক্ষণ' : 'Print / Save PDF' };
   };
@@ -528,7 +531,7 @@ export function AccountsDashboard({ go, focus, onFocusDone }: AccountsDashboardP
         moneyRow(lang === 'bn' ? 'খরচ' : 'Expenses', fExp),
         moneyRow(lang === 'bn' ? 'নিট লাভ' : 'Net profit', fProfit),
       ] }];
-    downloadReportCSV({ shop: business.name, title: titles[activeTab], period: formatPeriodLabel(flt.from, flt.to), sections,
+    downloadReportCSV({ language: lang, shop: business.name, title: titles[activeTab], period: formatPeriodLabel(flt.from, flt.to), sections,
       printedAt: printedAtStamp(lang), printLabel: lang === 'bn' ? 'প্রিন্ট করুন' : 'Print' }, `chaler_accounts_${activeTab}_${td}.csv`);
   };
 
@@ -642,6 +645,7 @@ export function AccountsDashboard({ go, focus, onFocusDone }: AccountsDashboardP
   // Print Complete Accounts Statement
   const handlePrintStatement = () => {
     const doc: ReportDoc = {
+      language: lang,
       shop: business.name,
       title: lang === 'bn' ? 'আর্থিক বিবরণী ও অডিট রিপোর্ট' : 'Financial Statement & Audit Report',
       period: formatPeriodLabel(flt.from, flt.to),
@@ -659,13 +663,13 @@ export function AccountsDashboard({ go, focus, onFocusDone }: AccountsDashboardP
           ],
         },
         {
-          title: lang === 'bn' ? '২. আয় ও পরিচালন মুনাফা (P&L)' : '2. Income & Net Profit',
+          title: lang === 'bn' ? '২. আয় ও পরিচালন মুনাফা' : '2. Income & Net Profit',
           rows: [
-            { label: lang === 'bn' ? 'মোট বিক্রয় (Net Sales)' : 'Net Sales', right: m(fSale) },
-            { label: lang === 'bn' ? 'চালের ক্রয় মূল্য (COGS)' : 'Cost of Goods Sold', right: m(fCogs), neg: true },
-            { label: lang === 'bn' ? 'মোট বাণিজ্যিক লাভ (Gross Profit)' : 'Gross Profit', right: m(fGrossProfit), bold: true },
-            { label: lang === 'bn' ? 'পরিচালন ব্যয় (Operating Expenses)' : 'Operating Expenses', right: m(fExp), neg: true },
-            { label: lang === 'bn' ? 'প্রকৃত নিট মুনাফা (Net Profit)' : 'Net Profit', right: m(fProfit), bold: true },
+            { label: lang === 'bn' ? 'মোট বিক্রয়' : 'Net Sales', right: m(fSale) },
+            { label: lang === 'bn' ? 'বিক্রিত পণ্যের ক্রয়মূল্য' : 'Cost of Goods Sold', right: m(fCogs), neg: true },
+            { label: lang === 'bn' ? 'মোট বাণিজ্যিক মুনাফা' : 'Gross Profit', right: m(fGrossProfit), bold: true },
+            { label: lang === 'bn' ? 'পরিচালন ব্যয়' : 'Operating Expenses', right: m(fExp), neg: true },
+            { label: lang === 'bn' ? 'নিট মুনাফা' : 'Net Profit', right: m(fProfit), bold: true },
           ],
         },
         {
@@ -673,7 +677,7 @@ export function AccountsDashboard({ go, focus, onFocusDone }: AccountsDashboardP
           rows: [
             { label: lang === 'bn' ? 'বাজারে কাস্টমারদের কাছে মোট বাকি' : 'Customer Receivables', right: m(totalDueAmount) },
             { label: lang === 'bn' ? 'মহাজন/মিলের মোট দেনা' : 'Vendor Payables', right: m(totalPayableAmount), neg: true },
-            { label: lang === 'bn' ? 'নিট তারল্য উদ্বৃত্ত (Working Capital)' : 'Net Working Capital', right: m(netSolvencyScore), bold: true },
+            { label: lang === 'bn' ? 'নিট কার্যকরী মূলধন' : 'Net Working Capital', right: m(netSolvencyScore), bold: true },
           ],
         },
       ],

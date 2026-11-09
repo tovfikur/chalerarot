@@ -7,6 +7,7 @@ import { UserSettings } from './UserSettings';
 import { ActivityLog } from './ActivityLog';
 import { useAuth } from '../auth';
 import { AppIcon, icons, IconName } from '../icons';
+import { showEntryError } from '../entryDialog';
 
 export function Settings() {
   const { user } = useAuth();
@@ -21,10 +22,10 @@ export function Settings() {
   const months = Array.from({ length: 12 }, (_, i) => ({ id: String(i + 1), name: new Intl.DateTimeFormat(lang === 'bn' ? 'bn-BD' : 'en', { month: 'long' }).format(new Date(2024, i, 1)) }));
   const save = async () => {
     if (busy) return;
-    if (!draft.name.trim()) { setFailed(true); setMessage(label('ব্যবসার নাম লিখুন', 'Enter a business name')); return; }
+    if (!draft.name.trim()) { const msg = label('ব্যবসার নাম লিখুন', 'Enter a business name'); setFailed(true); setMessage(msg); showEntryError(lang, msg); return; }
     setBusy(true); setMessage('');
     try { await saveBusiness(draft); setFailed(false); setMessage(draft.language === 'bn' ? 'সেটিংস সংরক্ষিত হয়েছে' : 'Settings saved'); }
-    catch { setFailed(true); setMessage(label('সংরক্ষণ করা যায়নি। আবার চেষ্টা করুন।', 'Could not save. Please try again.')); }
+    catch { const msg = label('সংরক্ষণ করা যায়নি। আবার চেষ্টা করুন।', 'Could not save. Please try again.'); setFailed(true); setMessage(msg); showEntryError(lang, msg); }
     finally { setBusy(false); }
   };
   const open = (next: typeof section) => { setDraft(business); setMessage(''); setSection(next); };
@@ -70,7 +71,7 @@ export function Settings() {
     {section === 'business' ?
     <Card>
       <Title>{label('ব্যবসার তথ্য', 'Business details')}</Title>
-      <Field label={label('ব্যবসার নাম', 'Business name')} value={draft.name} onChange={v => change('name', v)} />
+      <Field label={label('ব্যবসার নাম', 'Business name')} value={draft.name} onChange={v => change('name', v)} required />
       <Field label={label('ঠিকানা', 'Address')} value={draft.address} onChange={v => change('address', v)} />
       <Field label={label('ফোন নম্বর', 'Phone number')} value={draft.phone} onChange={v => change('phone', v)} />
       <Text>{label('মুদ্রা', 'Currency')}</Text>

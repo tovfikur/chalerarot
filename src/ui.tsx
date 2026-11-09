@@ -65,6 +65,12 @@ export const Muted = ({ children }: { children: ReactNode }) => {
   const fs = useFs(14, 13);
   return <Text style={[s.muted, { fontSize: fs }]}>{children}</Text>;
 };
+export function RequiredLabel({ text, required = false, style }: { text: string; required?: boolean; style?: any }) {
+  return <View style={{ flexDirection: 'row', alignItems: 'baseline' }}>
+    <Text style={[{ color: color.muted, fontSize: 14 }, style]}>{text}</Text>
+    {required ? <Text accessibilityLabel="required" style={{ color: '#DC2626', fontSize: 16, fontWeight: '900' }}> *</Text> : null}
+  </View>;
+}
 export const Btn = ({ label, onPress, kind = 'primary', icon, testID }: { label: string; onPress: () => void; kind?: 'primary' | 'ghost' | 'danger'; icon?: IconName; testID?: string }) => {
   const fs = useFs(17, 15);
   return (
@@ -76,11 +82,11 @@ export const Btn = ({ label, onPress, kind = 'primary', icon, testID }: { label:
     </TouchableOpacity>
   );
 };
-export const Field = ({ label, value, onChange, num, accessibilityLabel, inputRef }: { label: string; value: string; onChange: (v: string) => void; num?: boolean; accessibilityLabel?: string; inputRef?: React.Ref<TextInput> }) => {
+export const Field = ({ label, value, onChange, num, accessibilityLabel, inputRef, required = false }: { label: string; value: string; onChange: (v: string) => void; num?: boolean; accessibilityLabel?: string; inputRef?: React.Ref<TextInput>; required?: boolean }) => {
   const fs = useFs(17, 15);
   return (
     <View style={{ marginBottom: 10 }}>
-      <Muted>{label}</Muted>
+      <RequiredLabel text={label} required={required} />
       <TextInput ref={inputRef} value={value} onChangeText={onChange} accessibilityLabel={accessibilityLabel ?? label} keyboardType={num ? 'numeric' : 'default'} inputMode={num ? 'decimal' : undefined} style={[s.input, { fontSize: fs }]} />
     </View>
   );
@@ -139,7 +145,7 @@ export function AccountPicker({ accountId, onPick, label, required, accountType 
   );
   return (
     <View style={{ marginBottom: 10 }}>
-      {label ? <Muted>{label}{required ? ' *' : ''}</Muted> : null}
+      {label ? <RequiredLabel text={label} required={required} /> : null}
       <View style={{ flexDirection: 'row', flexWrap: 'wrap', marginTop: 6 }}>
         {types.map(type => {
           const rows = byType(type);

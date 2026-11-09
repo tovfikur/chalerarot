@@ -1,10 +1,11 @@
 import React, { useState, useMemo, useEffect, useRef } from 'react';
 import { View, Text, TextInput, TouchableOpacity, ScrollView, StyleSheet, Modal, Platform, Alert } from 'react-native';
 import { useApp, Product } from '../store';
-import { toBnDigits, useNum } from '../ui';
+import { toBnDigits, useNum, RequiredLabel } from '../ui';
 import { toEnDigits, normalizeInput, parseNum } from '../bn';
 import { AppIcon, icons } from '../icons';
 import { BulkUploadModal } from '../BulkUploadModal';
+import { showEntryError } from '../entryDialog';
 import {
   exportStockExcel,
   exportStockPDF,
@@ -316,6 +317,7 @@ export function StockDashboard() {
       auditRows: filteredAuditRows,
       summary: auditSummary,
       note: auditNote,
+      lang,
     });
     if (!ok && Platform.OS !== 'web') {
       Alert.alert(label('অডিট রিপোর্ট', 'Audit report'), label('পিডিএফ রিপোর্ট তৈরি করা হয়েছে।', 'PDF report created.'));
@@ -326,6 +328,7 @@ export function StockDashboard() {
     const ok = exportAuditExcel({
       auditRows: filteredAuditRows,
       summary: auditSummary,
+      lang,
     });
     if (!ok && Platform.OS !== 'web') {
       Alert.alert(label('অডিট শিট', 'Audit sheet'), label('এক্সেল ফাইল ডাউনলোড সম্পন্ন হয়েছে।', 'Excel file downloaded.'));
@@ -363,20 +366,20 @@ export function StockDashboard() {
   const handleSaveProduct = async () => {
     const trimmedName = newName.trim();
     if (!trimmedName) {
-      Alert.alert(t('invalid'), label('পণ্যের নাম আবশ্যক।', 'Product name is required.'));
+      showEntryError(lang, label('পণ্যের নাম আবশ্যক।', 'Product name is required.'));
       return;
     }
 
     const bagKg = parseNum(newBagKg) || 50;
     if (bagKg <= 0) {
-      Alert.alert(t('invalidBag'), label('প্রতি বস্তায় কেজির পরিমাণ ০ এর বেশি হতে হবে।', 'Bag weight must be greater than zero.'));
+      showEntryError(lang, label('প্রতি বস্তায় কেজির পরিমাণ ০ এর বেশি হতে হবে।', 'Bag weight must be greater than zero.'));
       return;
     }
     const openingBags = parseNum(newOpeningBags) || 0;
     const cost = parseNum(newCostRate) || 0;
     const price = parseNum(newSalePrice);
     if (!Number.isFinite(price) || price <= 0) {
-      Alert.alert(t('invalidSalePrice'), label('সঠিক বিক্রয়দর দিন (০ এর বেশি)।', 'Enter a sale price greater than zero.'));
+      showEntryError(lang, label('সঠিক বিক্রয়দর দিন (০ এর বেশি)।', 'Enter a sale price greater than zero.'));
       return;
     }
     const openingKg = Math.round(openingBags * bagKg * 100) / 100;
@@ -412,7 +415,7 @@ export function StockDashboard() {
       setNewDescription('');
       Alert.alert(t('done'), isEdit ? label('পণ্য সফলভাবে আপডেট করা হয়েছে।', 'Product updated.') : label('নতুন পণ্য সফলভাবে যোগ করা হয়েছে।', 'Product added.'));
     } catch (err) {
-      Alert.alert(t('invalid'), err instanceof Error ? err.message : label('সংরক্ষণ ব্যর্থ হয়েছে।', 'Save failed.'));
+      showEntryError(lang, err instanceof Error ? err.message : label('সংরক্ষণ ব্যর্থ হয়েছে।', 'Save failed.'));
     }
   };
 
@@ -1086,7 +1089,7 @@ export function StockDashboard() {
                   />
                 </View>
                 <View style={[styles.modalCol, { flex: 1.6 }]}>
-                  <Text style={styles.modalLabel}>{label('পণ্যের নাম *', 'Product name *')}</Text>
+                  <RequiredLabel text={label('পণ্যের নাম', 'Product name')} required style={styles.modalLabel} />
                   <TextInput
                     value={newName}
                     onChangeText={setNewName}
@@ -1100,7 +1103,7 @@ export function StockDashboard() {
 
               <View style={styles.modalTwoCol}>
                 <View style={styles.modalCol}>
-                  <Text style={styles.modalLabel}>{label('প্রতি বস্তায় পরিমাণ (কেজি) *', 'Quantity per bag (kg) *')}</Text>
+                  <Text style={styles.modalLabel}>{label('প্রতি বস্তায় পরিমাণ (কেজি)', 'Quantity per bag (kg)')}</Text>
                   <TextInput
                     value={newBagKg}
                     onChangeText={setNewBagKg}
@@ -1144,7 +1147,7 @@ export function StockDashboard() {
                   )}
                 </View>
                 <View style={styles.modalCol}>
-                  <Text style={styles.modalLabel}>{label('বিক্রয়দর (প্রতি কেজি ৳) *', 'Sale rate (৳/kg) *')}</Text>
+                  <RequiredLabel text={label('বিক্রয়দর (প্রতি কেজি ৳)', 'Sale rate (৳/kg)')} required style={styles.modalLabel} />
                   <TextInput
                     value={newSalePrice}
                     onChangeText={setNewSalePrice}
@@ -1333,7 +1336,7 @@ export function StockDashboard() {
 
               {/* Audit Note */}
               <View style={styles.modalFormGroup}>
-                <Text style={styles.modalLabel}>{label('অডিট সমন্বয়ের কারণ বা রেফারেন্স নোট *', 'Reason or reference note *')}</Text>
+                <RequiredLabel text={label('অডিট সমন্বয়ের কারণ বা রেফারেন্স নোট', 'Reason or reference note')} required style={styles.modalLabel} />
                 <TextInput
                   value={auditNote}
                   onChangeText={setAuditNote}

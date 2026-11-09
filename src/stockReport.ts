@@ -2,7 +2,7 @@ import { toBnDigits } from './bn';
 import { Platform } from 'react-native';
 import { Lang } from './i18n';
 
-const englishReport = (html: string, lang: Lang) => {
+const englishReport = (html: string, lang: Lang, preservedValues: unknown[] = []) => {
   if (lang !== 'en') return html;
   const labels: Record<string, string> = {
     'বিক্রয়': 'Sale', 'ক্রয়': 'Purchase', 'বিক্রয় ফেরত': 'Sales return', 'ক্রয় ফেরত': 'Purchase return',
@@ -19,10 +19,39 @@ const englishReport = (html: string, lang: Lang) => {
     'মজুদ চাল ও স্টক মূল্যায়ন বিবরণী রিপোর্ট': 'Rice inventory valuation report', 'স্টক মুভমেন্ট রিপোর্ট': 'Stock movement report',
     'স্টক মুভমেন্ট বিবরণী রিপোর্ট': 'Stock movement report', 'প্রিন্ট / পিডিএফ হিসেবে সংরক্ষণ (Save as PDF)': 'Print / Save as PDF',
     'বন্ধ করুন': 'Close', 'টি': '', 'এটি একটি কম্পিউটার জেনারেটেড রিপোর্ট • চালের আড়ৎ ম্যানেজমেন্ট সিস্টেম': 'This is a computer generated report • Chaler Arot Management System',
+    'ম্যানুয়াল স্টক অডিট ও নিরীক্ষা বিবরণী': 'Manual stock audit report', 'মোট অডিটকৃত পণ্য:': 'Audited products:', 'পার্থক্যযুক্ত পণ্য:': 'Products with discrepancies:',
+    'মোট সিস্টেম কেজি:': 'Total system kg:', 'মোট বাস্তব কেজি:': 'Total physical kg:', 'পার্থক্য (কেজি):': 'Difference (kg):', 'আর্থিক সমন্বয় প্রভাব (৳):': 'Financial adjustment impact (৳):',
+    'সিস্টেম মজুদ (বস্তা)': 'System stock (bags)', 'সিস্টেম মজুদ (কেজি)': 'System stock (kg)', 'বাস্তব গণনা (বস্তা)': 'Physical count (bags)', 'বাস্তব গণনা (কেজি)': 'Physical count (kg)',
+    'পার্থক্য (বস্তা)': 'Difference (bags)', 'গড় ক্রয় দর (৳/কেজি)': 'Average purchase rate (৳/kg)', 'আর্থিক প্রভাব (৳)': 'Financial impact (৳)', 'কারণ / মন্তব্য': 'Reason / comment',
+    'অডিটের তারিখ:': 'Audit date:', 'মোট অডিটকৃত পণ্য': 'Audited products', 'অমিল': 'discrepancies',
+    'সিস্টেম মজুদ': 'System stock', 'বাস্তব মজুদ': 'Physical stock', 'পার্থক্য': 'Difference', 'গড় ক্রয় দর': 'Average purchase rate', 'নিরীক্ষকের স্বাক্ষর': 'Auditor signature',
+    'অডিট নোট:': 'Audit note:', 'মোট পণ্য / অমিল': 'Products / discrepancies', 'সাইজ': 'Size',
+    'নিট পার্থক্য ও আর্থিক প্রভাব': 'Net difference and financial impact',
+    'কেজি': 'kg', 'বস্তা': 'bags', 'মিল': 'matched', 'গণনাকারী / নিরীক্ষক': 'Counted by / auditor',
+    'গুদাম ইনচার্জ': 'Warehouse in-charge', 'ব্যবস্থাপক / স্বত্বাধিকারী': 'Manager / owner', 'স্বাক্ষর ও তারিখ': 'Signature and date',
+    'অনুমোদন ও তারিখ': 'Approval and date', 'এটি একটি কম্পিউটার জেনারেটেড স্টক অডিট ও নিরীক্ষা রিপোর্ট • চালের আড়ৎ ম্যানেজমেন্ট সিস্টেম': 'Computer generated stock audit report • Chaler Arot Management System',
+    'ক্রয় দর (৳/কেজি)': 'Purchase rate (৳/kg)', 'বিক্রয় দর (৳/কেজি)': 'Sale rate (৳/kg)',
+    'বাস্তব গণনা': 'Physical count',
+    'স্টক অডিট ও নিরীক্ষা রিপোর্ট': 'Stock audit report', 'ম্যানুয়াল স্টক অডিট ও নিরীক্ষা বিবরণী রিপোর্ট': 'Manual stock audit report',
   };
-  let result = html.replace(/[০-৯]/g, digit => String('০১২৩৪৫৬৭৮৯'.indexOf(digit))).replace(/ঢাকা/g, 'Dhaka');
+  const saved: { token: string; value: string }[] = [];
+  let result = html;
+  for (const value of preservedValues) {
+    if (value === null || value === undefined || value === '') continue;
+    const raw = String(value);
+    const csvValue = `"${raw.replace(/"/g, '""')}"`;
+    for (const variant of [...new Set([raw, esc(raw), csvValue])]) {
+      if (!variant || !result.includes(variant)) continue;
+      const token = `__REPORT_INPUT_${saved.length}_PRESERVED__`;
+      result = result.replaceAll(variant, token);
+      saved.push({ token, value: variant });
+    }
+  }
+  result = result.replace(/[০-৯]/g, digit => String('০১২৩৪৫৬৭৮৯'.indexOf(digit))).replace(/ঢাকা/g, 'Dhaka');
   for (const [bn, en] of Object.entries(labels).sort(([a], [b]) => b.length - a.length)) result = result.replaceAll(bn, en);
-  return result.replace('<html lang="bn">', '<html lang="en">');
+  result = result.replace('<html lang="bn">', '<html lang="en">');
+  for (const item of saved) result = result.replaceAll(item.token, item.value);
+  return result;
 };
 
 const esc = (s: any) => String(s ?? '')
@@ -39,7 +68,9 @@ export const movementTypeLabel = (type: string, lang: Lang = 'bn'): string => {
     SALE_EDIT_REVERSAL: ['বিক্রয় সংশোধন', 'Sale edit reversal'],
     PURCHASE_EDIT_REVERSAL: ['ক্রয় সংশোধন', 'Purchase edit reversal'],
   };
-  labels.NEGATIVE_STOCK_COGS_ADJUSTMENT = ['Negative stock COGS adjustment', 'Negative stock COGS adjustment'];
+  labels.NEGATIVE_STOCK_COGS_ADJUSTMENT = ['ঋণাত্মক মজুদের বিক্রয়মূল্য সমন্বয়', 'Negative stock COGS adjustment'];
+  labels.SALE_DELETE_REVERSAL = ['বিক্রয় মুছে ফেলার সমন্বয়', 'Sale deletion adjustment'];
+  labels.PURCHASE_DELETE_REVERSAL = ['ক্রয় মুছে ফেলার সমন্বয়', 'Purchase deletion adjustment'];
   const key = type?.toUpperCase();
   if (labels[key]) return labels[key][lang === 'bn' ? 0 : 1];
   switch (type?.toUpperCase()) {
@@ -146,7 +177,7 @@ export function exportStockExcel({
       Math.round(totalValuation),
     ].map(escapeCsv).join(','));
 
-    return downloadCSV(`chaler_stock_${dateStr}.csv`, englishReport(lines.join('\r\n'), lang));
+    return downloadCSV(`chaler_stock_${dateStr}.csv`, englishReport(lines.join('\r\n'), lang, items.flatMap(it => [it.code, it.name])));
   } else {
     const lines: string[] = [
       ['চালের আড়ৎ - স্টক মুভমেন্ট বিবরণী'].map(escapeCsv).join(','),
@@ -160,12 +191,12 @@ export function exportStockExcel({
         idx + 1,
         mv.date,
         mv.productName || 'পণ্য',
-        movementTypeLabel(mv.type),
+        movementTypeLabel(mv.type, lang),
         mv.qty,
       ].map(escapeCsv).join(','));
     });
 
-    return downloadCSV(`chaler_stock_movements_${dateStr}.csv`, englishReport(lines.join('\r\n'), lang));
+    return downloadCSV(`chaler_stock_movements_${dateStr}.csv`, englishReport(lines.join('\r\n'), lang, movements.map(mv => mv.productName)));
   }
 }
 
@@ -230,7 +261,7 @@ export function buildStockReportHTML({
         <td style="text-align: center; color: #64748B;">${toBnDigits(String(idx + 1))}</td>
         <td style="color: #334155;">${esc(toBnDigits(mv.date))}</td>
         <td style="font-weight: 600; color: #0F172A;">${esc(mv.productName || 'পণ্য')}</td>
-        <td style="font-weight: 700; color: #1E293B;">${esc(movementTypeLabel(mv.type))}</td>
+        <td style="font-weight: 700; color: #1E293B;">${esc(movementTypeLabel(mv.type, lang))}</td>
         <td style="text-align: right; font-weight: 800; color: ${mv.qty >= 0 ? '#16A34A' : '#DC2626'};">
           ${toBnDigits(String(mv.qty))} কেজি
         </td>
@@ -499,7 +530,7 @@ export function buildStockReportHTML({
   </script>
 </body>
 </html>`;
-  return englishReport(html, lang);
+  return englishReport(html, lang, [...items.flatMap(it => [it.code, it.name]), ...movements.map(mv => mv.productName), searchQuery]);
 }
 
 export function exportStockPDF({
@@ -579,8 +610,10 @@ export type AuditRow = {
 export function exportAuditExcel({
   auditRows,
   summary,
+  lang = 'bn',
 }: {
   auditRows: AuditRow[];
+  lang?: Lang;
   summary: {
     totalItems: number;
     discrepancyCount: number;
@@ -664,7 +697,8 @@ export function exportAuditExcel({
     '',
   ].map(escapeCsv).join(','));
 
-  return downloadCSV(`stock_audit_${dateStr}.csv`, lines.join('\r\n'));
+  const preserved = auditRows.flatMap(row => [row.code, row.name, row.reason]);
+  return downloadCSV(`stock_audit_${dateStr}.csv`, englishReport(lines.join('\r\n'), lang, preserved));
 }
 
 export function buildAuditReportHTML({
@@ -672,6 +706,7 @@ export function buildAuditReportHTML({
   summary,
   date,
   note,
+  lang = 'bn',
 }: {
   auditRows: AuditRow[];
   summary: {
@@ -686,6 +721,7 @@ export function buildAuditReportHTML({
   };
   date?: string;
   note?: string;
+  lang?: Lang;
 }): string {
   const now = new Date();
   const dateStr = date || now.toLocaleDateString('en-GB');
@@ -724,7 +760,7 @@ export function buildAuditReportHTML({
     `;
   }).join('');
 
-  return `<!DOCTYPE html>
+  return englishReport(`<!DOCTYPE html>
 <html lang="bn">
 <head>
   <meta charset="utf-8" />
@@ -1007,7 +1043,7 @@ export function buildAuditReportHTML({
     };
   </script>
 </body>
-</html>`;
+</html>`, lang, [...auditRows.flatMap(row => [row.code, row.name, row.reason]), note]);
 }
 
 export function exportAuditPDF({
@@ -1015,6 +1051,7 @@ export function exportAuditPDF({
   summary,
   date,
   note,
+  lang = 'bn',
 }: {
   auditRows: AuditRow[];
   summary: {
@@ -1029,6 +1066,7 @@ export function exportAuditPDF({
   };
   date?: string;
   note?: string;
+  lang?: Lang;
 }): boolean {
   if (typeof window === 'undefined') return false;
   const html = buildAuditReportHTML({
@@ -1036,6 +1074,7 @@ export function exportAuditPDF({
     summary,
     date,
     note,
+    lang,
   });
 
   const w = window.open('', '_blank');

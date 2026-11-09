@@ -12,13 +12,14 @@ import {
   Modal,
 } from 'react-native';
 import { useApp, today, Product, Party } from '../store';
-import { color, useMoney, useNum, toBnDigits, AccountPicker, Field } from '../ui';
+import { color, useMoney, useNum, toBnDigits, AccountPicker, Field, RequiredLabel } from '../ui';
 import { parseNum, localeDigits, toEnDigits } from '../bn';
 import { AppIcon, icons } from '../icons';
 import { MonthCal } from '../screens';
 import { BagUnit, kgPerUnit } from '../bags';
 import { api, SaleDetail, PurchaseDetail } from '../api';
 import { UnitNames, InvData, fmtTime, unitDetail, buildInvoiceHTML } from '../invoice';
+import { showEntryError } from '../entryDialog';
 
 export interface FormItemLine {
   id: string;
@@ -111,6 +112,7 @@ export function TradeDashboardForm({ mode, onDone, onOpenHistory, editId }: Trad
   const isSale = mode === 'sale';
   const { t, lang, products, vendors, customers, bal, purchase, sale, moneyAccounts, saveExpense, deleteExpense, expenses, sales, purchases, refresh } = useApp();
   const tx = (bn: string, en: string) => lang === 'bn' ? bn : en;
+  const showFormError = (message: string) => showEntryError(lang, message);
   const m = useMoney();
   const n = useNum();
 
@@ -343,12 +345,15 @@ export function TradeDashboardForm({ mode, onDone, onOpenHistory, editId }: Trad
           otherCost: mode === 'purchase' ? String(line.otherCost ?? 0) : '' };
       }));
       const paymentLines = doc.payments ?? [];
-      const unsupportedPaymentLines = paymentLines.filter(p => {
+      const transportPayments = paymentLines.filter(p => p.transportPayment);
+      const ordinaryPaymentLines = paymentLines.filter(p => !p.transportPayment);
+      const unsupportedPaymentLines = ordinaryPaymentLines.filter(p => {
         const account = moneyAccounts.find(a => a.id === p.accountId);
         return !account || !['cash', 'bank'].includes(account.type);
       });
       if (unsupportedPaymentLines.length) setEditPaymentUnsupported(true);
-      for (const p of paymentLines) {
+      if (transportPayments.length) setTransportCost(String(transportPayments.reduce((sum, p) => sum + p.amount, 0)));
+      for (const p of ordinaryPaymentLines) {
         const account = moneyAccounts.find(a => a.id === p.accountId);
         if (account?.type === 'bank' || account?.type === 'cash') {
           setPaymentAmounts(v => ({ ...v, [account.id]: String(parseNum(v[account.id]) + p.amount) }));
@@ -359,7 +364,7 @@ export function TradeDashboardForm({ mode, onDone, onOpenHistory, editId }: Trad
       const linkedTransport = expenses.find(e => e.category === 'transport' && (e.note ?? '').includes(`#${invoiceRef}`));
       const linkedLanding = expenses.find(e => e.capitalized && (e.note ?? '').includes(`#${invoiceRef}`));
       setTransportExpenseId(linkedTransport?.id); setLandingExpenseId(linkedLanding?.id);
-      setTransportCost(linkedTransport ? String(linkedTransport.amount) : '');
+      if (!transportPayments.length) setTransportCost(linkedTransport ? String(linkedTransport.amount) : '');
       if (linkedTransport?.accountId) setExpenseAccountId(linkedTransport.accountId);
       if (linkedLanding?.accountId) setExpenseAccountId(linkedLanding.accountId);
       setEditLoading(false);
@@ -435,10 +440,11 @@ export function TradeDashboardForm({ mode, onDone, onOpenHistory, editId }: Trad
   const numCash = paymentLines.filter(payment => payment.type === 'cash').reduce((sum, payment) => sum + payment.amount, 0);
   const numBank = paymentLines.filter(payment => payment.type === 'bank').reduce((sum, payment) => sum + payment.amount, 0);
   const numDiscount = parseNum(discount);
-  const totalPaid = numCash + numBank;
+  const cashBankPaid = numCash + numBank;
+  const totalPaid = cashBankPaid + (isSale ? numTransport : 0);
 
-  // Invoice due: product value minus transport cost minus payments and discount
-  const netInvoiceBalance = totalProductValue - numTransport - totalPaid - numDiscount;
+  // Customer-paid transport counts toward the invoice settlement, but is not shop cash.
+  const netInvoiceBalance = totalProductValue - totalPaid - numDiscount;
   const invoiceDue = Math.max(0, netInvoiceBalance);
   // Total due: invoice due + previous due (or reduced by net return credit)
   const selectedAdvance = Math.min(advanceToApply, Math.max(0, -prevDue), invoiceDue);
@@ -816,18 +822,18 @@ export function TradeDashboardForm({ mode, onDone, onOpenHistory, editId }: Trad
   // Open Split Confirmation Modal after preliminary validation
   const handleOpenConfirm = useCallback(() => {
     if (editPaymentUnsupported) {
-      setFormError(tx('এই ইনভয়েসের পেমেন্ট অ্যাকাউন্ট সম্পাদনা করা যাবে না।', 'This invoice uses a payment account that this editor cannot preserve.'));
+      showFormError(tx('এই ইনভয়েসের পেমেন্ট অ্যাকাউন্ট সম্পাদনা করা যাবে না।', 'This invoice uses a payment account that this editor cannot preserve.'));
       return;
     }
     setFormError('');
     const validLines = items.filter(it => it.name.trim() && parseNum(it.qty) !== 0);
     if (!validLines.length) {
-      setFormError(lang === 'bn' ? 'অনুগ্রহ করে অন্তত একটি পণ্য ও তার পরিমাণ (ধনাত্মক বা ফেরত) দিন।' : 'Add at least one selected product with a non-zero quantity.');
+      showFormError(lang === 'bn' ? 'অনুগ্রহ করে অন্তত একটি পণ্য ও তার পরিমাণ (ধনাত্মক বা ফেরত) দিন।' : 'Add at least one selected product with a non-zero quantity.');
       return;
     }
 
     if (!selectedPartyId) {
-      setFormError(isSale ? 'Select a customer before creating this invoice.' : 'Select a vendor before creating this invoice.');
+      showFormError(isSale ? tx('ইনভয়েস তৈরির আগে কাস্টমার নির্বাচন করুন।', 'Select a customer before creating this invoice.') : tx('ইনভয়েস তৈরির আগে সরবরাহকারী নির্বাচন করুন।', 'Select a supplier before creating this invoice.'));
       return;
     }
 
@@ -836,7 +842,7 @@ export function TradeDashboardForm({ mode, onDone, onOpenHistory, editId }: Trad
       return !(enteredRate > 0);
     });
     if (hasInvalidLine) {
-      setFormError(isSale ? tx('পণ্যের সঠিক বিক্রয় দর দিন।', 'Enter a valid sale rate.') : tx('পণ্যের সঠিক ক্রয় দর দিন।', 'Enter a valid purchase rate.'));
+      showFormError(isSale ? tx('পণ্যের সঠিক বিক্রয় দর দিন।', 'Enter a valid sale rate.') : tx('পণ্যের সঠিক ক্রয় দর দিন।', 'Enter a valid purchase rate.'));
       return;
     }
 
@@ -849,14 +855,14 @@ export function TradeDashboardForm({ mode, onDone, onOpenHistory, editId }: Trad
     }
 
     setReviewSplitOpen(true);
-  }, [items, isSale, selectedPartyId, parties, t, lang, products, totalProductValue, numTransport, numDiscount, editId, editPaymentUnsupported, tx, paymentAccounts, paymentAmounts]);
+  }, [items, isSale, selectedPartyId, parties, t, lang, products, totalProductValue, numTransport, numDiscount, editId, editPaymentUnsupported, tx, paymentAccounts, paymentAmounts, showFormError]);
 
   // Final submission handler that creates the invoice
   const executeTransaction = useCallback(async (printWin?: any) => {
     const win = (printWin && typeof printWin === 'object' && typeof printWin.close === 'function') ? (printWin as Window) : null;
     if (submitting) return;
     if (editPaymentUnsupported) {
-      setFormError(tx('এই ইনভয়েসের পেমেন্ট অ্যাকাউন্ট সম্পাদনা করা যাবে না।', 'This invoice uses a payment account that this editor cannot preserve.'));
+      showFormError(tx('এই ইনভয়েসের পেমেন্ট অ্যাকাউন্ট সম্পাদনা করা যাবে না।', 'This invoice uses a payment account that this editor cannot preserve.'));
       if (win && !win.closed) win.close();
       return;
     }
@@ -864,13 +870,13 @@ export function TradeDashboardForm({ mode, onDone, onOpenHistory, editId }: Trad
     const validLines = items.filter(it => it.name.trim() && parseNum(it.qty) !== 0);
     if (!validLines.length) {
       if (win && !win.closed) win.close();
-      setFormError(tx('অনুগ্রহ করে অন্তত একটি পণ্যের নাম ও পরিমাণ দিন।', 'Enter at least one product and quantity.'));
+      showFormError(tx('অনুগ্রহ করে অন্তত একটি পণ্যের নাম ও পরিমাণ দিন।', 'Enter at least one product and quantity.'));
       return;
     }
 
     if (!selectedPartyId) {
       if (win && !win.closed) win.close();
-      setFormError(isSale ? tx('ইনভয়েস তৈরির আগে কাস্টমার নির্বাচন করুন।', 'Select a customer before creating the invoice.') : tx('ইনভয়েস তৈরির আগে সরবরাহকারী নির্বাচন করুন।', 'Select a vendor before creating the invoice.'));
+      showFormError(isSale ? tx('ইনভয়েস তৈরির আগে কাস্টমার নির্বাচন করুন।', 'Select a customer before creating the invoice.') : tx('ইনভয়েস তৈরির আগে সরবরাহকারী নির্বাচন করুন।', 'Select a supplier before creating the invoice.'));
       return;
     }
 
@@ -881,14 +887,14 @@ export function TradeDashboardForm({ mode, onDone, onOpenHistory, editId }: Trad
 
     if (hasInvalidLine) {
       if (win && !win.closed) win.close();
-      setFormError(isSale ? tx('পণ্যের সঠিক বিক্রয় দর দিন।', 'Enter a valid sale rate.') : tx('পণ্যের সঠিক ক্রয় দর দিন।', 'Enter a valid purchase rate.'));
+      showFormError(isSale ? tx('পণ্যের সঠিক বিক্রয় দর দিন।', 'Enter a valid sale rate.') : tx('পণ্যের সঠিক ক্রয় দর দিন।', 'Enter a valid purchase rate.'));
       return;
     }
 
     const effectivePartyId = selectedPartyId;
-    if (paymentLines.some(payment => !payment.active)) { setFormError('Payments must use active cash or bank accounts.'); return; }
+    if (paymentLines.some(payment => !payment.active)) { showFormError(tx('পেমেন্টের জন্য সক্রিয় ক্যাশ বা ব্যাংক অ্যাকাউন্ট বাছুন।', 'Choose an active cash or bank account for the payment.')); return; }
     const chosenAccountId = paymentLines[0]?.accountId ?? paymentAccounts[0]?.id ?? expenseAccountId;
-    if (!isSale && validLines.some(l => parseNum(l.otherCost) > 0) && !expenseAccountId) { setFormError('Select an active account for purchase costs.'); return; }
+    if (!isSale && validLines.some(l => parseNum(l.otherCost) > 0) && !expenseAccountId) { showFormError(tx('ক্রয় খরচের জন্য একটি সক্রিয় অ্যাকাউন্ট নির্বাচন করুন।', 'Select an active account for purchase costs.')); return; }
 
     setSubmitting(true);
     try {
@@ -954,6 +960,8 @@ export function TradeDashboardForm({ mode, onDone, onOpenHistory, editId }: Trad
           lines: processedLines,
           discount: numDiscount,
           paid: totalPaid,
+          transportPaid: numTransport,
+          transportPaymentNote: tx('পরিবহন পেমেন্ট (গ্রাহক সরাসরি দিয়েছেন)', 'Transport payment (paid directly by customer)'),
           accountId: chosenAccountId,
           payments: paymentLines.map(({ accountId, amount }) => ({ accountId, amount })),
           paymentNote: paymentNote.trim() || undefined,
@@ -983,7 +991,7 @@ export function TradeDashboardForm({ mode, onDone, onOpenHistory, editId }: Trad
       const expAccountId = isSale ? chosenAccountId : expenseAccountId;
       const expenseSaveFailures: string[] = [];
 
-      if (numTransport > 0 && expAccountId) {
+      if (!isSale && numTransport > 0 && expAccountId) {
         try {
           await saveExpense({
             id: editId ? transportExpenseId : undefined,
@@ -999,7 +1007,7 @@ export function TradeDashboardForm({ mode, onDone, onOpenHistory, editId }: Trad
           expenseSaveFailures.push('transport');
         }
       }
-      if (editId && numTransport <= 0 && transportExpenseId) {
+      if (editId && transportExpenseId && (isSale || numTransport <= 0)) {
         await deleteExpense(transportExpenseId);
       }
 
@@ -1099,14 +1107,14 @@ export function TradeDashboardForm({ mode, onDone, onOpenHistory, editId }: Trad
       }
     } catch (err) {
       if (win && !win.closed) win.close();
-      setFormError(err instanceof Error ? err.message : tx('লেনদেন সম্পন্ন করা সম্ভব হয়নি।', 'Could not complete the transaction.'));
+      showFormError(err instanceof Error ? err.message : tx('লেনদেন সম্পন্ন করা সম্ভব হয়নি।', 'Could not complete the transaction.'));
     } finally {
       setSubmitting(false);
     }
   }, [
     submitting, items, selectedPartyId, isSale, products, moneyAccounts, paymentLines, paymentAccounts, numBank, billDate, editPaymentUnsupported,
-    lang, sale, numDiscount, totalPaid, memoNo, purchase, numTransport, paymentNote, saveExpense, mode,
-    printDoc, resetForm, sales, purchases, focusCustomerInput, editId, refresh, onDone
+    lang, sale, numDiscount, totalPaid, memoNo, purchase, numTransport, paymentNote, saveExpense, deleteExpense, mode,
+    printDoc, resetForm, sales, purchases, focusCustomerInput, editId, refresh, onDone, showFormError
   ]);
 
   // Global Keyboard Shortcuts Listener
@@ -1367,7 +1375,7 @@ export function TradeDashboardForm({ mode, onDone, onOpenHistory, editId }: Trad
             {/* Party Code (Cursor starts here by default) */}
             <View style={[styles.formGroup, { position: 'relative', zIndex: partyDropdownOpen ? 1100 : 1 }]}>
               <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 4 }}>
-                <Text style={styles.fieldLabel}>{isSale ? tx('কাস্টমার কোড', 'Customer code') : tx('সরবরাহকারী কোড', 'Vendor code')}</Text>
+                <RequiredLabel text={isSale ? tx('কাস্টমার কোড', 'Customer code') : tx('সরবরাহকারী কোড', 'Supplier code')} required style={styles.fieldLabel} />
                 {/* Default Code Indicator & Toggle Button */}
                 {partyCode.trim() ? (
                   <TouchableOpacity
@@ -1630,7 +1638,7 @@ export function TradeDashboardForm({ mode, onDone, onOpenHistory, editId }: Trad
             {/* Bill Date with Lock / Unlock and Set Buttons */}
             <View style={styles.formGroup}>
               <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 6 }}>
-                <Text style={styles.fieldLabel}>{isSale ? 'বিক্রয়ের তারিখ' : 'বিলের তারিখ'}</Text>
+                <RequiredLabel text={isSale ? tx('বিক্রয়ের তারিখ', 'Sale date') : tx('বিলের তারিখ', 'Bill date')} required style={styles.fieldLabel} />
 
                 {/* Lock / Unlock and Set Buttons */}
                 <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
@@ -1784,14 +1792,14 @@ export function TradeDashboardForm({ mode, onDone, onOpenHistory, editId }: Trad
           <View style={styles.tableHeaderRow3D}>
             <Text style={[styles.th, { width: 44, textAlign: 'center' }]}>{tx('ক্রম', '#')}</Text>
             <Text style={[styles.th, { width: 120 }]}>{tx('পণ্য কোড', 'Product code')}</Text>
-            <Text style={[styles.th, { flex: 1, minWidth: 200 }]}>{tx('পণ্যের নাম', 'Product name')}</Text>
-            <Text style={[styles.th, { width: 120, textAlign: 'center' }]}>{tx('পরিমাণ (বস্তা)', 'Quantity (bags)')}</Text>
+            <RequiredLabel text={tx('পণ্যের নাম', 'Product name')} required style={[styles.th, { flex: 1, minWidth: 200 }]} />
+            <RequiredLabel text={tx('পরিমাণ (বস্তা)', 'Quantity (bags)')} required style={[styles.th, { width: 120, textAlign: 'center' }]} />
             <Text style={[styles.th, { width: 110, textAlign: 'center' }]}>{tx('মোট কেজি', 'Total kg')}</Text>
             {isSale && (
               <Text style={[styles.th, { width: 120, textAlign: 'center' }]}>{tx('গড় ক্রয়দর (৳)', 'Average cost (৳)')}</Text>
             )}
             <Text style={[styles.th, { width: 120, textAlign: 'center' }]}>
-              {isSale ? tx('বিক্রয় দর (৳)', 'Sale rate (৳)') : tx('ক্রয় দর (৳)', 'Purchase rate (৳)')}
+              {isSale ? tx('বিক্রয় দর (৳)', 'Sale rate (৳)') : tx('ক্রয় দর (৳)', 'Purchase rate (৳)')}<Text style={{ color: '#DC2626', fontWeight: '900' }}> *</Text>
             </Text>
             {!isSale && (
               <Text style={[styles.th, { width: 130, textAlign: 'center' }]}>{tx('অন্যান্য খরচ/বস্তা (৳)', 'Other cost/bag (৳)')}</Text>
@@ -2504,7 +2512,7 @@ export function TradeDashboardForm({ mode, onDone, onOpenHistory, editId }: Trad
                             style={{ paddingHorizontal: 6, paddingVertical: 1, borderRadius: 4, backgroundColor: '#E0F2FE', borderWidth: 1, borderColor: '#BAE6FD' }}
                           >
                             <Text style={{ fontSize: 11, fontWeight: '700', color: '#0369A1' }}>
-                              {tx('ইনভয়েস মূল্য', 'Invoice amount')} (৳{lang === 'bn' ? toBnDigits(String(Math.max(0, Math.round(totalProductValue - numTransport - numDiscount)))) : Math.max(0, Math.round(totalProductValue - numTransport - numDiscount))})
+                          {tx('পরিবহন পেমেন্টের পর নগদ গ্রহণ', 'Cash to receive after transport payment')} (৳{lang === 'bn' ? toBnDigits(String(Math.max(0, Math.round(totalProductValue - numTransport - numDiscount)))) : Math.max(0, Math.round(totalProductValue - numTransport - numDiscount))})
                             </Text>
                           </TouchableOpacity> : null}
                         </View>
@@ -2543,7 +2551,7 @@ export function TradeDashboardForm({ mode, onDone, onOpenHistory, editId }: Trad
                         }}
                       >
                         <Text style={{ fontSize: 12, fontWeight: '700', color: totalDue > 0 ? '#991B1B' : '#166534' }}>
-                          {isSale ? tx('ক্যাশ গ্রহণের পর বাকি:', 'Due after cash received:') : tx('ক্যাশ পরিশোধের পর বাকি:', 'Due after cash paid:')}
+                          {isSale ? tx('সব পেমেন্টের পর বাকি:', 'Due after payments:') : tx('ক্যাশ পরিশোধের পর বাকি:', 'Due after cash paid:')}
                         </Text>
                         <Text style={{ fontSize: 13, fontWeight: '800', color: totalDue > 0 ? '#DC2626' : '#15803D' }}>
                           ৳{localeDigits(String(Math.round(totalDue)), lang)}
@@ -2574,10 +2582,10 @@ export function TradeDashboardForm({ mode, onDone, onOpenHistory, editId }: Trad
                       <AccountPicker accountId={expenseAccountId} onPick={setExpenseAccountId} label="Account for purchase costs" required />
                     ) : null}
                     {isSale ? <View style={{ marginBottom: 8, padding: 8, backgroundColor: '#F8FAFC', borderRadius: 8, borderWidth: 1, borderColor: '#E2E8F0' }}>
-                      <Text style={{ fontSize: 12, fontWeight: '700', color: '#64748B', marginBottom: 4 }}>{tx('পরিবহন খরচ (ঐচ্ছিক)', 'Transport cost (optional)')}</Text>
+                      <Text style={{ fontSize: 12, fontWeight: '700', color: '#64748B', marginBottom: 4 }}>{tx('পরিবহন বাবদ পেমেন্ট (ঐচ্ছিক)', 'Transport payment (optional)')}</Text>
                       <TextInput
                         ref={el => (inputRefs.current['modal_transportCost'] = el)}
-                        accessibilityLabel="Transport cost"
+                        accessibilityLabel={tx('পরিবহন বাবদ পেমেন্ট', 'Transport payment')}
                         value={transportCost}
                         onChangeText={setTransportCost}
                         keyboardType="numeric"
@@ -2588,7 +2596,7 @@ export function TradeDashboardForm({ mode, onDone, onOpenHistory, editId }: Trad
                       />
                       {numTransport > 0 && (
                         <Text style={{ fontSize: 11, color: '#1c70b9', marginTop: 3, fontWeight: '600' }}>
-                          {tx('মোট বাকি থেকে বাদ যাবে:', 'Deducted from total due:')} ৳{lang === 'bn' ? toBnDigits(String(numTransport)) : numTransport}
+                          {tx('গ্রাহক সরাসরি পরিবহন বাবদ দিয়েছেন:', 'Paid directly by customer for transport:')} ৳{lang === 'bn' ? toBnDigits(String(numTransport)) : numTransport}
                         </Text>
                       )}
                     </View> : null}
@@ -2608,7 +2616,7 @@ export function TradeDashboardForm({ mode, onDone, onOpenHistory, editId }: Trad
                     <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingVertical: 5 }}>
                       <Text style={{ fontSize: 14, fontWeight: '700', color: '#475569' }}>
                         {numTransport > 0
-                          ? `${tx('মোট ইনভয়েস বাকি (-পরিবহন', 'Invoice due (less transport')} ৳${lang === 'bn' ? toBnDigits(String(Math.round(numTransport))) : Math.round(numTransport)}):`
+                          ? `${tx('পরিবহন পেমেন্ট বাদে ইনভয়েস বাকি', 'Invoice due after transport payment')} ৳${lang === 'bn' ? toBnDigits(String(Math.round(numTransport))) : Math.round(numTransport)}:`
                           : tx('মোট ইনভয়েস বাকি:', 'Invoice due:')}
                       </Text>
                       <Text style={{ fontSize: 16, fontWeight: '800', color: '#B45309' }}>৳{toBnDigits(String(Math.round(invoiceDue)))}</Text>

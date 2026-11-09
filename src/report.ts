@@ -17,6 +17,7 @@ export type ReportRow = {
 export type ReportSection = { title?: string; rows: ReportRow[] };
 
 export type ReportDoc = {
+  language?: 'bn' | 'en';
   shop: string;
   title: string;
   /** Selected period / filter, exactly as shown on the KPI card. */
@@ -34,11 +35,14 @@ export type ReportDoc = {
 export function downloadReportCSV(d: ReportDoc, filename: string): boolean {
   if (typeof document === 'undefined') return false;
   const cell = (value: string) => `"${String(value ?? '').replace(/"/g, '""')}"`;
+  const headings = d.language === 'bn'
+    ? ['বিবরণ', 'বিস্তারিত', 'পরিমাণ']
+    : ['Description', 'Details', 'Amount'];
   const rows: string[] = [[d.shop, d.title, d.period].map(cell).join(',')];
   for (const meta of d.meta ?? []) rows.push([meta.label, meta.value].map(cell).join(','));
   for (const section of d.sections) {
     if (section.title) rows.push('', cell(section.title));
-    rows.push([cell('Description'), cell('Details'), cell('Amount')].join(','));
+    rows.push(headings.map(cell).join(','));
     for (const row of section.rows) rows.push([cell(row.label), cell(row.sub ?? ''), cell(row.right)].join(','));
   }
   if (d.total) rows.push('', [cell(d.total.label), '', cell(d.total.value)].join(','));
@@ -83,7 +87,7 @@ export function buildReportHTML(d: ReportDoc, autoPrint: boolean): string {
         <td class="l">${esc(r.label)}${r.sub ? `<div class="s">${esc(r.sub)}</div>` : ''}</td>
         <td class="r ${r.neg ? 'neg' : ''}">${esc(r.right)}</td></tr>`).join('')}
     </table>`).join('');
-  return `<!DOCTYPE html><html><head><meta charset="utf-8" />
+  return `<!DOCTYPE html><html lang="${d.language === 'bn' ? 'bn' : 'en'}"><head><meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
 <title>${esc(d.title)}</title>
 <style>

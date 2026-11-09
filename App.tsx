@@ -10,6 +10,7 @@ import { api, Reminder, GSearchRes } from './src/api';
 
 import { AppIcon, icons, TAB_ICON_SIZE, IconName } from './src/icons';
 import { useBreakpoint, useFs } from './src/responsive';
+import { EntryDialogHost } from './src/entryDialog';
 
 const tabs: { r: string; k: Key; icon: IconName }[] = [
   { r: 'home', k: 'home', icon: icons.home },
@@ -540,4 +541,4 @@ function Shell() {
     </SafeAreaView>
   );
 }
-export default function App() { return <AuthGate><AppProvider><Shell /></AppProvider></AuthGate>; }
+export default function App() { return <><AuthGate><AppProvider><Shell /></AppProvider></AuthGate><EntryDialogHost /></>; }

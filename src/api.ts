@@ -73,7 +73,7 @@ export type SettlementStatus = 'paid' | 'partial' | 'due';
 export type TxnItem = {
   productId?: string; productName: string; unit: string; enteredQty: number; qtyKg: number; rate: number; otherCost?: number; unitCost?: number;
 };
-export type InvoicePayment = { id: string; paymentNo?: string; accountId?: string | null; accountName?: string; amount: number; date?: string; note?: string; advance?: boolean };
+export type InvoicePayment = { id: string; paymentNo?: string; accountId?: string | null; accountName?: string; amount: number; date?: string; note?: string; advance?: boolean; transportPayment?: boolean };
 /** Payment account recorded on the ledger row when the document was saved. */
 export type TxnPayment = { accountName: string | null; method: string; amount: number; date: string } | null;
 export type SaleDetail = {
@@ -226,6 +226,8 @@ export const api = {
   createPurchase: (b: object) => req<TxnResult>('/purchases', { method: 'POST', body: JSON.stringify(b) }),
   updateSale: (id: string, b: object) => req<TxnResult>(`/sales/${id}`, { method: 'PUT', body: JSON.stringify(b) }),
   updatePurchase: (id: string, b: object) => req<TxnResult>(`/purchases/${id}`, { method: 'PUT', body: JSON.stringify(b) }),
+  deleteSale: (id: string) => req<{ id: string; invoiceNo?: string; deleted: boolean; note: string }>(`/sales/${id}`, { method: 'DELETE' }),
+  deletePurchase: (id: string) => req<{ id: string; invoiceNo?: string; deleted: boolean; note: string }>(`/purchases/${id}`, { method: 'DELETE' }),
   saleDetail: (id: string) => req<SaleDetail>(`/sales/${id}`),
   purchaseDetail: (id: string) => req<PurchaseDetail>(`/purchases/${id}`),
   customerPayment: (b: object) => req<IdRes>('/customer-payments', { method: 'POST', body: JSON.stringify(b) }),

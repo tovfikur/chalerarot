@@ -47,6 +47,7 @@ export function BankCashDashboard() {
     customerPayment: t('collect'), vendorPayment: t('pay'), expense: t('expense'), saleReturn: t('saleReturnLabel2'), purchaseReturn: t('purchaseReturnLabel'),
     transferIn: t('transferMoney'), transferOut: t('transferMoney'), openingAdjust: t('openingMoney'),
   };
+  const accountTypeName = (type: string) => ({ cash: label('নগদ', 'Cash'), bank: label('ব্যাংক', 'Bank') }[type] ?? type);
   // One row per internal transfer; other movements each retain their own row.
   const seen = new Set<string>();
   const recent = rows.filter(row => row.sourceType !== 'openingAdjust').filter(row => { if (!row.transferId) return true; if (seen.has(row.transferId)) return false; seen.add(row.transferId); return true; }).slice(0, 12);
@@ -54,7 +55,7 @@ export function BankCashDashboard() {
     const cell = (value: unknown) => `"${String(value ?? '').replace(/"/g, '""')}"`;
     const lines = [
       [label('অ্যাকাউন্ট', 'Account'), label('ধরন', 'Type'), label('শুরুর ব্যালেন্স', 'Opening balance'), label('শুরুর তারিখ', 'Opening date'), label('বর্তমান স্থিতি', 'Current balance'), label('লেনদেনের তারিখ', 'Transaction date'), label('লেনদেন', 'Transaction'), label('পরিমাণ', 'Amount')].map(cell).join(','),
-      ...shown.map(a => [a.name, a.type, a.adjustedOpeningBalance ?? a.openingBalance, a.openingDate, a.balance, '', '', ''].map(cell).join(',')),
+      ...shown.map(a => [a.name, accountTypeName(a.type), a.adjustedOpeningBalance ?? a.openingBalance, a.openingDate, a.balance, '', '', ''].map(cell).join(',')),
       ...recent.map(r => ['', '', '', '', '', r.date, names[r.sourceType] ?? r.sourceType, `${r.direction === 'in' ? '+' : '-'}${r.amount}`].map(cell).join(',')),
     ];
     downloadCSV(`bank_cash_report_${today()}.csv`, lines.join('\r\n'));

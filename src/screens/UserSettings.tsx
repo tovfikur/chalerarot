@@ -5,6 +5,7 @@ import { useAuth, AuthField } from '../auth';
 import { useApp } from '../store';
 import { Card, Title, Btn, Chips, color } from '../ui';
 import { AppIcon, icons } from '../icons';
+import { showEntryError } from '../entryDialog';
 
 const isEmail = (v: string) => /^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/.test(v.trim());
 
@@ -19,15 +20,15 @@ export function UserSettings({ section }: { section: 'profile' | 'users' }) {
   const [message, setMessage] = useState(''), [busy, setBusy] = useState(false), [listError, setListError] = useState('');
   const load = async () => { try { setRows(await api.users()); setListError(''); } catch { setListError(l('ব্যবহারকারীর তালিকা লোড করা যায়নি', 'Could not load users')); } };
   useEffect(() => { if (user.role === 'admin' && section === 'users') load(); }, [user.role, section]);
-  const run = async (work: () => Promise<void>) => { if (busy) return; setBusy(true); setMessage(''); try { await work(); setMessage(l('সংরক্ষিত হয়েছে', 'Saved')); } catch (e) { setMessage(e instanceof Error ? e.message : l('সংরক্ষণ করা যায়নি', 'Could not save')); } finally { setBusy(false); } };
+  const run = async (work: () => Promise<void>) => { if (busy) return; setBusy(true); setMessage(''); try { await work(); setMessage(l('সংরক্ষিত হয়েছে', 'Saved')); } catch (e) { const msg = e instanceof Error ? e.message : l('সংরক্ষণ করা যায়নি', 'Could not save'); setMessage(msg); showEntryError(lang, msg); } finally { setBusy(false); } };
   const update = (key: keyof UserInput, value: string | boolean) => setDraft(d => d ? { ...d, [key]: value } : d);
   const saveDraftUser = () => {
     if (!draft) return;
     const phone = draft.phone.replace(/[\u09E6-\u09EF]/g, digit => String(digit.charCodeAt(0) - 0x09E6));
-    if (!draft.name.trim()) { setMessage(l('নাম লিখুন।', 'Enter the user name.')); return; }
-    if (!isEmail(draft.email)) { setMessage(l('সঠিক ইমেইল লিখুন।', 'Enter a valid email address.')); return; }
-    if (!/^[+0-9 ()-]{6,30}$/.test(phone)) { setMessage(l('সঠিক ফোন নম্বর লিখুন।', 'Enter a valid phone number.')); return; }
-    if (!editId && draft.password.length < 10) { setMessage(l('পাসওয়ার্ড অন্তত ১০ অক্ষরের হতে হবে।', 'Password must be at least 10 characters.')); return; }
+    if (!draft.name.trim()) { const msg = l('নাম লিখুন।', 'Enter the user name.'); setMessage(msg); showEntryError(lang, msg); return; }
+    if (!isEmail(draft.email)) { const msg = l('সঠিক ইমেইল লিখুন।', 'Enter a valid email address.'); setMessage(msg); showEntryError(lang, msg); return; }
+    if (!/^[+0-9 ()-]{6,30}$/.test(phone)) { const msg = l('সঠিক ফোন নম্বর লিখুন।', 'Enter a valid phone number.'); setMessage(msg); showEntryError(lang, msg); return; }
+    if (!editId && draft.password.length < 10) { const msg = l('পাসওয়ার্ড অন্তত ১০ অক্ষরের হতে হবে।', 'Password must be at least 10 characters.'); setMessage(msg); showEntryError(lang, msg); return; }
     void run(async () => {
       const saved = await api.saveUser(draft, editId);
       if (saved.id === user.id) { setUser(saved); setEmail(saved.email); setName(saved.name); setPhone(saved.phone); }
@@ -92,10 +93,10 @@ export function UserSettings({ section }: { section: 'profile' | 'users' }) {
       </View>
       {draft ? <View style={{ marginTop: 20 }}>
         <Title>{editId ? l('ব্যবহারকারী সম্পাদনা', 'Edit user') : l('নতুন ব্যবহারকারী', 'New user')}</Title>
-        <AuthField label={l('পূর্ণ নাম', 'Full name')} value={draft.name} onChange={v => update('name', v)} />
-        <AuthField label={l('যোগাযোগের ফোন', 'Contact phone')} value={draft.phone} onChange={v => update('phone', v)} />
-        <AuthField label={l('ইমেইল', 'Email')} value={draft.email} onChange={v => update('email', v)} />
-        <AuthField label={l(editId ? 'নতুন পাসওয়ার্ড (ঐচ্ছিক)' : 'পাসওয়ার্ড (অন্তত ১০ অক্ষর)', editId ? 'New password (optional)' : 'Password (at least 10 characters)')} value={draft.password} onChange={v => update('password', v)} password />
+        <AuthField label={l('পূর্ণ নাম', 'Full name')} value={draft.name} onChange={v => update('name', v)} required />
+        <AuthField label={l('যোগাযোগের ফোন', 'Contact phone')} value={draft.phone} onChange={v => update('phone', v)} required />
+        <AuthField label={l('ইমেইল', 'Email')} value={draft.email} onChange={v => update('email', v)} required />
+        <AuthField label={l(editId ? 'নতুন পাসওয়ার্ড (ঐচ্ছিক)' : 'পাসওয়ার্ড (অন্তত ১০ অক্ষর)', editId ? 'New password (optional)' : 'Password (at least 10 characters)')} value={draft.password} onChange={v => update('password', v)} password required={!editId} />
         {editId === user.id ? <Text style={styles.hint}>{l('নিজের ভূমিকা ও সক্রিয়তা এখান থেকে বদলানো যাবে না।', 'You cannot change your own role or active status here.')}</Text> : <>
           <Chips items={[{ id: 'staff', name: l('কর্মী', 'Staff') }, { id: 'admin', name: l('প্রশাসক', 'Administrator') }]} value={draft.role} onPick={v => update('role', v)} />
           {editId ? <Chips items={[{ id: 'yes', name: l('সক্রিয়', 'Active') }, { id: 'no', name: l('নিষ্ক্রিয়', 'Inactive') }]} value={draft.active ? 'yes' : 'no'} onPick={v => update('active', v === 'yes')} /> : null}

@@ -15,6 +15,7 @@ import { color, useMoney, useNum, toBnDigits } from './ui';
 import { AppIcon, icons } from './icons';
 import { toEnDigits, parseNum } from './bn';
 import { DetailShell } from './screens';
+import { showEntryError } from './entryDialog';
 
 export type BulkKind = 'product' | 'customer' | 'vendor';
 
@@ -303,6 +304,7 @@ export function BulkUploadModal({ kind, onClose, onSuccess }: BulkUploadModalPro
       }
 
       const code = String(item.code ?? '').trim();
+      if (kind !== 'product' && !code) addError(`${kind === 'customer' ? 'Customer' : 'Supplier'} code is required`);
       if (code) {
         const codeKey = code.toUpperCase();
         if (!/^[A-Z0-9][A-Z0-9._/-]{0,49}$/.test(codeKey)) {
@@ -348,6 +350,7 @@ export function BulkUploadModal({ kind, onClose, onSuccess }: BulkUploadModalPro
       const data = dataRows[index];
       if (!String(data.name ?? '').trim()) errors[index].push('Name is required');
       const code = String(data.code ?? '').trim();
+      if (kind !== 'product' && !code) errors[index].push(`${kind === 'customer' ? 'Customer' : 'Supplier'} code is required`);
       const key = code.toUpperCase();
       if (code && !/^[A-Z0-9][A-Z0-9._/-]{0,49}$/.test(key)) errors[index].push('Code must use English letters or numbers; hyphen, underscore, dot and slash are allowed');
       if (code && knownCodes.has(key)) errors[index].push(`Code '${code}' already exists`);
@@ -402,7 +405,9 @@ export function BulkUploadModal({ kind, onClose, onSuccess }: BulkUploadModalPro
 
   const handleSubmit = async () => {
     if (!validRows.length) {
-      setImportReport('There are no valid rows to upload. Review the highlighted errors.');
+      const message = lang === 'bn' ? 'আপলোড করার মতো সঠিক সারি নেই। চিহ্নিত ভুলগুলো ঠিক করে আবার চেষ্টা করুন।' : 'There are no valid rows to upload. Fix the highlighted errors and try again.';
+      setImportReport(message);
+      showEntryError(lang, message);
       setImportReportSuccess(false);
       return;
     }

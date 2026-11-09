@@ -7,16 +7,17 @@ import { api, AppUser, onAuthExpired } from './api';
 import { color } from './ui';
 import { AppIcon, icons } from './icons';
 import { Lang } from './i18n';
+import { showEntryError } from './entryDialog';
 
 type AuthContext = { user: AppUser; setUser: (u: AppUser) => void; logout: () => Promise<void> };
 const Auth = createContext<AuthContext>(null as any);
 export const useAuth = () => useContext(Auth);
 
 /** Shared field used by the profile / user-management screens. */
-export function AuthField({ label, value, onChange, password = false }: { label: string; value: string; onChange: (v: string) => void; password?: boolean }) {
+export function AuthField({ label, value, onChange, password = false, required = false }: { label: string; value: string; onChange: (v: string) => void; password?: boolean; required?: boolean }) {
   return (
     <View style={{ marginBottom: 14 }}>
-      <Text style={styles.fieldLabel}>{label}</Text>
+      <Text style={styles.fieldLabel}>{label}{required ? <Text style={{ color: '#DC2626', fontWeight: '900' }}> *</Text> : null}</Text>
       <TextInput
         accessibilityLabel={label}
         value={value}
@@ -73,9 +74,9 @@ function BrandPanel({ lang }: { lang: Lang }) {
 }
 
 function LoginField({
-  label, value, onChange, icon, password, secure, onToggle, testID, onSubmit, lang,
+  label, value, onChange, icon, password, secure, onToggle, testID, onSubmit, lang, required = false,
 }: {
-  label: string; value: string; onChange: (v: string) => void; lang: Lang;
+  label: string; value: string; onChange: (v: string) => void; lang: Lang; required?: boolean;
   icon: React.ComponentProps<typeof AppIcon>['name'];
   password?: boolean; secure?: boolean; onToggle?: () => void; testID?: string; onSubmit?: () => void;
 }) {
@@ -83,7 +84,7 @@ function LoginField({
   const [focused, setFocused] = useState(false);
   return (
     <View style={{ marginBottom: 16 }}>
-      <Text style={styles.fieldLabel}>{label}</Text>
+      <Text style={styles.fieldLabel}>{label}{required ? <Text style={{ color: '#DC2626', fontWeight: '900' }}> *</Text> : null}</Text>
       <View style={[styles.inputWrap, focused && styles.inputWrapFocused]}>
         <AppIcon name={icon} size={20} iconColor={focused ? color.primary : color.muted} />
         <TextInput
@@ -152,8 +153,8 @@ export function AuthGate({ children }: { children: ReactNode }) {
 
   const submit = async () => {
     if (busy) return;
-    if (!email.trim()) { setError(text('ইমেইল লিখুন', 'Enter your email')); return; }
-    if (!password) { setError(text('পাসওয়ার্ড লিখুন', 'Enter your password')); return; }
+    if (!email.trim()) { const message = text('ইমেইল লিখুন', 'Enter your email'); setError(message); showEntryError(lang, message); return; }
+    if (!password) { const message = text('পাসওয়ার্ড লিখুন', 'Enter your password'); setError(message); showEntryError(lang, message); return; }
     setBusy(true);
     setError('');
     try {
@@ -161,7 +162,7 @@ export function AuthGate({ children }: { children: ReactNode }) {
       setUser(current);
       setPassword('');
     } catch (e) {
-      setError(e instanceof Error ? e.message : text('লগইন করা যায়নি', 'Unable to sign in'));
+      const message = e instanceof Error ? e.message : text('লগইন করা যায়নি', 'Unable to sign in'); setError(message); showEntryError(lang, message);
     } finally {
       setBusy(false);
     }
@@ -222,6 +223,7 @@ export function AuthGate({ children }: { children: ReactNode }) {
                   <LoginField
                     label={text('ইমেইল', 'Email')}
                     lang={lang}
+                    required
                     value={email}
                     onChange={v => { setEmail(v); setError(''); }}
                     icon={icons.mail}
@@ -231,6 +233,7 @@ export function AuthGate({ children }: { children: ReactNode }) {
                   <LoginField
                     label={text('পাসওয়ার্ড', 'Password')}
                     lang={lang}
+                    required
                     value={password}
                     onChange={v => { setPassword(v); setError(''); }}
                     icon={icons.lock}

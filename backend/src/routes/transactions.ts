@@ -133,10 +133,13 @@ const invoicePaymentDetails = async (
       paymentNo: payment?.paymentNo,
       amount: allocation.amount,
       date: payment?.date,
-      note: payment?.note ?? undefined,
+      note: payment?.note?.startsWith('[[TRANSPORT_PAYMENT]]')
+        ? payment.note.slice('[[TRANSPORT_PAYMENT]]'.length).trimStart()
+        : payment?.note ?? undefined,
       accountId: movement?.moneyAccountId ?? undefined,
       accountName: movement?.moneyAccount?.name ?? undefined,
       advance: !((payment as any)?.saleId ?? (payment as any)?.purchaseId),
+      transportPayment: payment?.note?.startsWith('[[TRANSPORT_PAYMENT]]') ?? false,
     };
   });
 };
@@ -180,11 +183,13 @@ async function assertLastStockEvent(t: TxClient, productIds: string[], createdAt
 
 async function editSale(req: Request, res: Response) {
   try {
-    const { customerId, lines, discount, paid, accountId, next, date, payments, paymentNote } = req.body ?? {};
+    const { customerId, lines, discount, paid, transportPaid, transportPaymentNote, accountId, next, date, payments, paymentNote } = req.body ?? {};
     if (!Array.isArray(lines) || !lines.length) return res.status(400).json({ error: 'No items in sale' });
     const day = transactionDay(date);
     checkPromiseDay(next);
     const pay = Math.max(0, num(paid));
+    const transportPay = Math.min(pay, Math.max(0, num(transportPaid)));
+    const cashPay = Math.max(0, pay - transportPay);
     const split = Array.isArray(payments) ? payments.filter((x: any) => x && num(x.amount) > 0) : null;
     const result = await db.$transaction(async t => {
       const old = await t.sale.findUnique({ where: { id: req.params.id }, include: { items: true, returns: true } });
@@ -194,7 +199,7 @@ async function editSale(req: Request, res: Response) {
       const ids = [...old.items.map(i => i.productId), ...lines.map((l: any) => String(l.productId ?? ''))];
       await assertLastStockEvent(t, ids, old.createdAt, old.id);
       const payAccounts = split ? await Promise.all(split.map((x: any) => resolveAccount(t, { accountId: x.accountId }))) : [];
-      const payAccount = !split && pay > 0 ? await resolveAccount(t, { accountId, method: accountId ? undefined : 'cash' }) : null;
+      const payAccount = !split && cashPay > 0 ? await resolveAccount(t, { accountId, method: accountId ? undefined : 'cash' }) : null;
       const allowNegativeStock = (await t.businessSettings.findUnique({ where: { id: 'main' }, select: { allowNegativeStock: true } }))?.allowNegativeStock ?? false;
 
       // Undo the old sale into stock at its saved AVCO cost, then repost the
@@ -238,6 +243,8 @@ async function editSale(req: Request, res: Response) {
       }
       const total = Math.max(0, round2(subtotal - disc));
       const cappedPay = Math.min(pay, total); const due = round2(total - cappedPay);
+      const cappedTransportPay = Math.min(transportPay, cappedPay);
+      const cappedCashPay = Math.max(0, round2(cappedPay - cappedTransportPay));
       let validCustomerId: string | null = null;
       if (customerId) {
         const c = await t.customer.findUnique({ where: { id: String(customerId) } });
@@ -251,9 +258,13 @@ async function editSale(req: Request, res: Response) {
         await recordMovement(t, { accountId: acc.id, method: acc.type, direction: 'in', amount, date: day, sourceType: 'customerPayment', sourceId: payment.id, note: paymentNote ?? old.invoiceNo });
       };
       if (split) {
-        let remaining = cappedPay;
+        let remaining = cappedCashPay;
         for (let i = 0; i < split.length && remaining > 0; i++) { const amount = round2(Math.min(remaining, num(split[i].amount))); if (amount > 0) { await postPayment(amount, payAccounts[i]); remaining = round2(remaining - amount); } }
-      } else if (payAccount && cappedPay > 0) await postPayment(cappedPay, payAccount);
+      } else if (payAccount && cappedCashPay > 0) await postPayment(cappedCashPay, payAccount);
+      if (cappedTransportPay > 0) await t.customerPayment.create({ data: {
+        paymentNo: await nextPaymentNo(t, 'received'), customerId: validCustomerId, saleId: old.id,
+        amount: cappedTransportPay, date: day, note: `[[TRANSPORT_PAYMENT]] ${transportPaymentNote ?? 'Transport payment (paid directly by customer)'}`,
+      } });
       if (old.customerId && old.customerId !== validCustomerId) await syncPartyInvoices('sale', old.customerId, t);
       if (validCustomerId) await syncPartyInvoices('sale', validCustomerId, t);
       return { id: old.id, invoiceNo: old.invoiceNo, total };
@@ -323,6 +334,125 @@ async function editPurchase(req: Request, res: Response) {
     });
     res.json(result);
   } catch (e: unknown) { const err = e as { status?: number; message?: string; code?: string }; res.status(err.status ?? 500).json({ error: err.message ?? 'Failed to edit purchase', code: err.code }); }
+}
+
+async function deleteLinkedInvoiceExpenses(t: TxClient, invoiceNo?: string | null) {
+  if (!invoiceNo) return 0;
+  const linked = await t.expense.findMany({ where: { deletedAt: null, note: { contains: `#${invoiceNo}` } }, select: { id: true } });
+  if (!linked.length) return 0;
+  const ids = linked.map(row => row.id);
+  await t.expense.updateMany({ where: { id: { in: ids } }, data: { deletedAt: new Date() } });
+  await t.moneyMovement.updateMany({ where: { sourceType: 'expense', sourceId: { in: ids } }, data: { active: false } });
+  return linked.length;
+}
+
+// Remove the invoice's stock history and rebuild the product cache from the
+// remaining ledger rows. Deletion is allowed only when no later stock event
+// depends on these products, so this restores the state as if the invoice had
+// never been posted.
+async function removeInvoiceStockHistory(t: TxClient, productIds: string[], invoiceId: string) {
+  const linked = await t.stockMovement.findMany({ where: { refId: invoiceId }, select: { productId: true } });
+  const ids = [...new Set([...productIds, ...linked.map(row => row.productId)])];
+  if (!ids.length) return;
+  await t.stockMovement.deleteMany({ where: { refId: invoiceId } });
+  for (const productId of ids) {
+    const [product, rows] = await Promise.all([
+      t.product.findUnique({ where: { id: productId }, select: { cost: true } }),
+      t.stockMovement.findMany({ where: { productId }, select: { bucket: true, qtyKg: true, value: true, unitCost: true }, orderBy: [{ date: 'asc' }, { createdAt: 'asc' }, { id: 'asc' }] }),
+    ]);
+    if (!product) continue;
+    let qtyKg = 0, stockValue = 0, damagedQtyKg = 0, damagedValue = 0, lastSellableCost = product.cost;
+    for (const movement of rows) {
+      if (movement.bucket === 'damaged') {
+        damagedQtyKg += movement.qtyKg;
+        damagedValue += movement.value;
+      } else {
+        qtyKg += movement.qtyKg;
+        stockValue += movement.value;
+        if (movement.qtyKg !== 0) lastSellableCost = movement.unitCost;
+      }
+    }
+    qtyKg = round2(qtyKg); stockValue = round2(stockValue);
+    damagedQtyKg = round2(damagedQtyKg); damagedValue = round2(damagedValue);
+    await t.product.update({ where: { id: productId }, data: {
+      qtyKg, stockValue, damagedQtyKg, damagedValue,
+      cost: qtyKg > 0 ? round2(stockValue / qtyKg) : lastSellableCost,
+    } });
+  }
+}
+
+async function keepDeletedInvoiceAdvances(t: TxClient, kind: 'sale' | 'purchase', invoiceId: string) {
+  if (kind === 'sale') {
+    const allocations = await t.customerPaymentAllocation.findMany({ where: { saleId: invoiceId }, select: { paymentId: true } });
+    for (const { paymentId } of allocations) {
+      const other = await t.customerPaymentAllocation.count({ where: { paymentId, saleId: { not: invoiceId } } });
+      if (!other) await t.customerPayment.update({ where: { id: paymentId }, data: { allocationLocked: false } });
+    }
+  } else {
+    const allocations = await t.vendorPaymentAllocation.findMany({ where: { purchaseId: invoiceId }, select: { paymentId: true } });
+    for (const { paymentId } of allocations) {
+      const other = await t.vendorPaymentAllocation.count({ where: { paymentId, purchaseId: { not: invoiceId } } });
+      if (!other) await t.vendorPayment.update({ where: { id: paymentId }, data: { allocationLocked: false } });
+    }
+  }
+}
+
+async function deleteSale(req: Request, res: Response) {
+  try {
+    const result = await db.$transaction(async t => {
+      const old = await t.sale.findUnique({ where: { id: req.params.id }, include: { items: true, returns: true, customer: { select: { name: true } } } });
+      if (!old) throw Object.assign(new Error('Sale not found'), { status: 404 });
+      if (old.returns.length) throw Object.assign(new Error('This invoice has posted returns and cannot be deleted. Create a correcting entry instead.'), { status: 409 });
+      const stockRows = await t.stockMovement.findMany({ where: { refId: old.id }, select: { productId: true } });
+      await assertLastStockEvent(t, [...old.items.map(item => item.productId), ...stockRows.map(row => row.productId)], old.createdAt, old.id);
+      await keepDeletedInvoiceAdvances(t, 'sale', old.id);
+      await removeInvoiceStockHistory(t, old.items.map(item => item.productId), old.id);
+      const payments = await t.customerPayment.findMany({ where: { saleId: old.id, returnId: null }, select: { id: true } });
+      await t.moneyMovement.deleteMany({ where: { OR: [
+        { sourceType: 'customerPayment', sourceId: { in: payments.map(payment => payment.id) } },
+        { sourceType: 'sale', OR: [{ sourceId: old.id }, { sourceId: { startsWith: `${old.id}:` } }] },
+      ] } });
+      await t.customerPayment.deleteMany({ where: { saleId: old.id, returnId: null } });
+      const deletedExpenses = await deleteLinkedInvoiceExpenses(t, old.invoiceNo);
+      await t.sale.delete({ where: { id: old.id } });
+      if (old.customerId) await syncPartyInvoices('sale', old.customerId, t);
+      return { id: old.id, invoiceNo: old.invoiceNo, total: old.total, partyName: old.customer?.name ?? '', removedItems: old.items.length, removedPayments: payments.length, deletedExpenses };
+    });
+    res.json({ ...result, deleted: true, note: 'Invoice and its direct payments and stock history were removed; allocated party advances were retained.' });
+  } catch (e: unknown) {
+    const err = e as { status?: number; message?: string; code?: string };
+    res.status(err.status ?? 500).json({ error: err.message ?? 'Failed to delete sale', code: err.code });
+  }
+}
+
+async function deletePurchase(req: Request, res: Response) {
+  try {
+    const result = await db.$transaction(async t => {
+      const old = await t.purchase.findUnique({ where: { id: req.params.id }, include: { items: true, returns: true, vendor: { select: { name: true } } } });
+      if (!old) throw Object.assign(new Error('Purchase not found'), { status: 404 });
+      if (old.returns.length) throw Object.assign(new Error('This invoice has posted returns and cannot be deleted. Create a correcting entry instead.'), { status: 409 });
+      const negativeCostResolution = await t.stockMovement.findFirst({ where: { refId: old.id, type: 'NEGATIVE_STOCK_COGS_ADJUSTMENT' }, select: { id: true } });
+      if (negativeCostResolution) throw Object.assign(new Error('This purchase resolved negative stock costs and cannot be deleted. Create a correcting entry instead.'), { status: 409 });
+      const stockRows = await t.stockMovement.findMany({ where: { refId: old.id }, select: { productId: true } });
+      await assertLastStockEvent(t, [...old.items.map(item => item.productId), ...stockRows.map(row => row.productId)], old.createdAt, old.id);
+      await keepDeletedInvoiceAdvances(t, 'purchase', old.id);
+      await removeInvoiceStockHistory(t, old.items.map(item => item.productId), old.id);
+      const payments = await t.vendorPayment.findMany({ where: { purchaseId: old.id, returnId: null }, select: { id: true } });
+      await t.moneyMovement.deleteMany({ where: { OR: [
+        { sourceType: 'purchase', OR: [{ sourceId: old.id }, { sourceId: { startsWith: `${old.id}:` } }] },
+        { sourceType: 'vendorPayment', sourceId: { in: payments.map(payment => payment.id) } },
+      ] } });
+      await t.vendorPayment.deleteMany({ where: { purchaseId: old.id, returnId: null } });
+      const deletedExpenses = await deleteLinkedInvoiceExpenses(t, old.invoiceNo);
+      await t.purchase.delete({ where: { id: old.id } });
+      await syncPartyInvoices('purchase', old.vendorId, t);
+      return { id: old.id, invoiceNo: old.invoiceNo, total: old.total, partyName: old.vendor.name, removedItems: old.items.length, removedPayments: payments.length, deletedExpenses };
+    });
+    res.json({ ...result, deleted: true, note: 'Invoice and its direct payments and stock history were removed; allocated party advances were retained.' });
+  } catch (e: unknown) {
+    const err = e as { status?: number; message?: string; code?: string };
+    res.status(err.status ?? 500).json({ error: err.message ?? 'Failed to delete purchase', code: err.code });
+  }
 }
 
 // GET /api/sales (with items) — paid/due/status are derived from the
@@ -410,6 +540,7 @@ tx.get('/sales/:id', async (req: Request, res: Response) => {
 });
 
 tx.put('/sales/:id', editSale);
+tx.delete('/sales/:id', deleteSale);
 
 // GET /api/sales/:id/returnable — original lines with remaining returnable KG
 tx.get('/sales/:id/returnable', async (req: Request, res: Response) => {
@@ -441,18 +572,20 @@ tx.get('/sales/:id/returnable', async (req: Request, res: Response) => {
 // POST /api/sales { customerId?, lines: [{productId, unit, enteredQty}], discount?, paid?, method?, next?, date?, memoNo? }
 tx.post('/sales', async (req: Request, res: Response) => {
   try {
-    const { customerId, lines, discount, paid, method, accountId, next, date, memoNo, paymentNote, advanceToApply } = req.body ?? {};
+    const { customerId, lines, discount, paid, transportPaid, transportPaymentNote, method, accountId, next, date, memoNo, paymentNote, advanceToApply } = req.body ?? {};
     if (!Array.isArray(lines) || !lines.length) return res.status(400).json({ error: 'No items in sale' });
     const day = transactionDay(date);
     checkPromiseDay(next);
     const pay = Math.max(0, num(paid));
-    const payMethod = methodForAmount(method, pay, Boolean(accountId));
+    const transportPay = Math.min(pay, Math.max(0, num(transportPaid)));
+    const cashPay = Math.max(0, pay - transportPay);
+    const payMethod = methodForAmount(method, cashPay, Boolean(accountId));
     const splitPayments = Array.isArray(req.body.payments) ? req.body.payments.filter((x: any) => x && num(x.amount) > 0) : null;
     const disc = Math.max(0, num(discount));
     const result = await db.$transaction(async t => {
       // Money only moves for the amount actually received; the concrete account
       // is resolved once and used by the ledger entry below.
-      const payAccount = !splitPayments && pay > 0 ? await resolveAccount(t, { accountId, method: accountId ? undefined : payMethod }) : null;
+      const payAccount = !splitPayments && cashPay > 0 ? await resolveAccount(t, { accountId, method: accountId ? undefined : payMethod }) : null;
       const splitAccounts = splitPayments ? await Promise.all(splitPayments.map((x: any) => resolveAccount(t, { accountId: x.accountId }))) : [];
       const allowNegativeStock = (await t.businessSettings.findUnique({ where: { id: 'main' }, select: { allowNegativeStock: true } }))?.allowNegativeStock ?? false;
       let sub = 0, cogs = 0;
@@ -530,6 +663,8 @@ tx.post('/sales', async (req: Request, res: Response) => {
       const grossTotal = Math.max(0, Math.round((sub - disc) * 100) / 100);
       const netInvoiceTotal = Math.max(0, Math.round((sub - disc - returnTotalAmount) * 100) / 100);
       const cappedPay = Math.min(pay, netInvoiceTotal);
+      const cappedTransportPay = Math.min(transportPay, cappedPay);
+      const cappedCashPay = Math.max(0, round2(cappedPay - cappedTransportPay));
       const due = Math.round((netInvoiceTotal - cappedPay) * 100) / 100;
 
       let validCustomerId: string | null = null;
@@ -605,7 +740,7 @@ tx.post('/sales', async (req: Request, res: Response) => {
       }
 
       if (splitPayments) {
-        let remaining = cappedPay;
+        let remaining = cappedCashPay;
         for (let i = 0; i < splitPayments.length && remaining > 0; i++) {
           const amount = round2(Math.min(remaining, num(splitPayments[i].amount)));
           if (!(amount > 0)) continue;
@@ -619,15 +754,19 @@ tx.post('/sales', async (req: Request, res: Response) => {
           });
           remaining = round2(remaining - amount);
         }
-      } else if (payAccount) {
+      } else if (payAccount && cappedCashPay > 0) {
         const payment = await t.customerPayment.create({
-          data: { paymentNo: await nextPaymentNo(t, 'received'), customerId: validCustomerId, saleId: sale.id, amount: cappedPay, date: day, note: paymentNote ?? null },
+          data: { paymentNo: await nextPaymentNo(t, 'received'), customerId: validCustomerId, saleId: sale.id, amount: cappedCashPay, date: day, note: paymentNote ?? null },
         });
         await recordMovement(t, {
-          accountId: payAccount.id, method: payAccount.type, direction: 'in', amount: cappedPay, date: day,
+          accountId: payAccount.id, method: payAccount.type, direction: 'in', amount: cappedCashPay, date: day,
           sourceType: 'customerPayment', sourceId: payment.id, note: paymentNote ?? sale.invoiceNo,
         });
       }
+      if (cappedTransportPay > 0) await t.customerPayment.create({ data: {
+        paymentNo: await nextPaymentNo(t, 'received'), customerId: validCustomerId, saleId: sale.id,
+        amount: cappedTransportPay, date: day, note: `[[TRANSPORT_PAYMENT]] ${transportPaymentNote ?? 'Transport payment (paid directly by customer)'}`,
+      } });
       let advanceApplied = 0;
       if (validCustomerId && num(advanceToApply) > 0) {
         const applyAmount = Math.min(round2(num(advanceToApply)), due);
@@ -725,6 +864,7 @@ tx.get('/purchases/:id', async (req: Request, res: Response) => {
 });
 
 tx.put('/purchases/:id', editPurchase);
+tx.delete('/purchases/:id', deletePurchase);
 
 // GET /api/purchases/:id/returnable — original lines with remaining returnable KG
 tx.get('/purchases/:id/returnable', async (req: Request, res: Response) => {
@@ -1149,7 +1289,7 @@ tx.get('/bootstrap', async (_req: Request, res: Response) => {
       const st = purSet.get(p.id);
       return { id: p.id, vendorId: p.vendorId, date: p.date, createdAt: p.createdAt, total: p.total, paid: st?.paid ?? p.paid, due: st?.due ?? p.due, status: st?.status ?? 'due', invoiceNo: p.invoiceNo ?? undefined, items: purchaseLinesById.get(p.id) ?? [] };
     }),
-    customerPayments: customerPayments.map(p => ({ id: p.id, paymentNo: p.paymentNo, transactionNo: paymentTransactionNo.get(p.id), customerId: p.customerId ?? 'cash', amount: p.amount, date: p.date, note: p.note ?? undefined, returnId: p.returnId ?? undefined, returnNo: p.returnId ? retNo.get(p.returnId) : undefined, createdAt: p.createdAt, saleId: p.saleId ?? undefined, method: p.returnId ? undefined : (inMethod.get(`p:${p.id}`) ?? (p.saleId ? inMethod.get(`s:${p.saleId}`) : undefined)), accountId: p.returnId ? undefined : inAccount.get(p.id)?.accountId, accountName: p.returnId ? undefined : inAccount.get(p.id)?.accountName })),
+    customerPayments: customerPayments.map(p => ({ id: p.id, paymentNo: p.paymentNo, transactionNo: paymentTransactionNo.get(p.id), customerId: p.customerId ?? 'cash', amount: p.amount, date: p.date, note: p.note?.startsWith('[[TRANSPORT_PAYMENT]]') ? p.note.slice('[[TRANSPORT_PAYMENT]]'.length).trimStart() : (p.note ?? undefined), returnId: p.returnId ?? undefined, returnNo: p.returnId ? retNo.get(p.returnId) : undefined, createdAt: p.createdAt, saleId: p.saleId ?? undefined, method: p.returnId ? undefined : (inMethod.get(`p:${p.id}`) ?? (p.saleId ? inMethod.get(`s:${p.saleId}`) : undefined)), accountId: p.returnId ? undefined : inAccount.get(p.id)?.accountId, accountName: p.returnId ? undefined : inAccount.get(p.id)?.accountName })),
     vendorPayments: vendorPayments.map(p => ({ id: p.id, paymentNo: p.paymentNo, transactionNo: paymentTransactionNo.get(p.id), vendorId: p.vendorId, amount: p.amount, date: p.date, note: p.note ?? undefined, returnId: p.returnId ?? undefined, returnNo: p.returnId ? retNo.get(p.returnId) : undefined, createdAt: p.createdAt, purchaseId: p.purchaseId ?? undefined, accountId: p.returnId ? undefined : outAccount.get(p.id)?.accountId, accountName: p.returnId ? undefined : outAccount.get(p.id)?.accountName })),
     movements: movements.map(mv => {
       const sale = mv.refId ? sales.find(row => row.id === mv.refId) : undefined;

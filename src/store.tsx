@@ -33,7 +33,7 @@ export interface Service {
   saveParty(kind: 'c' | 'v', p: Party): Promise<void>; deleteParty(kind: 'c' | 'v', id: string): Promise<void>;
   bulkUploadParties(kind: 'c' | 'v', items: any[]): Promise<import('./api').BulkImportRes>;
   refresh(): Promise<void>;
-  sale(a: { customerId?: string; lines: SaleLineIn[]; discount: number; paid: number; accountId?: string; payments?: { accountId: string; amount: number }[]; next?: string; date?: string; memoNo?: string }): Promise<{ id: string; invoiceNo?: string; total: number }>;
+  sale(a: { customerId?: string; lines: SaleLineIn[]; discount: number; paid: number; transportPaid?: number; transportPaymentNote?: string; accountId?: string; payments?: { accountId: string; amount: number }[]; next?: string; date?: string; memoNo?: string }): Promise<{ id: string; invoiceNo?: string; total: number }>;
   purchase(a: { vendorId: string; lines: PurchaseLineIn[]; paid: number; accountId?: string; payments?: { accountId: string; amount: number }[]; next?: string; date?: string; memoNo?: string }): Promise<{ id: string; invoiceNo?: string; total: number }>;
   money(kind: 'c' | 'v', a: { partyId: string; amount: number; accountId: string; date: string; note?: string; next?: string }): Promise<void>;
   partyPaymentSplit(a: { kind: 'c' | 'v'; partyId: string; payments: { accountId: string; amount: number }[]; date: string; note?: string }): Promise<{ payments: { id: string; paymentNo: string; amount: number; accountId: string }[] }>;
@@ -191,8 +191,8 @@ export function AppProvider({ children }: { children: ReactNode }) {
       return res;
     },
     refresh,
-    sale: async ({ customerId, lines, discount, paid, accountId, payments, next, date, memoNo }) => {
-      const r = await api.createSale({ customerId, lines, discount, paid, accountId, payments, next, date, memoNo });
+    sale: async ({ customerId, lines, discount, paid, transportPaid, transportPaymentNote, accountId, payments, next, date, memoNo }) => {
+      const r = await api.createSale({ customerId, lines, discount, paid, transportPaid, transportPaymentNote, accountId, payments, next, date, memoNo });
       refresh().catch(() => {});
       return r;
     },

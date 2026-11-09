@@ -5,6 +5,7 @@ import { useApp } from '../store';
 import { Btn, Card, Field, Row, color, useDateStr, useMoney } from '../ui';
 import { DetailShell } from '../screens';
 import { parseNum, toEnDigits } from '../bn';
+import { showEntryError } from '../entryDialog';
 
 export type MoneyMovementItem = {
   id: string; transactionNo?: string; amount: number; date: string; direction: 'in' | 'out'; sourceType: string;
@@ -23,11 +24,11 @@ export function MoneyMovementDetail({ movement, accountName, onClose, onSaved }:
   const editable = movement.sourceType === 'deposit' || movement.sourceType === 'withdrawal';
   const save = async () => {
     const parsed = parseNum(toEnDigits(amount));
-    if (!Number.isFinite(parsed) || parsed <= 0) { setError(l('সঠিক পরিমাণ লিখুন', 'Enter a valid amount')); return; }
-    if (note.length > 500) { setError(l('নোট ৫০০ অক্ষরের মধ্যে লিখুন', 'Keep the note under 500 characters')); return; }
+    if (!Number.isFinite(parsed) || parsed <= 0) { const msg = l('সঠিক পরিমাণ লিখুন', 'Enter a valid amount'); setError(msg); showEntryError(lang, msg); return; }
+    if (note.length > 500) { const msg = l('নোট ৫০০ অক্ষরের মধ্যে লিখুন', 'Keep the note under 500 characters'); setError(msg); showEntryError(lang, msg); return; }
     setBusy(true); setError('');
     try { await api.updateMoneyEntry(movement.id, { amount: parsed, note }); await onSaved(); onClose(); }
-    catch (e) { setError(e instanceof Error ? e.message : l('লেনদেন আপডেট করা যায়নি', 'Could not update transaction')); }
+    catch (e) { const msg = e instanceof Error ? e.message : l('লেনদেন আপডেট করা যায়নি', 'Could not update transaction'); setError(msg); showEntryError(lang, msg); }
     finally { setBusy(false); }
   };
   return <DetailShell title={l('লেনদেনের বিবরণ', 'Transaction details')} onClose={onClose}>

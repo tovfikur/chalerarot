@@ -17,8 +17,10 @@ function classify(method: string, path: string): Classification | null {
 
   if (path === '/api/sales' && method === 'POST') return { entity: 'sale', action: 'create' };
   if (/^\/api\/sales\/[^/]+$/.test(path) && method === 'PUT') return { entity: 'sale', action: 'edit' };
+  if (/^\/api\/sales\/[^/]+$/.test(path) && method === 'DELETE') return { entity: 'sale', action: 'delete' };
   if (path === '/api/purchases' && method === 'POST') return { entity: 'purchase', action: 'create' };
   if (/^\/api\/purchases\/[^/]+$/.test(path) && method === 'PUT') return { entity: 'purchase', action: 'edit' };
+  if (/^\/api\/purchases\/[^/]+$/.test(path) && method === 'DELETE') return { entity: 'purchase', action: 'delete' };
   if (path === '/api/customer-payments' && method === 'POST') return { entity: 'customerPayment', action: 'create' };
   if (path === '/api/vendor-payments' && method === 'POST') return { entity: 'vendorPayment', action: 'create' };
   if (path === '/api/returns' && method === 'POST') return { entity: 'return', action: 'create' };
@@ -128,7 +130,7 @@ async function build(req: Request, responseBody: any, actor: any) {
   const amount = (entity === 'product' && (action === 'bulk' || action === 'create')
     ? number(productOpeningAmount)
     : undefined) ?? number(b.totalAmount) ?? number(b.amount)
-    ?? number(body.amount) ?? number(body.paid) ?? number(body.openingBalance);
+    ?? number(b.total) ?? number(body.amount) ?? number(body.paid) ?? number(body.openingBalance);
   const reference = text(
     b.paymentNo ?? b.invoiceNo ?? b.transferNo ?? b.returnNo ?? b.voucherNo ?? b.sourceId ?? b.code ?? b.email ?? b.name
     ?? body.invoiceNo ?? body.code ?? body.email ?? body.name,
@@ -143,6 +145,8 @@ async function build(req: Request, responseBody: any, actor: any) {
   put('date', body.date ?? b.date);
   put('note', action === 'edit' && (entity === 'sale' || entity === 'purchase')
     ? 'Confirmed invoice edit reposted stock and payments under the original transaction number.'
+    : action === 'delete' && (entity === 'sale' || entity === 'purchase')
+    ? b.note ?? 'Invoice deleted; inventory reversed and related payment entries deactivated.'
     : body.paymentNote ?? body.note ?? b.note);
   put('method', body.method ?? b.method);
   put('direction', body.direction ?? b.direction);
@@ -163,9 +167,16 @@ async function build(req: Request, responseBody: any, actor: any) {
     put('changedItems', Array.isArray(body.lines) ? body.lines.length : undefined);
     put('editNote', 'Existing invoice and transaction number updated; stock and payment entries reposted on confirmation.');
   }
+  if (action === 'delete' && (entity === 'sale' || entity === 'purchase')) {
+    put('stage', 'deleted');
+    put('inventory', 'reversed in stock ledger');
+    put('reversedItems', b.reversedItems);
+    put('cancelledPayments', b.cancelledPayments);
+    put('deletedExpenses', b.deletedExpenses);
+  }
 
   if (entity === 'sale' || entity === 'purchase') {
-    const name = entity === 'sale' ? await customerName(body.customerId) : await vendorName(body.vendorId);
+    const name = entity === 'sale' ? (await customerName(body.customerId) ?? text(b.partyName)) : (await vendorName(body.vendorId) ?? text(b.partyName));
     put('partyName', name);
     put('partyKind', entity === 'sale' ? 'customer' : 'vendor');
   } else if (entity === 'customerPayment') {
