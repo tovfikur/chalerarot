@@ -17,11 +17,11 @@ const num = (v: unknown, d = 0) => {
 };
 
 const shape = (
-  e: { id: string; voucherNo: string | null; category: string; customName: string | null; amount: number; date: string; note: string | null; capitalized: boolean },
+  e: { id: string; voucherNo: string | null; category: string; customName: string | null; amount: number; date: string; note: string | null; capitalized: boolean; createdAt: Date },
   mv?: { method: string; moneyAccountId: string | null },
 ) => ({
   id: e.id, voucherNo: e.voucherNo ?? undefined, category: e.category, customName: e.customName ?? undefined,
-  amount: e.amount, date: e.date, note: e.note ?? undefined,
+  amount: e.amount, date: e.date, createdAt: e.createdAt, note: e.note ?? undefined,
   capitalized: e.capitalized,
   method: mv?.method, accountId: mv?.moneyAccountId ?? undefined,
 });
@@ -74,10 +74,10 @@ expenses.get('/', async (_req: Request, res: Response) => {
   const stockAdjustments = adjustments.map(m => ({
     id: `stockadj:${m.id}`, voucherNo: `ADJ-${m.id.slice(-8).toUpperCase()}`,
     category: 'other', customName: 'Inventory adjustment', amount: -m.value, date: m.date,
-    note: `${m.product.name}${m.refId ? ` · ${m.refId}` : m.type === 'REVALUE' ? ' · Stock cost revaluation' : ''}`, capitalized: false,
+    createdAt: m.createdAt, note: `${m.product.name}${m.refId ? ` · ${m.refId}` : m.type === 'REVALUE' ? ' · Stock cost revaluation' : ''}`, capitalized: false,
     sourceMovementId: m.id, stockAdjustment: true, accountName: 'Inventory adjustments',
   }));
-  res.json([...ordinary, ...stockAdjustments].sort((a, b) => b.date.localeCompare(a.date)));
+  res.json([...ordinary, ...stockAdjustments].sort((a, b) => b.date.localeCompare(a.date) || String(b.createdAt ?? '').localeCompare(String(a.createdAt ?? '')) || b.id.localeCompare(a.id)));
 });
 
 // GET /api/expenses/:id

@@ -161,6 +161,9 @@ const invoicePaymentDetails = async (
     return {
       id: allocation.paymentId,
       paymentNo: payment?.paymentNo,
+      transactionNo: movement?.transactionNo ?? payment?.paymentNo,
+      description: cleanPaymentNote(payment?.note),
+      descriptionCode: isTransportContra ? 'transport' : !((payment as any)?.saleId ?? (payment as any)?.purchaseId) ? 'advance' : 'invoice',
       amount: allocation.amount,
       date: payment?.date,
       note: isTransportContra ? undefined : cleanPaymentNote(payment?.note),
@@ -1366,8 +1369,8 @@ tx.get('/bootstrap', async (_req: Request, res: Response) => {
       return { id: mv.id, productId: mv.productId, productName: mv.product.name, type: mv.type, qty: mv.qtyKg, bags: mv.product.mediumBagKg > 0 ? round2(mv.qtyKg / mv.product.mediumBagKg) : 0, unitCost: mv.unitCost, bagUnitPrice: round2(mv.unitCost * (mv.product.mediumBagKg || 0)), amount: mv.value, date: mv.date, transactionNo, note: [mv.note, transactionNote].filter(Boolean).join(' · ') || undefined };
     }),
     expenses: [
-      ...expenses.map(e => ({ id: e.id, voucherNo: e.voucherNo ?? undefined, category: e.category, customName: e.customName ?? undefined, amount: e.amount, date: e.date, note: e.note ?? undefined, capitalized: e.capitalized, method: expMethod.get(e.id)?.method, accountId: expMethod.get(e.id)?.moneyAccountId ?? undefined })),
-      ...stockAdjustments.map(mv => ({ id: `stockadj:${mv.id}`, voucherNo: `ADJ-${mv.id.slice(-8).toUpperCase()}`, category: 'other', customName: 'Inventory adjustment', amount: -mv.value, date: mv.date, note: `${mv.product.name}${mv.refId ? ` · ${mv.refId}` : mv.type === 'REVALUE' ? ' · Stock cost revaluation' : ''}`, capitalized: false, sourceMovementId: mv.id, stockAdjustment: true, accountName: 'Inventory adjustments' })),
+      ...expenses.map(e => ({ id: e.id, voucherNo: e.voucherNo ?? undefined, category: e.category, customName: e.customName ?? undefined, amount: e.amount, date: e.date, createdAt: e.createdAt, note: e.note ?? undefined, capitalized: e.capitalized, method: expMethod.get(e.id)?.method, accountId: expMethod.get(e.id)?.moneyAccountId ?? undefined })),
+      ...stockAdjustments.map(mv => ({ id: `stockadj:${mv.id}`, voucherNo: `ADJ-${mv.id.slice(-8).toUpperCase()}`, category: 'other', customName: 'Inventory adjustment', amount: -mv.value, date: mv.date, createdAt: mv.createdAt, note: `${mv.product.name}${mv.refId ? ` · ${mv.refId}` : mv.type === 'REVALUE' ? ' · Stock cost revaluation' : ''}`, capitalized: false, sourceMovementId: mv.id, stockAdjustment: true, accountName: 'Inventory adjustments' })),
     ],
     returns: rets.map(r => ({ id: r.id, kind: r.kind, date: r.date, amount: r.totalAmount, profit: r.profitImpact, returnNo: r.returnNo ?? undefined })),
     money: balances,

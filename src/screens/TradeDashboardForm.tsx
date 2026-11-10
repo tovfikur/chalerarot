@@ -18,7 +18,7 @@ import { AppIcon, icons } from '../icons';
 import { MonthCal } from '../screens';
 import { BagUnit, kgPerUnit } from '../bags';
 import { api, SaleDetail, PurchaseDetail } from '../api';
-import { UnitNames, InvData, fmtTime, unitDetail, buildInvoiceHTML } from '../invoice';
+import { UnitNames, InvData, fmtTime, unitDetail, buildInvoiceHTML, invoicePaymentAmount, invoicePaymentDescription } from '../invoice';
 import { showEntryError } from '../entryDialog';
 
 export interface FormItemLine {
@@ -781,24 +781,33 @@ export function TradeDashboardForm({ mode, onDone, onOpenHistory, editId }: Trad
         const un: UnitNames = lang === 'bn'
           ? { kg: 'কেজি', small: 'ছোট বস্তা', medium: 'বস্তা', large: 'বড় বস্তা', ton: 'টন' }
           : { kg: 'kg', small: 'Small bag', medium: 'Bag', large: 'Large bag', ton: 'ton' };
+        const paymentTotals = invoicePaymentAmount(d.payments, d.paid, d.total);
         const doc: InvData = {
           no: (d.invoiceNo ?? '').toString(),
-          date: d.date,
+          date: lang === 'bn' ? localeDigits(d.date, lang) : d.date,
           time: fmtTime(d.createdAt, lang === 'bn'),
           partyName: party?.name ?? (isSaleKind ? tx('ক্যাশ কাস্টমার', 'Cash customer') : tx('সরবরাহকারী', 'Vendor')),
           partyMobile: party?.mobile ?? '',
           lines: d.items.map((it: any) => ({
             name: it.productName,
-            detail: `${unitDetail(it.unit, it.enteredQty, it.qtyKg, un, n)} • ৳${it.rate}/${tx('কেজি', 'kg')}`,
-            total: `৳${Math.round(it.qtyKg * it.rate)}`,
+            detail: `${unitDetail(it.unit, it.enteredQty, it.qtyKg, un, n)} • ${m(it.rate)}/${tx('কেজি', 'kg')}`,
+            total: m(it.qtyKg * it.rate),
           })),
-          total: `৳${d.total}`,
-          paid: `৳${d.paid}`,
-          due: `৳${d.due}`,
+          total: m(d.total),
+          paid: m(paymentTotals.paid),
+          due: m(paymentTotals.due),
+          fullyPaid: paymentTotals.fullyPaid,
+          payments: (d.payments ?? []).map((payment: any) => ({
+            transactionId: payment.transactionNo ?? payment.paymentNo ?? payment.id,
+            date: payment.date ? (lang === 'bn' ? localeDigits(payment.date, lang) : payment.date) : undefined,
+            description: invoicePaymentDescription(payment, lang),
+            accountName: payment.accountName,
+            amount: m(payment.amount),
+          })),
           next: d.nextDate,
           extra: belowCostLoss > 0 ? [{
             label: tx('ক্রয়দরের নিচে বিক্রির লোকসান', 'Loss on below-cost items'),
-            value: `-৳${Math.round(belowCostLoss)}`,
+            value: `-${m(belowCostLoss)}`,
             tone: 'loss',
           }] : undefined,
           labels: {
@@ -808,6 +817,8 @@ export function TradeDashboardForm({ mode, onDone, onOpenHistory, editId }: Trad
             partyLabel: isSaleKind ? tx('কাস্টমার', 'Customer') : tx('সরবরাহকারী', 'Vendor'),
             mobile: tx('মোবাইল', 'Mobile'), product: tx('পণ্য', 'Product'), qty: tx('পরিমাণ', 'Quantity'), rate: tx('দর', 'Rate'),
             total: tx('মোট', 'Total'), paid: tx('পরিশোধ', 'Paid'), due: tx('বাকি', 'Due'), payDate: tx('পরবর্তী তারিখ', 'Next date'), thanks: tx('ধন্যবাদ, আবার আসবেন', 'Thank you for your business'),
+            paymentBreakdown: tx('পেমেন্টের বিবরণ', 'Payment breakdown'), transactionId: tx('লেনদেন আইডি', 'Transaction ID'), description: tx('বিবরণ', 'Description'), account: tx('অ্যাকাউন্ট', 'Account'),
+            totalDue: tx('মোট বকেয়া', 'Total due'), fullyPaid: tx('সম্পূর্ণ পরিশোধিত', 'Fully paid'), transportPayment: tx('পরিবহন পেমেন্ট', 'Transport payment'), advancePayment: tx('অগ্রিম পেমেন্ট সমন্বয়', 'Advance payment applied'), invoicePayment: tx('ইনভয়েস পেমেন্ট', 'Invoice payment'), purchaseInvoice: tx('ক্রয় ইনভয়েস', 'Purchase invoice'), salesInvoice: tx('বিক্রয় ইনভয়েস', 'Sales invoice'),
           },
         };
         w.document.open();

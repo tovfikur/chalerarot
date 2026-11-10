@@ -212,7 +212,7 @@ export function ExpenseDashboard(_props: ExpenseDashboardProps) {
         return [e.voucherNo, catLabel(e), e.note, accountName(e.accountId), String(e.amount)]
           .some(v => String(v ?? '').toLowerCase().startsWith(q));
       })
-      .sort((a, b) => b.date.localeCompare(a.date));
+      .sort((a, b) => b.date.localeCompare(a.date) || String(b.createdAt ?? '').localeCompare(String(a.createdAt ?? '')) || b.id.localeCompare(a.id));
   }, [expenses, catFilter, search, catIdOf, catLabel, accountName]);
 
   const pageCount = Math.max(1, Math.ceil(filtered.length / PAGE_SIZE));

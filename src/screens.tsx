@@ -7,7 +7,7 @@ import { AppIcon, icons } from './icons';
 import { RGrid, TwoPanel, FormGrid, useFs, useBreakpoint } from './responsive';
 import { SearchToggle, SearchableSelect, SearchDropdown, NoResult, matchProduct, matchParty, codeStartsWith } from './search';
 import { api, ApiError, type TxnPayment, type SettlementStatus, DetailItem, RecvDetail, PayDetail, TrashItem, SaleDetail, PurchaseDetail, ReturnDetail, ReturnableTxn, type AccountType, type Expense, type MoneyBalance, type MoneyMethod, type MoneyMovementRow, type ChartAccountRow, type SavedJournalEntry, type JournalWrite } from './api';
-import { unitDetail, fmtTime, buildInvoiceText, buildInvoiceHTML, InvData, UnitNames } from './invoice';
+import { unitDetail, fmtTime, buildInvoiceText, buildInvoiceHTML, invoicePaymentAmount, invoicePaymentDescription, InvData, UnitNames } from './invoice';
 import { tp, Key } from './i18n';
 import { toEnDigits, toBnDigits, parseNum, localeDigits } from './bn';
 import { printReport, printedAtStamp, downloadReportCSV, type ReportDoc, type ReportRow } from './report';
@@ -2261,6 +2261,7 @@ export function ExpenseModal({ init, onClose, onSave, onTrash, inline = false }:
   inline?: boolean;
 }) {
   const { t, lang, moneyAccounts } = useApp();
+  const label = (en: string, bn: string) => lang === 'bn' ? bn : en;
   const [cat, setCat] = useState(init?.category ?? '');
   const [name, setName] = useState(init?.customName ?? '');
   const [date, setDate] = useState(init?.date ?? dhakaToday());
@@ -2303,6 +2304,16 @@ export function ExpenseModal({ init, onClose, onSave, onTrash, inline = false }:
     (async () => {
       try {
         await onSave({ id: init?.id, category: cat, customName: cat === 'other' ? (customCategoryName || name.trim()) : undefined, payments, date: date || today(), note: note.trim() || undefined });
+        Alert.alert(t('done'), init ? label('Expense updated successfully.', 'খরচ সফলভাবে হালনাগাদ হয়েছে।') : label('Expense recorded successfully.', 'খরচ সফলভাবে নথিভুক্ত হয়েছে।'));
+        if (!init) {
+          setCat('');
+          setName('');
+          setDate(dhakaToday());
+          setNote('');
+          setAmounts({});
+          setCustomCategoryName('');
+          setCategoryListOpen(false);
+        }
       } catch (e) {
         showEntryError(lang, e instanceof Error ? e.message : t('invalid'));
       }
@@ -2948,6 +2959,7 @@ function useInvoice() {
     const belowCostLoss = isSale
       ? sd.items.reduce((sum, item) => sum + Math.max(0, (item.unitCost ?? 0) - item.rate) * Math.max(0, item.qtyKg), 0)
       : 0;
+    const paymentTotals = invoicePaymentAmount(d.payments, d.paid, d.total);
     return {
       no: (d.invoiceNo ?? '').toString(),
       date: fd(d.date),
@@ -2960,8 +2972,16 @@ function useInvoice() {
         total: m(it.qtyKg * it.rate),
       })),
       total: m(d.total),
-      paid: m(d.paid),
-      due: m(d.due),
+      paid: m(paymentTotals.paid),
+      due: m(paymentTotals.due),
+      fullyPaid: paymentTotals.fullyPaid,
+      payments: (d.payments ?? []).map(payment => ({
+        transactionId: payment.transactionNo ?? payment.paymentNo ?? payment.id,
+        date: payment.date ? fd(payment.date) : undefined,
+        description: invoicePaymentDescription(payment, lang),
+        accountName: payment.accountName,
+        amount: m(payment.amount),
+      })),
       next: d.nextDate ? fd(d.nextDate) : undefined,
       extra: belowCostLoss > 0 ? [{
         label: lang === 'bn' ? 'ক্রয়দরের নিচে বিক্রির লোকসান' : 'Loss on below-cost items',
@@ -2975,6 +2995,8 @@ function useInvoice() {
         partyLabel: isSale ? t('customer') : t('vendor'),
         mobile: t('mobile'), product: t('product'), qty: t('qty'), rate: t('rate'),
         total: t('total'), paid: t('paid'), due: t('due'), payDate: t('payDate'), thanks: t('thanks'),
+        paymentBreakdown: lang === 'bn' ? 'পেমেন্টের বিবরণ' : 'Payment breakdown', transactionId: lang === 'bn' ? 'লেনদেন আইডি' : 'Transaction ID', description: lang === 'bn' ? 'বিবরণ' : 'Description', account: lang === 'bn' ? 'অ্যাকাউন্ট' : 'Account',
+        totalDue: lang === 'bn' ? 'মোট বকেয়া' : 'Total due', fullyPaid: lang === 'bn' ? 'সম্পূর্ণ পরিশোধিত' : 'Fully paid', transportPayment: lang === 'bn' ? 'পরিবহন পেমেন্ট' : 'Transport payment', advancePayment: lang === 'bn' ? 'অগ্রিম পেমেন্ট সমন্বয়' : 'Advance payment applied', invoicePayment: lang === 'bn' ? 'ইনভয়েস পেমেন্ট' : 'Invoice payment', purchaseInvoice: lang === 'bn' ? 'ক্রয় ইনভয়েস' : 'Purchase invoice', salesInvoice: lang === 'bn' ? 'বিক্রয় ইনভয়েস' : 'Sales invoice',
       },
     };
   };
@@ -3053,6 +3075,8 @@ function useInvoice() {
         partyLabel: isSale ? t('customer') : t('vendor'),
         mobile: t('mobile'), product: t('product'), qty: t('qty'), rate: t('rate'),
         total: t('returnValue'), paid: t('paid'), due: t('due'), payDate: t('payDate'), thanks: t('thanks'),
+        paymentBreakdown: lang === 'bn' ? 'পেমেন্টের বিবরণ' : 'Payment breakdown', transactionId: lang === 'bn' ? 'লেনদেন আইডি' : 'Transaction ID', description: lang === 'bn' ? 'বিবরণ' : 'Description', account: lang === 'bn' ? 'অ্যাকাউন্ট' : 'Account',
+        totalDue: lang === 'bn' ? 'মোট বকেয়া' : 'Total due', fullyPaid: lang === 'bn' ? 'সম্পূর্ণ পরিশোধিত' : 'Fully paid', transportPayment: lang === 'bn' ? 'পরিবহন পেমেন্ট' : 'Transport payment', advancePayment: lang === 'bn' ? 'অগ্রিম পেমেন্ট সমন্বয়' : 'Advance payment applied', invoicePayment: lang === 'bn' ? 'ইনভয়েস পেমেন্ট' : 'Invoice payment', purchaseInvoice: lang === 'bn' ? 'ক্রয় ইনভয়েস' : 'Purchase invoice', salesInvoice: lang === 'bn' ? 'বিক্রয় ইনভয়েস' : 'Sales invoice',
       },
     };
   };
@@ -3150,7 +3174,7 @@ export function InvoiceModal({ kind, id, onClose, onReturn, onBack, onEdit }: {
             {doc.next ? <Row left={doc.labels.payDate} right={doc.next} /> : null}
             {extra.payments?.map(p => (
               <Row key={p.id} left={p.advance ? (lang === 'bn' ? 'পার্টি পেমেন্ট সমন্বয়' : 'Party payment applied') : t('payment')}
-                sub={[p.date ? fd(p.date) : '', p.accountName ?? '', p.transportContra ? `${lang === 'bn' ? 'পরিবহন সমন্বয়' : 'Transport contra settlement'}${p.contraSaleInvoiceNo ? ` · ${lang === 'bn' ? 'বিক্রয় ইনভয়েস' : 'Sales invoice'} ${p.contraSaleInvoiceNo}` : ''}` : p.note ?? ''].filter(Boolean).join(' · ')} right={m(p.amount)} />
+                sub={[p.transactionNo ?? p.paymentNo ?? '', p.date ? fd(p.date) : '', p.accountName ?? '', invoicePaymentDescription(p, lang)].filter(Boolean).join(' · ')} right={m(p.amount)} />
             ))}
           </Card>
           <Btn icon={icons.print} label={t('printInvoice')} onPress={() => printTxn(kind, id)} />

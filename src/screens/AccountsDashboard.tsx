@@ -829,7 +829,7 @@ export function AccountsDashboard({ go, focus, onFocusDone }: AccountsDashboardP
         const accountName = e.accountName ?? moneyAccounts.find(account => account.id === e.accountId)?.name ?? '';
         return catName.toLowerCase().startsWith(q) || e.category.toLowerCase().startsWith(q) || (e.note && e.note.toLowerCase().startsWith(q)) || (e.voucherNo ?? '').toLowerCase().startsWith(q) || accountName.toLowerCase().startsWith(q);
       })
-      .sort((a, b) => (a.date < b.date ? 1 : -1));
+      .sort((a, b) => b.date.localeCompare(a.date) || String(b.createdAt ?? '').localeCompare(String(a.createdAt ?? '')) || b.id.localeCompare(a.id));
   }, [expenses, moneyAccounts, expSearch, expCatFilter, expenseCategoryLabel]);
 
   const expenseRegisterDoc: ReportDoc = {

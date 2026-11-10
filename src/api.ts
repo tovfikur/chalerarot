@@ -73,7 +73,7 @@ export type SettlementStatus = 'paid' | 'partial' | 'due';
 export type TxnItem = {
   productId?: string; productName: string; unit: string; enteredQty: number; qtyKg: number; rate: number; otherCost?: number; unitCost?: number;
 };
-export type InvoicePayment = { id: string; paymentNo?: string; accountId?: string | null; accountName?: string; amount: number; date?: string; note?: string; advance?: boolean; transportPayment?: boolean; transportContra?: boolean; contraPurchaseInvoiceNo?: string; contraSaleInvoiceNo?: string };
+export type InvoicePayment = { id: string; paymentNo?: string; transactionNo?: string; description?: string; descriptionCode?: 'transport' | 'advance' | 'invoice'; accountId?: string | null; accountName?: string; amount: number; date?: string; note?: string; advance?: boolean; transportPayment?: boolean; transportContra?: boolean; contraPurchaseInvoiceNo?: string; contraSaleInvoiceNo?: string };
 /** Payment account recorded on the ledger row when the document was saved. */
 export type TxnPayment = { accountName: string | null; method: string; amount: number; date: string } | null;
 export type SaleDetail = {
@@ -94,7 +94,7 @@ export type MoneyMethod = 'cash' | 'bkash' | 'nagad' | 'bank';
 
 export type Expense = {
   id: string; voucherNo?: string; category: string; customName?: string;
-  amount: number; date: string; note?: string; method?: MoneyMethod; accountId?: string; capitalized?: boolean;
+  amount: number; date: string; createdAt?: string; note?: string; method?: MoneyMethod; accountId?: string; capitalized?: boolean;
   sourceMovementId?: string; stockAdjustment?: boolean; accountName?: string;
 };
 
