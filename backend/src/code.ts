@@ -3,12 +3,14 @@ import { Prisma } from '@prisma/client';
 export type CodedEntity = 'product' | 'customer' | 'supplier';
 
 /**
- * Serialize claims for a normalized code across all coded entities. The lock
- * closes the race between the cross-table check and insert/update.
+ * Serialize claims for a normalized code. Customer and supplier codes have
+ * separate namespaces; product codes remain shared with both party types.
+ * The lock closes races between the relevant checks and insert/update.
  */
 export async function lockAndCheckCode(
   tx: Prisma.TransactionClient,
   code: string,
+  entity: CodedEntity,
   exclude?: { entity: CodedEntity; id: string },
 ): Promise<{ normalized: string; conflict?: CodedEntity; invalid?: boolean }> {
   const normalized = code.trim();
@@ -21,8 +23,8 @@ export async function lockAndCheckCode(
   await tx.$queryRaw`WITH acquired AS MATERIALIZED (SELECT pg_advisory_xact_lock(hashtext(${comparisonKey}))) SELECT 1 AS locked FROM acquired`;
   const [product, customer, supplier] = await Promise.all([
     tx.product.findFirst({ where: { code: { equals: comparisonKey, mode: 'insensitive' }, ...(exclude?.entity === 'product' ? { id: { not: exclude.id } } : {}) }, select: { id: true } }),
-    tx.customer.findFirst({ where: { code: { equals: comparisonKey, mode: 'insensitive' }, ...(exclude?.entity === 'customer' ? { id: { not: exclude.id } } : {}) }, select: { id: true } }),
-    tx.vendor.findFirst({ where: { code: { equals: comparisonKey, mode: 'insensitive' }, ...(exclude?.entity === 'supplier' ? { id: { not: exclude.id } } : {}) }, select: { id: true } }),
+    entity !== 'supplier' ? tx.customer.findFirst({ where: { code: { equals: comparisonKey, mode: 'insensitive' }, ...(exclude?.entity === 'customer' ? { id: { not: exclude.id } } : {}) }, select: { id: true } }) : Promise.resolve(null),
+    entity !== 'customer' ? tx.vendor.findFirst({ where: { code: { equals: comparisonKey, mode: 'insensitive' }, ...(exclude?.entity === 'supplier' ? { id: { not: exclude.id } } : {}) }, select: { id: true } }) : Promise.resolve(null),
   ]);
   if (product) return { normalized, conflict: 'product' };
   if (customer) return { normalized, conflict: 'customer' };

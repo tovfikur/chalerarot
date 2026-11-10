@@ -450,6 +450,7 @@ model JournalEntry {
   sourceId    String?
   sourceRef   String?
   active      Boolean  @default(true)
+  status      String   @default("posted") // draft | posted | cancelled
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
   lines       JournalLine[]

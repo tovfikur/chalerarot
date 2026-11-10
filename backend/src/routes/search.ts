@@ -1,4 +1,4 @@
-import { Router, Request, Response } from 'express';
+﻿import { Router, Request, Response } from 'express';
 import { db } from '../db';
 import { customerBalance, vendorBalance } from '../balance';
 
@@ -10,7 +10,7 @@ const clampLim = (v: unknown) => {
   return Math.min(50, Math.max(1, n));
 };
 
-// GET /api/search?q=&limit= — one grouped lookup over persisted data:
+// GET /api/search?q=&limit= â€” one grouped lookup over persisted data:
 // sale/purchase/return numbers (or their party's name/mobile) plus
 // active customers/vendors by name/mobile. Trash excluded everywhere.
 search.get('/', async (req: Request, res: Response) => {
@@ -18,17 +18,17 @@ search.get('/', async (req: Request, res: Response) => {
   const lim = clampLim(req.query.limit);
   if (!q) return res.json({ invoices: [], returns: [], customers: [], vendors: [], more: { invoices: false, returns: false, customers: false, vendors: false } });
 
-  const ci = { contains: q, mode: 'insensitive' } as const;
+  const ci = { startsWith: q, mode: 'insensitive' } as const;
   const exact = { equals: q, mode: 'insensitive' } as const;
   const [sales, purs, retList, custs, vends] = await Promise.all([
     db.sale.findMany({
-      where: { OR: [{ invoiceNo: exact }, { customer: { OR: [{ name: ci }, { mobile: ci }, { code: exact }] } }] },
+      where: { OR: [{ invoiceNo: exact }, { customer: { OR: [{ name: ci }, { mobile: ci }, { code: ci }] } }] },
       orderBy: [{ date: 'desc' }, { createdAt: 'desc' }],
       take: lim + 1,
       include: { customer: { select: { name: true } } },
     }),
     db.purchase.findMany({
-      where: { OR: [{ invoiceNo: exact }, { vendor: { OR: [{ name: ci }, { mobile: ci }, { code: exact }] } }] },
+      where: { OR: [{ invoiceNo: ci }, { vendor: { OR: [{ name: ci }, { mobile: ci }, { code: ci }] } }] },
       orderBy: [{ date: 'desc' }, { createdAt: 'desc' }],
       take: lim + 1,
       include: { vendor: { select: { name: true } } },
@@ -36,9 +36,9 @@ search.get('/', async (req: Request, res: Response) => {
     db.productReturn.findMany({
       where: {
         OR: [
-          { returnNo: exact },
-          { sale: { customer: { OR: [{ name: ci }, { mobile: ci }, { code: exact }] } } },
-          { purchase: { vendor: { OR: [{ name: ci }, { mobile: ci }, { code: exact }] } } },
+          { returnNo: ci },
+          { sale: { customer: { OR: [{ name: ci }, { mobile: ci }, { code: ci }] } } },
+          { purchase: { vendor: { OR: [{ name: ci }, { mobile: ci }, { code: ci }] } } },
         ],
       },
       orderBy: [{ date: 'desc' }, { createdAt: 'desc' }],
@@ -49,12 +49,12 @@ search.get('/', async (req: Request, res: Response) => {
       },
     }),
     db.customer.findMany({
-      where: { deletedAt: null, OR: [{ name: ci }, { mobile: ci }, { code: exact }] },
+      where: { deletedAt: null, OR: [{ name: ci }, { mobile: ci }, { code: ci }] },
       orderBy: { name: 'asc' },
       take: lim + 1,
     }),
     db.vendor.findMany({
-      where: { deletedAt: null, OR: [{ name: ci }, { mobile: ci }, { code: exact }] },
+      where: { deletedAt: null, OR: [{ name: ci }, { mobile: ci }, { code: ci }] },
       orderBy: { name: 'asc' },
       take: lim + 1,
     }),
@@ -91,3 +91,4 @@ search.get('/', async (req: Request, res: Response) => {
     more: { invoices: inv.length > lim || sales.length > lim || purs.length > lim, returns: retList.length > lim, customers: custs.length > lim, vendors: vends.length > lim },
   });
 });
+

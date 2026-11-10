@@ -8,6 +8,11 @@ import { seedChart } from './accounting';
 
 const sum = (a: { amount: number }[]) => a.reduce((s, x) => s + x.amount, 0);
 const round2 = (n: number) => Math.round(n * 100) / 100;
+const cleanPartyPaymentNote = (note?: string | null) => note
+  ?.replace(/\[\[TRANSPORT_PAYMENT\]\]\s*/g, '')
+  .replace(/\[\[TRANSPORT_CONTRA_PURCHASE:[^\]]+\]\]/g, '')
+  .replace(/\[\[TRANSPORT_CONTRA_SALE:[^\]]+\]\]/g, '')
+  .trim() || undefined;
 
 const moneyAccountLedgerName = (account?: { name: string; type: string } | null) => {
   if (!account) return 'Cash: Unassigned';
@@ -62,7 +67,7 @@ reports.get('/balance-sheet', async (req: Request, res: Response) => {
       + movements.filter(m => m.moneyAccountId === a.id).reduce((sum, m) => sum + (m.direction === 'in' ? m.amount : -m.amount), 0), 0)
       + legacyMovements.reduce((sum, m) => sum + (m.direction === 'in' ? m.amount : -m.amount), 0);
   };
-  const savedJournalLines = await db.journalLine.findMany({ where: { entry: { active: true, sourceType: { in: ['manual', 'houseExpense'] }, date: { lte: asOf } } }, include: { entry: { select: { sourceType: true } }, account: { select: { code: true, name: true, type: true, moneyAccount: { select: { type: true } } } } } });
+  const savedJournalLines = await db.journalLine.findMany({ where: { entry: { active: true, status: 'posted', sourceType: { in: ['manual', 'houseExpense'] }, date: { lte: asOf } } }, include: { entry: { select: { sourceType: true } }, account: { select: { code: true, name: true, type: true, moneyAccount: { select: { type: true } } } } } });
   // House expense cash movements are already reflected in MoneyMovement; only
   // manual journals need to adjust the derived cash and party balances here.
   const delta = (fn: (code: string, name: string, type: string, moneyType?: string) => boolean) => savedJournalLines.filter(line => line.entry.sourceType === 'manual' && fn(line.account.code, line.account.name, line.account.type, line.account.moneyAccount?.type)).reduce((total, line) => total + line.debit - line.credit, 0);
@@ -286,7 +291,7 @@ async function deriveJournalRows(from: string, to: string) {
     db.customer.findMany({ where: { deletedAt: null, openingDue: { not: 0 } } }),
     db.vendor.findMany({ where: { deletedAt: null, openingPayable: { not: 0 } } }),
     db.stockMovement.findMany({ where: { date: { gte: from, lte: to }, type: { in: ['OPENING', 'ADJUSTMENT', 'REVALUE'] }, bucket: 'sellable' } }),
-    db.journalEntry.findMany({ where: { active: true, sourceType: { in: ['manual', 'houseExpense'] }, date: { gte: from, lte: to } }, include: { lines: { include: { account: true } } } }),
+    db.journalEntry.findMany({ where: { active: true, status: 'posted', sourceType: { in: ['manual', 'houseExpense'] }, date: { gte: from, lte: to } }, include: { lines: { include: { account: true } } } }),
     db.chartAccount.findMany({ where: { moneyAccountId: { not: null } }, select: { moneyAccountId: true, name: true } }),
   ]);
   const linkedName = new Map(linkedCashAccounts.map(a => [a.moneyAccountId!, a.name]));
@@ -335,6 +340,26 @@ async function deriveJournalRows(from: string, to: string) {
     add(p.date, ref, 'Accounts payable', 'Purchase invoice', 0, p.total);
     const advanceApplied = advancePostings.purchaseAdvanceApplied.get(p.id) ?? 0;
     if (advanceApplied > 0) { add(p.date, ref, 'Accounts payable', 'Apply supplier advance to invoice', advanceApplied, 0); add(p.date, ref, 'Supplier advances', 'Apply supplier advance to invoice', 0, advanceApplied); }
+  }
+  const contraCustomers = await db.customerPayment.findMany({
+    where: { active: true, date: { gte: from, lte: to }, note: { contains: '[[TRANSPORT_CONTRA_PURCHASE:' } },
+    select: { id: true, paymentNo: true, saleId: true, amount: true, date: true, note: true },
+  });
+  const contraPurchaseIds = [...new Set(contraCustomers.map(payment => payment.note?.match(/\[\[TRANSPORT_CONTRA_PURCHASE:([^\]]+)\]\]/)?.[1]).filter((id): id is string => Boolean(id)))];
+  const contraPurchases = contraPurchaseIds.length
+    ? await db.purchase.findMany({ where: { id: { in: contraPurchaseIds } }, select: { id: true, invoiceNo: true } })
+    : [];
+  const contraPurchaseById = new Map(contraPurchases.map(purchase => [purchase.id, purchase]));
+  for (const payment of contraCustomers) {
+    const purchaseId = payment.note?.match(/\[\[TRANSPORT_CONTRA_PURCHASE:([^\]]+)\]\]/)?.[1];
+    const purchase = purchaseId ? contraPurchaseById.get(purchaseId) : undefined;
+    const sale = sales.find(row => row.id === payment.saleId);
+    if (!purchase || !sale) continue;
+    const reference = `CONTRA-${payment.paymentNo}`;
+    const paymentDescription = cleanPartyPaymentNote(payment.note);
+    const description = `${paymentDescription || 'Direct transport settlement'} · ${sale.invoiceNo ?? sale.id} / ${purchase.invoiceNo ?? purchase.id}`;
+    add(payment.date, reference, 'Accounts payable', description, payment.amount, 0);
+    add(payment.date, reference, 'Accounts receivable', description, 0, payment.amount);
   }
   for (const e of expenses) {
     const movement = payments.find(m => m.sourceType === 'expense' && m.sourceId === e.id);
@@ -469,7 +494,7 @@ export async function reconcileAutomaticJournalEntries() {
  */
 async function buildJournalRows(from: string, to: string) {
   const entries = await db.journalEntry.findMany({
-    where: { active: true, date: { gte: from, lte: to } },
+    where: { active: true, status: 'posted', date: { gte: from, lte: to } },
     include: { lines: { include: { account: true } } },
     orderBy: [{ date: 'asc' }, { entryNo: 'asc' }],
   });
@@ -478,6 +503,8 @@ async function buildJournalRows(from: string, to: string) {
     reference: entry.sourceRef ?? entry.entryNo,
     account: line.account.name,
     accountId: line.accountId,
+    accountCode: line.account.code,
+    accountType: line.account.type,
     description: `${entry.memo}${line.description ? ` · ${line.description}` : ''}`,
     debit: +line.debit.toFixed(2),
     credit: +line.credit.toFixed(2),
@@ -496,10 +523,18 @@ reports.get('/journal-entries', async (req: Request, res: Response) => {
   const to = typeof req.query.to === 'string' ? req.query.to : todayStr();
   if (!/^\d{4}-\d{2}-\d{2}$/.test(from) || !/^\d{4}-\d{2}-\d{2}$/.test(to) || from > to) return res.status(400).json({ error: 'Valid from and to dates are required' });
   await reconcileAutomaticJournalEntries();
+  if (req.query.includeStatuses === 'true') {
+    const saved = await db.journalEntry.findMany({ where: { date: { gte: from, lte: to } }, include: { lines: { include: { account: true } } }, orderBy: [{ date: 'desc' }, { entryNo: 'desc' }] });
+    const entries = saved.map(entry => {
+      const lines = entry.lines.map((line, index) => ({ date: entry.date, reference: entry.sourceRef ?? entry.entryNo, account: line.account.name, accountId: line.accountId, accountCode: line.account.code, accountType: line.account.type, description: `${entry.memo}${line.description ? ` · ${line.description}` : ''}`, debit: +line.debit.toFixed(2), credit: +line.credit.toFixed(2), journalNo: entry.entryNo, sequence: index + 1, entryId: entry.id, editable: entry.sourceType === 'manual', sourceType: entry.sourceType, sourceId: entry.sourceId, sourceRef: entry.sourceRef }));
+      return { date: entry.date, reference: entry.sourceRef ?? entry.entryNo, lines, debitTotal: +lines.reduce((n, line) => n + line.debit, 0).toFixed(2), creditTotal: +lines.reduce((n, line) => n + line.credit, 0).toFixed(2), entryId: entry.id, editable: entry.sourceType === 'manual', sourceType: entry.sourceType, sourceId: entry.sourceId, sourceRef: entry.sourceRef, status: entry.status };
+    });
+    return res.json({ from, to, entries, debitTotal: +entries.reduce((n, entry) => n + entry.debitTotal, 0).toFixed(2), creditTotal: +entries.reduce((n, entry) => n + entry.creditTotal, 0).toFixed(2), balanced: entries.every(entry => Math.abs(entry.debitTotal - entry.creditTotal) < 0.01) });
+  }
   const rows = await buildJournalRows(from, to);
   const groups = new Map<string, typeof rows>();
   for (const row of rows) { const key = `${row.date}|${row.reference}`; groups.set(key, [...(groups.get(key) ?? []), row]); }
-  const entries = [...groups.values()].map(lines => ({ date: lines[0].date, reference: lines[0].reference, lines,
+  const entries = [...groups.values()].map(lines => ({ date: lines[0].date, reference: lines[0].reference, lines, status: 'posted' as const,
     entryId: lines.find(line => line.entryId)?.entryId, editable: lines.some(line => line.editable), sourceType: lines.find(line => line.sourceType)?.sourceType,
     sourceId: lines.find(line => line.sourceId)?.sourceId, sourceRef: lines.find(line => line.sourceRef)?.sourceRef,
     debitTotal: +lines.reduce((n, x) => n + x.debit, 0).toFixed(2), creditTotal: +lines.reduce((n, x) => n + x.credit, 0).toFixed(2) }));
@@ -592,7 +627,7 @@ reports.get('/cashflow', async (req: Request, res: Response) => {
     db.moneyAccount.findMany({ select: { openingBalance: true, openingDate: true } }),
     db.moneyMovement.findMany({ where: { active: true, date: { lte: to } } }),
     db.expense.findMany({ where: { capitalized: true, deletedAt: null, date: { gte: from, lte: to } }, select: { id: true } }),
-    db.journalLine.findMany({ where: { entry: { active: true, sourceType: 'manual', date: { lte: to } }, account: { moneyAccountId: { not: null } } }, include: { entry: { select: { date: true } }, account: { select: { moneyAccountId: true } } } }),
+    db.journalLine.findMany({ where: { entry: { active: true, status: 'posted', sourceType: 'manual', date: { lte: to } }, account: { moneyAccountId: { not: null } } }, include: { entry: { select: { date: true } }, account: { select: { moneyAccountId: true } } } }),
   ]);
   const journalCashDeltaBefore = cashJournalLines.filter(line => line.entry.date < from).reduce((total, line) => total + line.debit - line.credit, 0);
   const journalCashDeltaPeriod = cashJournalLines.filter(line => line.entry.date >= from).reduce((total, line) => total + line.debit - line.credit, 0);
@@ -693,7 +728,7 @@ reports.get('/accounts/receivables/:id', async (req: Request, res: Response) => 
         })),
       };
     }),
-    payments: pays.map(p => ({ id: p.id, amount: p.amount, date: p.date, note: p.note ?? undefined })),
+    payments: pays.map(p => ({ id: p.id, amount: p.amount, date: p.date, note: cleanPartyPaymentNote(p.note) })),
     totalSales: saleTotal,
     totalPaid: Math.round(salePaid * 100) / 100,
     balance: Math.round((c.openingDue + saleTotal + saleRefunds - salePaid) * 100) / 100,
@@ -741,7 +776,7 @@ reports.get('/accounts/payables/:id', async (req: Request, res: Response) => {
         })),
       };
     }),
-    payments: pays.map(p => ({ id: p.id, amount: p.amount, date: p.date, note: p.note ?? undefined })),
+    payments: pays.map(p => ({ id: p.id, amount: p.amount, date: p.date, note: cleanPartyPaymentNote(p.note) })),
     totalPurchase: purTotal,
     totalPaid: Math.round(purPaid * 100) / 100,
     balance: Math.round((v.openingPayable + purTotal + purRefunds - purPaid) * 100) / 100,

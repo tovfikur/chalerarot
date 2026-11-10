@@ -10,11 +10,12 @@ export type ReportRow = {
   label: string;      // left column (invoice no, customer, category, label...)
   sub?: string;       // optional second line under the label
   right: string;      // right column (already formatted, e.g. ৳1,234)
+  cells?: string[];
   neg?: boolean;      // render the right column in red
   bold?: boolean;
 };
 
-export type ReportSection = { title?: string; rows: ReportRow[] };
+export type ReportSection = { title?: string; columns?: string[]; rows: ReportRow[] };
 
 export type ReportDoc = {
   language?: 'bn' | 'en';
@@ -42,8 +43,8 @@ export function downloadReportCSV(d: ReportDoc, filename: string): boolean {
   for (const meta of d.meta ?? []) rows.push([meta.label, meta.value].map(cell).join(','));
   for (const section of d.sections) {
     if (section.title) rows.push('', cell(section.title));
-    rows.push(headings.map(cell).join(','));
-    for (const row of section.rows) rows.push([cell(row.label), cell(row.sub ?? ''), cell(row.right)].join(','));
+    rows.push((section.columns ?? headings).map(cell).join(','));
+    for (const row of section.rows) rows.push((row.cells ?? [row.label, row.sub ?? '', row.right]).map(cell).join(','));
   }
   if (d.total) rows.push('', [cell(d.total.label), '', cell(d.total.value)].join(','));
   try {
@@ -83,7 +84,8 @@ export function buildReportHTML(d: ReportDoc, autoPrint: boolean): string {
   const sections = d.sections.map(sec => `
     ${sec.title ? `<h3>${esc(sec.title)}</h3>` : ''}
     <table>
-      ${sec.rows.map(r => `<tr class="${r.bold ? 'b' : ''}">
+      ${sec.columns ? `<thead><tr>${sec.columns.map(c => `<th>${esc(c)}</th>`).join('')}</tr></thead>` : ''}
+      ${sec.rows.map(r => r.cells ? `<tr class="${r.bold ? 'b' : ''}">${r.cells.map((cell, i) => `<td class="${i === r.cells!.length - 1 ? `r ${r.neg ? 'neg' : ''}` : 'l'}">${esc(cell)}</td>`).join('')}</tr>` : `<tr class="${r.bold ? 'b' : ''}">
         <td class="l">${esc(r.label)}${r.sub ? `<div class="s">${esc(r.sub)}</div>` : ''}</td>
         <td class="r ${r.neg ? 'neg' : ''}">${esc(r.right)}</td></tr>`).join('')}
     </table>`).join('');
@@ -99,6 +101,8 @@ export function buildReportHTML(d: ReportDoc, autoPrint: boolean): string {
   h3 { font-size: 15px; margin: 14px 0 4px; color: #1B7F4B; }
   table { width: 100%; border-collapse: collapse; }
   td { padding: 5px 0; border-bottom: 1px solid #E3E8E4; font-size: 14px; vertical-align: top; }
+  th { text-align: left; padding: 6px 4px; border-bottom: 2px solid #CBD5E1; font-size: 12px; }
+  th:not(:first-child) { text-align: right; }
   td.r { text-align: right; white-space: nowrap; font-weight: 600; padding-left: 10px; }
   td.r.neg { color: #C62828; }
   td .s { font-size: 12px; color: #6B7A70; font-weight: 400; }

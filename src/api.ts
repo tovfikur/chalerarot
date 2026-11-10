@@ -73,7 +73,7 @@ export type SettlementStatus = 'paid' | 'partial' | 'due';
 export type TxnItem = {
   productId?: string; productName: string; unit: string; enteredQty: number; qtyKg: number; rate: number; otherCost?: number; unitCost?: number;
 };
-export type InvoicePayment = { id: string; paymentNo?: string; accountId?: string | null; accountName?: string; amount: number; date?: string; note?: string; advance?: boolean; transportPayment?: boolean };
+export type InvoicePayment = { id: string; paymentNo?: string; accountId?: string | null; accountName?: string; amount: number; date?: string; note?: string; advance?: boolean; transportPayment?: boolean; transportContra?: boolean; contraPurchaseInvoiceNo?: string; contraSaleInvoiceNo?: string };
 /** Payment account recorded on the ledger row when the document was saved. */
 export type TxnPayment = { accountName: string | null; method: string; amount: number; date: string } | null;
 export type SaleDetail = {
@@ -128,8 +128,10 @@ export type MoneyAccountList = { accounts: MoneyAccountRow[]; totalMoney: number
 export type MoneyAccountMovement = {
   id: string; transactionNo: string; date: string; direction: 'in' | 'out'; amount: number;
   sourceType: string; sourceId: string; note?: string; transferNo?: string;
-  counterpartyAccountId?: string; active: boolean; balance: number;
+  counterpartyAccountId?: string; active: boolean; balance: number; createdAt?: string;
 };
+
+export type StockMovementReportRow = { id: string; productId: string; type: string; bucket: string; qtyKg: number; unitCost: number; value: number; date: string; refId?: string | null; note?: string | null; createdAt?: string };
 
 export type MoneyAccountDetail = { account: MoneyAccountRow; movements: MoneyAccountMovement[] };
 
@@ -155,13 +157,13 @@ export type CashFlowStatement = {
 };
 
 export type BalanceSheet = { asOf: string; assets: { cash: number | null; bank: number | null; wallets: number | null; receivables: number; supplierAdvances?: number; inventory: number; other?: number; total: number }; liabilities: { payables: number; customerCredits?: number; other?: number; total: number }; equity: number; journalEquity: number; otherEquity: number; accounts?: { assets: { code: string; name: string; type: string; balance: number }[]; liabilities: { code: string; name: string; type: string; balance: number }[]; equity: { code: string; name: string; type: string; balance: number }[] }; totalLiabilitiesAndEquity: number; balanced: boolean };
-export type JournalLine = { date: string; reference: string; account: string; accountId?: string; description: string; debit: number; credit: number; journalNo: string; sequence: number; entryId?: string; editable?: boolean };
-export type JournalEntries = { from: string; to: string; entries: { date: string; reference: string; lines: JournalLine[]; debitTotal: number; creditTotal: number; entryId?: string; editable?: boolean; sourceType?: string; sourceId?: string; sourceRef?: string }[]; debitTotal: number; creditTotal: number; balanced: boolean };
+export type JournalLine = { date: string; reference: string; account: string; accountId?: string; accountCode?: string; accountType?: string; description: string; debit: number; credit: number; journalNo: string; sequence: number; entryId?: string; editable?: boolean };
+export type JournalEntries = { from: string; to: string; entries: { date: string; reference: string; lines: JournalLine[]; debitTotal: number; creditTotal: number; entryId?: string; editable?: boolean; sourceType?: string; sourceId?: string; sourceRef?: string; status?: 'draft' | 'posted' | 'cancelled' }[]; debitTotal: number; creditTotal: number; balanced: boolean };
 export type GeneralLedger = { from: string; to: string; accounts: { account: string; code: string; openingBalance: number; periodDebit: number; periodCredit: number; closingBalance: number; netBalance: number; balanceSide: 'Dr' | 'Cr'; rows: (JournalLine & { runningBalance: number })[] }[]; debitTotal: number; creditTotal: number; balanced: boolean };
 export type ChartAccountRow = { id: string; code: string; name: string; type: 'asset' | 'liability' | 'equity' | 'income' | 'expense'; active: boolean; system: boolean };
 export type JournalEntryLine = { id?: string; accountId: string; account?: ChartAccountRow; description: string; debit: number; credit: number };
-export type SavedJournalEntry = { id: string; entryNo: string; date: string; memo: string; sourceType: string; sourceId?: string | null; sourceRef?: string | null; active: boolean; lines: JournalEntryLine[] };
-export type JournalWrite = { date: string; memo: string; sourceType?: 'manual'; lines: JournalEntryLine[] };
+export type SavedJournalEntry = { id: string; entryNo: string; date: string; memo: string; sourceType: string; sourceId?: string | null; sourceRef?: string | null; active: boolean; status?: 'draft' | 'posted' | 'cancelled'; lines: JournalEntryLine[] };
+export type JournalWrite = { date: string; memo: string; sourceType?: 'manual'; status?: 'draft' | 'posted'; lines: JournalEntryLine[] };
 
 /** One money transfer = one business event (its two movements stay linked). */
 export type MoneyTransfer = {
@@ -181,7 +183,8 @@ export const api = {
   users: () => req<AppUser[]>('/users'),
   saveUser: (body: UserInput, id?: string) => req<AppUser>(id ? `/users/${id}` : '/users', { method: id ? 'PUT' : 'POST', body: JSON.stringify(body) }),
   profile: (body: { name: string; phone: string; email: string; password: string; currentPassword: string }) => req<AppUser>('/auth/profile', { method: 'PUT', body: JSON.stringify(body) }),
-  moneyMovements: () => req<MoneyMovementRow[]>('/money/movements?limit=30'),
+  moneyMovements: (limit = 30) => req<MoneyMovementRow[]>(`/money/movements?limit=${encodeURIComponent(String(limit))}`),
+  stockMovements: (limit = 500) => req<StockMovementReportRow[]>(`/stock-movements?limit=${encodeURIComponent(String(limit))}`),
   moneyEntry: (body: { accountId: string; direction: 'in' | 'out'; amount: number; date: string; note: string; requestId: string }) => req<MoneyMovementRow>('/money/entries', { method: 'POST', body: JSON.stringify(body) }),
   houseExpenses: () => req<HouseExpenseRow[]>('/house-expenses'),
   createHouseExpense: (body: { accountId: string; amount: number; date: string; description: string; note: string; requestId: string }) => req<HouseExpenseRow>('/house-expenses', { method: 'POST', body: JSON.stringify(body) }),
@@ -264,12 +267,13 @@ export const api = {
   cashflow: (from: string, to: string) => req<CashFlowStatement>(`/cashflow?from=${from}&to=${to}`),
   balanceSheet: (asOf: string) => req<BalanceSheet>(`/balance-sheet?asOf=${asOf}`),
   generalLedger: (from: string, to: string) => req<GeneralLedger>(`/general-ledger?from=${from}&to=${to}`),
-  journalEntries: (from: string, to: string) => req<JournalEntries>(`/journal-entries?from=${from}&to=${to}`),
+  journalEntries: (from: string, to: string, includeStatuses = false) => req<JournalEntries>(`/journal-entries?from=${encodeURIComponent(from)}&to=${encodeURIComponent(to)}${includeStatuses ? '&includeStatuses=true' : ''}`),
   chartAccounts: () => req<ChartAccountRow[]>('/chart-of-accounts'),
   createChartAccount: (body: { code: string; name: string; type: ChartAccountRow['type'] }) => req<ChartAccountRow>('/chart-of-accounts', { method: 'POST', body: JSON.stringify(body) }),
   updateChartAccount: (id: string, body: Partial<ChartAccountRow>) => req<ChartAccountRow>(`/chart-of-accounts/${id}`, { method: 'PUT', body: JSON.stringify(body) }),
   createJournalEntry: (body: JournalWrite) => req<SavedJournalEntry>('/journal-entries', { method: 'POST', body: JSON.stringify(body) }),
   updateJournalEntry: (id: string, body: JournalWrite) => req<SavedJournalEntry>(`/journal-entries/${id}`, { method: 'PUT', body: JSON.stringify(body) }),
+  setJournalEntryStatus: (id: string, status: 'draft' | 'posted' | 'cancelled') => req<{ id: string; status: string }>(`/journal-entries/${id}/status`, { method: 'PUT', body: JSON.stringify({ status }) }),
   moneyTransfers: (limit?: number) => req<MoneyTransfer[]>(`/money/transfers${limit ? `?limit=${limit}` : ''}`),
   createMoneyTransfer: (b: { fromId: string; toId: string; amount: number; date?: string; note?: string }) =>
     req<MoneyTransfer & { money: MoneyBalance[] }>('/money/transfers', { method: 'POST', body: JSON.stringify(b) }),

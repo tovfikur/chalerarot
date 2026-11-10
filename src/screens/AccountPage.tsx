@@ -31,7 +31,8 @@ export function AccountPage({ id, onBack }: { id: string; onBack: () => void }) 
   const filtered = invalid ? [] : (data?.movements ?? []).filter(row => row.sourceType !== 'openingAdjust' &&
     (!start || row.date >= start) && (!end || row.date <= end) && (kind === 'all' || row.sourceType === kind) &&
     (direction === 'all' || row.direction === direction) &&
-    `${names[row.sourceType] ?? row.sourceType} ${row.note ?? ''} ${row.transferNo ?? ''} ${otherName(row)} ${row.amount}`.toLowerCase().includes(toEnDigits(query).trim().toLowerCase()));
+    [names[row.sourceType] ?? row.sourceType, row.note ?? '', row.transferNo ?? '', otherName(row), String(row.amount)]
+      .some(value => value.toLowerCase().startsWith(toEnDigits(query).trim().toLowerCase())));
   const incoming = filtered.filter(r => r.direction === 'in').reduce((s, r) => s + r.amount, 0);
   const outgoing = filtered.filter(r => r.direction === 'out').reduce((s, r) => s + r.amount, 0);
   const pages = Math.max(1, Math.ceil(filtered.length / 25));

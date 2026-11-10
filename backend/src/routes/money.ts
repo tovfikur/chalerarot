@@ -143,7 +143,7 @@ money.get('/accounts/:id', async (req: Request, res: Response) => {
   const acc = list.find(a => a.id === req.params.id);
   if (!acc) return res.status(404).json({ error: 'Money account not found' });
   const chartAccount = await db.chartAccount.findUnique({ where: { moneyAccountId: acc.id } });
-  const journalLines = chartAccount ? await db.journalLine.findMany({ where: { accountId: chartAccount.id, entry: { active: true, sourceType: 'manual' } }, include: { entry: { select: { id: true, entryNo: true, date: true, memo: true, sourceType: true, sourceRef: true } } } }) : [];
+  const journalLines = chartAccount ? await db.journalLine.findMany({ where: { accountId: chartAccount.id, entry: { active: true, status: 'posted', sourceType: 'manual' } }, include: { entry: { select: { id: true, entryNo: true, date: true, memo: true, sourceType: true, sourceRef: true } } } }) : [];
   const merged = [
     ...rows.map(m => ({ id: m.id, transactionNo: m.transactionNo, date: m.date, direction: m.direction as 'in' | 'out', amount: m.amount, sourceType: m.sourceType, sourceId: m.sourceId, note: m.note ?? undefined, transferNo: m.transfer?.transferNo, counterpartyAccountId: m.transfer ? (m.transfer.fromAccountId === acc.id ? m.transfer.toAccountId : m.transfer.fromAccountId) ?? undefined : undefined, active: m.active, createdAt: m.createdAt })),
     ...journalLines.filter(line => line.debit > 0 || line.credit > 0).map(line => ({ id: `journal-${line.id}`, transactionNo: line.entry.entryNo, date: line.entry.date, direction: line.debit > 0 ? 'in' as const : 'out' as const, amount: line.debit > 0 ? line.debit : line.credit, sourceType: 'journal', sourceId: line.entry.id, note: `${line.entry.entryNo} · ${line.entry.memo}`, transferNo: undefined, counterpartyAccountId: undefined, active: true, createdAt: line.createdAt })),
@@ -389,7 +389,7 @@ money.post('/transfers', async (req: Request, res: Response) => {
 
 // GET /api/money/movements?limit=100 — recent ledger entries (all accounts)
 money.get('/movements', async (req: Request, res: Response) => {
-  const limit = Math.min(500, Math.max(1, parseInt(String(req.query.limit ?? '100'), 10) || 100));
+  const limit = Math.min(10000, Math.max(1, parseInt(String(req.query.limit ?? '100'), 10) || 100));
   const list = await db.moneyMovement.findMany({
     where: { active: true, ...(req.query.accountId ? { moneyAccountId: String(req.query.accountId) } : {}) },
     orderBy: [{ date: 'desc' }, { createdAt: 'desc' }], take: limit,

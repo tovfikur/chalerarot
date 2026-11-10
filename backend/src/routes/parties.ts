@@ -46,7 +46,7 @@ customers.post('/bulk', async (req: Request, res: Response) => {
         }
         let code = item.code ? String(item.code).trim() : null;
         if (code) {
-          const codeCheck = await lockAndCheckCode(tx, code);
+          const codeCheck = await lockAndCheckCode(tx, code, 'customer');
           const key = codeCheck.normalized.toUpperCase();
           if (codeCheck.invalid) {
             errors.push({ row: rowNum, name, error: 'Code must use English letters or numbers; hyphen, underscore, dot and slash are allowed' });
@@ -98,7 +98,7 @@ customers.post('/', async (req: Request, res: Response) => {
   try {
     const c = await db.$transaction(async tx => {
       const rawCode = String(code ?? '').trim();
-      const checked = rawCode ? await lockAndCheckCode(tx, rawCode) : { normalized: '' };
+      const checked = rawCode ? await lockAndCheckCode(tx, rawCode, 'customer') : { normalized: '' };
       if (checked.invalid) throw Object.assign(new Error('Code must use English letters or numbers; hyphen, underscore, dot and slash are allowed'), { code: 'CODE_INVALID' });
       if (checked.conflict) throw Object.assign(new Error('Code is already in use'), { code: 'CODE_EXISTS', conflict: checked.conflict });
       return tx.customer.create({ data: { code: checked.normalized || null, name: String(name).trim(), mobile: String(mobile ?? ''), address: address ?? null, openingDue: num(opening), nextDate: next ?? null } });
@@ -119,7 +119,7 @@ customers.put('/:id', async (req: Request, res: Response) => {
   try {
     const u = await db.$transaction(async tx => {
       const rawCode = code === undefined ? cur.code : String(code ?? '').trim();
-      const checked = rawCode ? await lockAndCheckCode(tx, rawCode, { entity: 'customer', id: cur.id }) : { normalized: '' };
+      const checked = rawCode ? await lockAndCheckCode(tx, rawCode, 'customer', { entity: 'customer', id: cur.id }) : { normalized: '' };
       if (checked.invalid) throw Object.assign(new Error('Code must use English letters or numbers; hyphen, underscore, dot and slash are allowed'), { code: 'CODE_INVALID' });
       if (checked.conflict) throw Object.assign(new Error('Code is already in use'), { code: 'CODE_EXISTS', conflict: checked.conflict });
       return tx.customer.update({ where: { id: cur.id }, data: {
@@ -200,7 +200,7 @@ vendors.post('/bulk', async (req: Request, res: Response) => {
         }
         let code = item.code ? String(item.code).trim() : null;
         if (code) {
-          const codeCheck = await lockAndCheckCode(tx, code);
+          const codeCheck = await lockAndCheckCode(tx, code, 'supplier');
           const key = codeCheck.normalized.toUpperCase();
           if (codeCheck.invalid) {
             errors.push({ row: rowNum, name, error: 'Code must use English letters or numbers; hyphen, underscore, dot and slash are allowed' });
@@ -252,7 +252,7 @@ vendors.post('/', async (req: Request, res: Response) => {
   try {
     const v = await db.$transaction(async tx => {
       const rawCode = String(code ?? '').trim();
-      const checked = rawCode ? await lockAndCheckCode(tx, rawCode) : { normalized: '' };
+      const checked = rawCode ? await lockAndCheckCode(tx, rawCode, 'supplier') : { normalized: '' };
       if (checked.invalid) throw Object.assign(new Error('Code must use English letters or numbers; hyphen, underscore, dot and slash are allowed'), { code: 'CODE_INVALID' });
       if (checked.conflict) throw Object.assign(new Error('Code is already in use'), { code: 'CODE_EXISTS', conflict: checked.conflict });
       return tx.vendor.create({ data: { code: checked.normalized || null, name: String(name).trim(), mobile: String(mobile ?? ''), address: address ?? null, openingPayable: num(opening), nextDate: next ?? null } });
@@ -273,7 +273,7 @@ vendors.put('/:id', async (req: Request, res: Response) => {
   try {
     const u = await db.$transaction(async tx => {
       const rawCode = code === undefined ? cur.code : String(code ?? '').trim();
-      const checked = rawCode ? await lockAndCheckCode(tx, rawCode, { entity: 'supplier', id: cur.id }) : { normalized: '' };
+      const checked = rawCode ? await lockAndCheckCode(tx, rawCode, 'supplier', { entity: 'supplier', id: cur.id }) : { normalized: '' };
       if (checked.invalid) throw Object.assign(new Error('Code must use English letters or numbers; hyphen, underscore, dot and slash are allowed'), { code: 'CODE_INVALID' });
       if (checked.conflict) throw Object.assign(new Error('Code is already in use'), { code: 'CODE_EXISTS', conflict: checked.conflict });
       return tx.vendor.update({ where: { id: cur.id }, data: {

@@ -12,6 +12,23 @@ const num = (v: unknown, d = 0) => {
   const n = typeof v === 'number' ? v : parseFloat(String(v ?? ''));
   return Number.isFinite(n) ? n : d;
 };
+const contraPurchaseIdFromNote = (note?: string | null) => note?.match(/\[\[TRANSPORT_CONTRA_PURCHASE:([^\]]+)\]\]/)?.[1];
+const contraSaleIdFromNote = (note?: string | null) => note?.match(/\[\[TRANSPORT_CONTRA_SALE:([^\]]+)\]\]/)?.[1];
+const cleanPaymentNote = (note?: string | null) => note
+  ?.replace(/\[\[TRANSPORT_PAYMENT\]\]\s*/g, '')
+  .replace(/\[\[TRANSPORT_CONTRA_PURCHASE:[^\]]+\]\]/g, '')
+  .replace(/\[\[TRANSPORT_CONTRA_SALE:[^\]]+\]\]/g, '')
+  .trim() || undefined;
+
+async function resolveTransportContraPurchase(t: TxClient, invoiceNo: string, amount: number) {
+  const purchase = await t.purchase.findUnique({ where: { invoiceNo: invoiceNo.trim() } });
+  if (!purchase) throw Object.assign(new Error('Purchase invoice number not found.'), { status: 400, code: 'CONTRA_PURCHASE_NOT_FOUND' });
+  const due = settleParty('purchase', purchase.vendorId, t).then(rows => rows.get(purchase.id)?.due ?? 0);
+  if (round2(await due) + 0.009 < round2(amount)) {
+    throw Object.assign(new Error('The purchase invoice has less remaining payable than the transport amount.'), { status: 400, code: 'CONTRA_PURCHASE_BALANCE' });
+  }
+  return purchase;
+}
 
 // Preserve the old FIFO application on invoices that already existed when an
 // advance was received. Lock those allocations before a new invoice is added,
@@ -125,21 +142,35 @@ const invoicePaymentDetails = async (
   const directPayments = paymentRows.filter(row => Boolean((row as any).saleId ?? (row as any).purchaseId));
   const directMovements = movementRows.filter(row => row.sourceType === (kind === 'sale' ? 'sale' : 'purchase'));
   const directMovementByPaymentId = new Map(directPayments.map((payment, index) => [payment.id, directMovements[index]]));
+  const contraPurchaseIds = [...new Set(paymentRows.map(row => contraPurchaseIdFromNote(row.note)).filter((id): id is string => Boolean(id)))];
+  const contraPurchases = contraPurchaseIds.length
+    ? await db.purchase.findMany({ where: { id: { in: contraPurchaseIds } }, select: { id: true, invoiceNo: true } })
+    : [];
+  const contraPurchaseNoById = new Map(contraPurchases.map(purchase => [purchase.id, purchase.invoiceNo ?? undefined]));
+  const contraSaleIds = [...new Set(paymentRows.map(row => contraSaleIdFromNote(row.note)).filter((id): id is string => Boolean(id)))];
+  const contraSales = contraSaleIds.length
+    ? await db.sale.findMany({ where: { id: { in: contraSaleIds } }, select: { id: true, invoiceNo: true } })
+    : [];
+  const contraSaleNoById = new Map(contraSales.map(sale => [sale.id, sale.invoiceNo ?? undefined]));
   return allocations.map(allocation => {
     const payment = paymentById.get(allocation.paymentId);
     const movement = movementById.get(allocation.paymentId) ?? directMovementByPaymentId.get(allocation.paymentId);
+    const contraPurchaseId = contraPurchaseIdFromNote(payment?.note);
+    const contraSaleId = contraSaleIdFromNote(payment?.note);
+    const isTransportContra = Boolean(contraPurchaseId || contraSaleId || payment?.note?.startsWith('[[TRANSPORT_PAYMENT]]'));
     return {
       id: allocation.paymentId,
       paymentNo: payment?.paymentNo,
       amount: allocation.amount,
       date: payment?.date,
-      note: payment?.note?.startsWith('[[TRANSPORT_PAYMENT]]')
-        ? payment.note.slice('[[TRANSPORT_PAYMENT]]'.length).trimStart()
-        : payment?.note ?? undefined,
+      note: isTransportContra ? undefined : cleanPaymentNote(payment?.note),
       accountId: movement?.moneyAccountId ?? undefined,
       accountName: movement?.moneyAccount?.name ?? undefined,
       advance: !((payment as any)?.saleId ?? (payment as any)?.purchaseId),
       transportPayment: payment?.note?.startsWith('[[TRANSPORT_PAYMENT]]') ?? false,
+      contraPurchaseInvoiceNo: contraPurchaseId ? contraPurchaseNoById.get(contraPurchaseId) : undefined,
+      contraSaleInvoiceNo: contraSaleId ? contraSaleNoById.get(contraSaleId) : undefined,
+      transportContra: isTransportContra,
     };
   });
 };
@@ -183,7 +214,7 @@ async function assertLastStockEvent(t: TxClient, productIds: string[], createdAt
 
 async function editSale(req: Request, res: Response) {
   try {
-    const { customerId, lines, discount, paid, transportPaid, transportPaymentNote, accountId, next, date, payments, paymentNote } = req.body ?? {};
+    const { customerId, lines, discount, paid, transportPaid, transportPaymentNote, transportContraPurchaseNo, accountId, next, date, payments, paymentNote } = req.body ?? {};
     if (!Array.isArray(lines) || !lines.length) return res.status(400).json({ error: 'No items in sale' });
     const day = transactionDay(date);
     checkPromiseDay(next);
@@ -195,6 +226,9 @@ async function editSale(req: Request, res: Response) {
       const old = await t.sale.findUnique({ where: { id: req.params.id }, include: { items: true, returns: true } });
       if (!old) throw Object.assign(new Error('Sale not found'), { status: 404 });
       if (old.returns.length) throw Object.assign(new Error('Invoices with posted returns cannot be edited.'), { status: 409 });
+      const oldContraMarker = `[[TRANSPORT_CONTRA_SALE:${old.id}]]`;
+      const oldContraPayments = await t.vendorPayment.findMany({ where: { active: true, note: { contains: oldContraMarker } }, select: { id: true, vendorId: true } });
+      if (oldContraPayments.length) await t.vendorPayment.updateMany({ where: { id: { in: oldContraPayments.map(payment => payment.id) } }, data: { active: false } });
       if (day !== old.date) throw Object.assign(new Error('The invoice date cannot be changed during edit; use the original date to preserve AVCO history.'), { status: 409 });
       const ids = [...old.items.map(i => i.productId), ...lines.map((l: any) => String(l.productId ?? ''))];
       await assertLastStockEvent(t, ids, old.createdAt, old.id);
@@ -251,6 +285,10 @@ async function editSale(req: Request, res: Response) {
         if (c && !c.deletedAt) validCustomerId = c.id;
       }
       if (due > 0 && !validCustomerId) throw Object.assign(new Error('Customer is required when there is a due'), { status: 400 });
+      if (transportContraPurchaseNo && cappedTransportPay <= 0) throw Object.assign(new Error('Enter a transport amount before linking a purchase invoice.'), { status: 400, code: 'CONTRA_WITHOUT_TRANSPORT' });
+      const contraPurchase = transportContraPurchaseNo && cappedTransportPay > 0
+        ? await resolveTransportContraPurchase(t, String(transportContraPurchaseNo), cappedTransportPay)
+        : null;
       await t.sale.update({ where: { id: old.id }, data: { customerId: validCustomerId, date: day, discount: disc, total, paid: cappedPay, due, profit: round2(total - cogs), nextDate: next || null, items: { create: savedItems } } });
 
       const postPayment = async (amount: number, acc: any) => {
@@ -263,10 +301,18 @@ async function editSale(req: Request, res: Response) {
       } else if (payAccount && cappedCashPay > 0) await postPayment(cappedCashPay, payAccount);
       if (cappedTransportPay > 0) await t.customerPayment.create({ data: {
         paymentNo: await nextPaymentNo(t, 'received'), customerId: validCustomerId, saleId: old.id,
-        amount: cappedTransportPay, date: day, note: `[[TRANSPORT_PAYMENT]] ${transportPaymentNote ?? 'Transport payment (paid directly by customer)'}`,
+        amount: cappedTransportPay, date: day, note: `[[TRANSPORT_PAYMENT]] ${transportPaymentNote ?? 'Transport payment (paid directly by customer)'}${contraPurchase ? ` [[TRANSPORT_CONTRA_PURCHASE:${contraPurchase.id}]]` : ''}`,
       } });
+      if (contraPurchase && validCustomerId && cappedTransportPay > 0) {
+        await t.vendorPayment.create({ data: {
+          paymentNo: await nextPaymentNo(t), vendorId: contraPurchase.vendorId, purchaseId: contraPurchase.id,
+          amount: cappedTransportPay, date: day,
+          note: `[[TRANSPORT_CONTRA_SALE:${old.id}]] ${transportPaymentNote ?? 'Transport payment (paid directly by customer)'} · ${old.invoiceNo ?? old.id}`,
+        } });
+      }
       if (old.customerId && old.customerId !== validCustomerId) await syncPartyInvoices('sale', old.customerId, t);
       if (validCustomerId) await syncPartyInvoices('sale', validCustomerId, t);
+      for (const vendorId of new Set([...oldContraPayments.map(payment => payment.vendorId), ...(contraPurchase ? [contraPurchase.vendorId] : [])])) await syncPartyInvoices('purchase', vendorId, t);
       return { id: old.id, invoiceNo: old.invoiceNo, total };
     });
     res.json(result);
@@ -285,6 +331,8 @@ async function editPurchase(req: Request, res: Response) {
       const old = await t.purchase.findUnique({ where: { id: req.params.id }, include: { items: true, returns: true } });
       if (!old) throw Object.assign(new Error('Purchase not found'), { status: 404 });
       if (old.returns.length) throw Object.assign(new Error('Invoices with posted returns cannot be edited.'), { status: 409 });
+      const linkedContraCustomers = await t.customerPayment.findMany({ where: { active: true, note: { contains: `[[TRANSPORT_CONTRA_PURCHASE:${old.id}]]` } }, select: { id: true } });
+      if (linkedContraCustomers.length) throw Object.assign(new Error('This purchase invoice has customer transport settlements linked to it. Delete or correct the related sales invoice first.'), { status: 409, code: 'PURCHASE_HAS_TRANSPORT_CONTRA' });
       const negativeCostResolution = await t.stockMovement.findFirst({ where: { refId: old.id, type: 'NEGATIVE_STOCK_COGS_ADJUSTMENT' }, select: { id: true } });
       if (negativeCostResolution) throw Object.assign(new Error('This purchase resolved negative-stock sale costs and cannot be edited. Create a correcting purchase instead.'), { status: 409 });
       if (day !== old.date) throw Object.assign(new Error('The invoice date cannot be changed during edit; use the original date to preserve AVCO history.'), { status: 409 });
@@ -403,6 +451,8 @@ async function deleteSale(req: Request, res: Response) {
       const old = await t.sale.findUnique({ where: { id: req.params.id }, include: { items: true, returns: true, customer: { select: { name: true } } } });
       if (!old) throw Object.assign(new Error('Sale not found'), { status: 404 });
       if (old.returns.length) throw Object.assign(new Error('This invoice has posted returns and cannot be deleted. Create a correcting entry instead.'), { status: 409 });
+      const contraVendorPayments = await t.vendorPayment.findMany({ where: { active: true, note: { contains: `[[TRANSPORT_CONTRA_SALE:${old.id}]]` } }, select: { id: true, vendorId: true } });
+      if (contraVendorPayments.length) await t.vendorPayment.updateMany({ where: { id: { in: contraVendorPayments.map(payment => payment.id) } }, data: { active: false } });
       const stockRows = await t.stockMovement.findMany({ where: { refId: old.id }, select: { productId: true } });
       await assertLastStockEvent(t, [...old.items.map(item => item.productId), ...stockRows.map(row => row.productId)], old.createdAt, old.id);
       await keepDeletedInvoiceAdvances(t, 'sale', old.id);
@@ -416,6 +466,7 @@ async function deleteSale(req: Request, res: Response) {
       const deletedExpenses = await deleteLinkedInvoiceExpenses(t, old.invoiceNo);
       await t.sale.delete({ where: { id: old.id } });
       if (old.customerId) await syncPartyInvoices('sale', old.customerId, t);
+      for (const vendorId of new Set(contraVendorPayments.map(payment => payment.vendorId))) await syncPartyInvoices('purchase', vendorId, t);
       return { id: old.id, invoiceNo: old.invoiceNo, total: old.total, partyName: old.customer?.name ?? '', removedItems: old.items.length, removedPayments: payments.length, deletedExpenses };
     });
     res.json({ ...result, deleted: true, note: 'Invoice and its direct payments and stock history were removed; allocated party advances were retained.' });
@@ -431,6 +482,8 @@ async function deletePurchase(req: Request, res: Response) {
       const old = await t.purchase.findUnique({ where: { id: req.params.id }, include: { items: true, returns: true, vendor: { select: { name: true } } } });
       if (!old) throw Object.assign(new Error('Purchase not found'), { status: 404 });
       if (old.returns.length) throw Object.assign(new Error('This invoice has posted returns and cannot be deleted. Create a correcting entry instead.'), { status: 409 });
+      const linkedContraCustomers = await t.customerPayment.findMany({ where: { active: true, note: { contains: `[[TRANSPORT_CONTRA_PURCHASE:${old.id}]]` } }, select: { id: true, customerId: true } });
+      if (linkedContraCustomers.length) await t.customerPayment.updateMany({ where: { id: { in: linkedContraCustomers.map(payment => payment.id) } }, data: { active: false } });
       const negativeCostResolution = await t.stockMovement.findFirst({ where: { refId: old.id, type: 'NEGATIVE_STOCK_COGS_ADJUSTMENT' }, select: { id: true } });
       if (negativeCostResolution) throw Object.assign(new Error('This purchase resolved negative stock costs and cannot be deleted. Create a correcting entry instead.'), { status: 409 });
       const stockRows = await t.stockMovement.findMany({ where: { refId: old.id }, select: { productId: true } });
@@ -446,6 +499,7 @@ async function deletePurchase(req: Request, res: Response) {
       const deletedExpenses = await deleteLinkedInvoiceExpenses(t, old.invoiceNo);
       await t.purchase.delete({ where: { id: old.id } });
       await syncPartyInvoices('purchase', old.vendorId, t);
+      for (const customerId of new Set(linkedContraCustomers.map(payment => payment.customerId).filter((id): id is string => Boolean(id)))) await syncPartyInvoices('sale', customerId, t);
       return { id: old.id, invoiceNo: old.invoiceNo, total: old.total, partyName: old.vendor.name, removedItems: old.items.length, removedPayments: payments.length, deletedExpenses };
     });
     res.json({ ...result, deleted: true, note: 'Invoice and its direct payments and stock history were removed; allocated party advances were retained.' });
@@ -572,7 +626,7 @@ tx.get('/sales/:id/returnable', async (req: Request, res: Response) => {
 // POST /api/sales { customerId?, lines: [{productId, unit, enteredQty}], discount?, paid?, method?, next?, date?, memoNo? }
 tx.post('/sales', async (req: Request, res: Response) => {
   try {
-    const { customerId, lines, discount, paid, transportPaid, transportPaymentNote, method, accountId, next, date, memoNo, paymentNote, advanceToApply } = req.body ?? {};
+    const { customerId, lines, discount, paid, transportPaid, transportPaymentNote, transportContraPurchaseNo, method, accountId, next, date, memoNo, paymentNote, advanceToApply } = req.body ?? {};
     if (!Array.isArray(lines) || !lines.length) return res.status(400).json({ error: 'No items in sale' });
     const day = transactionDay(date);
     checkPromiseDay(next);
@@ -678,6 +732,10 @@ tx.post('/sales', async (req: Request, res: Response) => {
       } else if (due > 0) {
         throw Object.assign(new Error('Customer is required when there is a due'), { status: 400 });
       }
+      if (transportContraPurchaseNo && cappedTransportPay <= 0) throw Object.assign(new Error('Enter a transport amount before linking a purchase invoice.'), { status: 400, code: 'CONTRA_WITHOUT_TRANSPORT' });
+      const contraPurchase = transportContraPurchaseNo && cappedTransportPay > 0
+        ? await resolveTransportContraPurchase(t, String(transportContraPurchaseNo), cappedTransportPay)
+        : null;
 
       // Use user-provided memoNo as invoiceNo if given and not already taken; otherwise auto-generate.
       let resolvedInvoiceNo: string;
@@ -765,8 +823,16 @@ tx.post('/sales', async (req: Request, res: Response) => {
       }
       if (cappedTransportPay > 0) await t.customerPayment.create({ data: {
         paymentNo: await nextPaymentNo(t, 'received'), customerId: validCustomerId, saleId: sale.id,
-        amount: cappedTransportPay, date: day, note: `[[TRANSPORT_PAYMENT]] ${transportPaymentNote ?? 'Transport payment (paid directly by customer)'}`,
+        amount: cappedTransportPay, date: day, note: `[[TRANSPORT_PAYMENT]] ${transportPaymentNote ?? 'Transport payment (paid directly by customer)'}${contraPurchase ? ` [[TRANSPORT_CONTRA_PURCHASE:${contraPurchase.id}]]` : ''}`,
       } });
+      if (contraPurchase && validCustomerId && cappedTransportPay > 0) {
+        await t.vendorPayment.create({ data: {
+          paymentNo: await nextPaymentNo(t), vendorId: contraPurchase.vendorId, purchaseId: contraPurchase.id,
+          amount: cappedTransportPay, date: day,
+          note: `[[TRANSPORT_CONTRA_SALE:${sale.id}]] ${transportPaymentNote ?? 'Transport payment (paid directly by customer)'} · ${sale.invoiceNo}`,
+        } });
+        await syncPartyInvoices('purchase', contraPurchase.vendorId, t);
+      }
       let advanceApplied = 0;
       if (validCustomerId && num(advanceToApply) > 0) {
         const applyAmount = Math.min(round2(num(advanceToApply)), due);
@@ -1199,7 +1265,7 @@ tx.post('/vendor-payments', async (req: Request, res: Response) => {
 
 // GET /api/stock-movements?limit=100
 tx.get('/stock-movements', async (req: Request, res: Response) => {
-  const limit = Math.min(500, Math.max(1, parseInt(String(req.query.limit ?? '100'), 10) || 100));
+  const limit = Math.min(10000, Math.max(1, parseInt(String(req.query.limit ?? '100'), 10) || 100));
   const list = await db.stockMovement.findMany({ orderBy: [{ date: 'desc' }, { createdAt: 'desc' }], take: limit });
   res.json(list);
 });
@@ -1289,8 +1355,8 @@ tx.get('/bootstrap', async (_req: Request, res: Response) => {
       const st = purSet.get(p.id);
       return { id: p.id, vendorId: p.vendorId, date: p.date, createdAt: p.createdAt, total: p.total, paid: st?.paid ?? p.paid, due: st?.due ?? p.due, status: st?.status ?? 'due', invoiceNo: p.invoiceNo ?? undefined, items: purchaseLinesById.get(p.id) ?? [] };
     }),
-    customerPayments: customerPayments.map(p => ({ id: p.id, paymentNo: p.paymentNo, transactionNo: paymentTransactionNo.get(p.id), customerId: p.customerId ?? 'cash', amount: p.amount, date: p.date, note: p.note?.startsWith('[[TRANSPORT_PAYMENT]]') ? p.note.slice('[[TRANSPORT_PAYMENT]]'.length).trimStart() : (p.note ?? undefined), returnId: p.returnId ?? undefined, returnNo: p.returnId ? retNo.get(p.returnId) : undefined, createdAt: p.createdAt, saleId: p.saleId ?? undefined, method: p.returnId ? undefined : (inMethod.get(`p:${p.id}`) ?? (p.saleId ? inMethod.get(`s:${p.saleId}`) : undefined)), accountId: p.returnId ? undefined : inAccount.get(p.id)?.accountId, accountName: p.returnId ? undefined : inAccount.get(p.id)?.accountName })),
-    vendorPayments: vendorPayments.map(p => ({ id: p.id, paymentNo: p.paymentNo, transactionNo: paymentTransactionNo.get(p.id), vendorId: p.vendorId, amount: p.amount, date: p.date, note: p.note ?? undefined, returnId: p.returnId ?? undefined, returnNo: p.returnId ? retNo.get(p.returnId) : undefined, createdAt: p.createdAt, purchaseId: p.purchaseId ?? undefined, accountId: p.returnId ? undefined : outAccount.get(p.id)?.accountId, accountName: p.returnId ? undefined : outAccount.get(p.id)?.accountName })),
+    customerPayments: customerPayments.map(p => ({ id: p.id, paymentNo: p.paymentNo, transactionNo: paymentTransactionNo.get(p.id), customerId: p.customerId ?? 'cash', amount: p.amount, date: p.date, note: cleanPaymentNote(p.note), returnId: p.returnId ?? undefined, returnNo: p.returnId ? retNo.get(p.returnId) : undefined, createdAt: p.createdAt, saleId: p.saleId ?? undefined, method: p.returnId ? undefined : (inMethod.get(`p:${p.id}`) ?? (p.saleId ? inMethod.get(`s:${p.saleId}`) : undefined)), accountId: p.returnId ? undefined : inAccount.get(p.id)?.accountId, accountName: p.returnId ? undefined : inAccount.get(p.id)?.accountName })),
+    vendorPayments: vendorPayments.map(p => ({ id: p.id, paymentNo: p.paymentNo, transactionNo: paymentTransactionNo.get(p.id), vendorId: p.vendorId, amount: p.amount, date: p.date, note: cleanPaymentNote(p.note), returnId: p.returnId ?? undefined, returnNo: p.returnId ? retNo.get(p.returnId) : undefined, createdAt: p.createdAt, purchaseId: p.purchaseId ?? undefined, accountId: p.returnId ? undefined : outAccount.get(p.id)?.accountId, accountName: p.returnId ? undefined : outAccount.get(p.id)?.accountName })),
     movements: movements.map(mv => {
       const sale = mv.refId ? sales.find(row => row.id === mv.refId) : undefined;
       const purchase = mv.refId ? purchases.find(row => row.id === mv.refId) : undefined;

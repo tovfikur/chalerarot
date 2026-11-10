@@ -138,15 +138,17 @@ accounting.delete('/chart-of-accounts/:id', async (req, res) => {
 
 accounting.post('/journal-entries', async (req, res) => {
   const body = req.body ?? {}, lines = cleanLines(body.lines), date = body.date, memo = String(body.memo ?? '').trim();
+  const status = body.status ?? 'posted';
+  if (!['draft', 'posted'].includes(status)) return respondError(res, 'Choose draft or posted status.');
   if (!lines || !validDate(date) || !memo) return respondError(res, 'A date, memo, and balanced debit/credit lines are required.');
   const accounts = await db.chartAccount.findMany({ where: { id: { in: lines.map(l => l.accountId) }, active: true } });
   if (new Set(accounts.map(a => a.id)).size !== new Set(lines.map(l => l.accountId)).size) return respondError(res, 'Select active chart accounts for every journal line.');
-  const entry = await db.journalEntry.create({ data: { entryNo: entryNo(date), date, memo, sourceType: 'manual', lines: { create: lines } }, include: { lines: { include: { account: true } } } });
+  const entry = await db.journalEntry.create({ data: { entryNo: entryNo(date), date, memo, sourceType: 'manual', status, lines: { create: lines } }, include: { lines: { include: { account: true } } } });
   res.status(201).json(entry);
 });
 accounting.put('/journal-entries/:id', async (req, res) => {
   const current = await db.journalEntry.findUnique({ where: { id: req.params.id } });
-  if (!current || !current.active) return respondError(res, 'Journal entry not found.', 404);
+  if (!current || current.status !== 'draft') return respondError(res, 'Reset the journal entry to draft before editing it.', 409);
   const body = req.body ?? {}, lines = cleanLines(body.lines), date = body.date, memo = String(body.memo ?? '').trim();
   if (!lines || !validDate(date) || !memo) return respondError(res, 'A date, memo, and balanced debit/credit lines are required.');
   if (current.sourceType !== 'manual') return respondError(res, 'Only manual journal entries can be edited.', 409);
@@ -162,5 +164,14 @@ accounting.delete('/journal-entries/:id', async (req, res) => {
   const current = await db.journalEntry.findUnique({ where: { id: req.params.id } });
   if (!current) return respondError(res, 'Journal entry not found.', 404);
   if (current.sourceType !== 'manual') return respondError(res, 'Only manual journal entries can be voided here.', 409);
-  await db.journalEntry.update({ where: { id: current.id }, data: { active: false } }); res.json({ id: current.id, active: false });
+  await db.journalEntry.update({ where: { id: current.id }, data: { active: false, status: 'cancelled' } }); res.json({ id: current.id, active: false, status: 'cancelled' });
+});
+accounting.put('/journal-entries/:id/status', async (req, res) => {
+  const status = req.body?.status;
+  if (!['draft', 'posted', 'cancelled'].includes(status)) return respondError(res, 'Choose draft, posted, or cancelled status.');
+  const current = await db.journalEntry.findUnique({ where: { id: req.params.id } });
+  if (!current) return respondError(res, 'Journal entry not found.', 404);
+  if (current.sourceType !== 'manual') return respondError(res, 'Automatic journal entries cannot be changed here.', 409);
+  const updated = await db.journalEntry.update({ where: { id: current.id }, data: { status, active: status !== 'cancelled' } });
+  res.json({ id: updated.id, status: updated.status });
 });

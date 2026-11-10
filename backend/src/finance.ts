@@ -102,7 +102,7 @@ export async function periodFinance(mode: PeriodMode, ref?: string, end?: string
     // is not a Purchase, so without this a period that begins before the shop
     // existed would show a negative COGS.
     db.stockMovement.findMany({ where: { type: 'OPENING', bucket: 'sellable', date: inRange }, select: { value: true } }),
-    db.journalLine.findMany({ where: { entry: { active: true, sourceType: 'manual', date: inRange } }, select: { debit: true, credit: true, account: { select: { type: true } } } }),
+    db.journalLine.findMany({ where: { entry: { active: true, status: 'posted', sourceType: 'manual', date: inRange } }, select: { debit: true, credit: true, account: { select: { type: true } } } }),
     db.stockMovement.findMany({ where: { type: { in: ['ADJUSTMENT', 'REVALUE'] }, bucket: 'sellable', date: inRange }, select: { value: true } }),
   ]);
 

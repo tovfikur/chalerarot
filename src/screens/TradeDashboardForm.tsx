@@ -156,6 +156,7 @@ export function TradeDashboardForm({ mode, onDone, onOpenHistory, editId }: Trad
 
   // Party selection state
   const [selectedPartyId, setSelectedPartyId] = useState<string>('');
+  const partyCodeEditedRef = useRef(false);
   const [partyCode, setPartyCode] = useState('');
   const [partyName, setPartyName] = useState('');
   const [partyMobile, setPartyMobile] = useState('');
@@ -189,7 +190,7 @@ export function TradeDashboardForm({ mode, onDone, onOpenHistory, editId }: Trad
 
   // Automatically load default customer/vendor when available and no party is selected
   useEffect(() => {
-    if (!selectedPartyId && defaultPartyCode && parties.length > 0) {
+    if (!editId && !partyCodeEditedRef.current && !selectedPartyId && defaultPartyCode && parties.length > 0) {
       const match = parties.find(p => p.code && p.code.trim().toLowerCase() === defaultPartyCode.trim().toLowerCase());
       if (match) {
         setSelectedPartyId(match.id);
@@ -199,7 +200,7 @@ export function TradeDashboardForm({ mode, onDone, onOpenHistory, editId }: Trad
         setPartyAddress(match.address || '');
       }
     }
-  }, [parties, defaultPartyCode, selectedPartyId]);
+  }, [parties, defaultPartyCode, selectedPartyId, editId]);
 
   // Set or toggle default party code
   const handleToggleDefaultParty = useCallback((codeToSet?: string) => {
@@ -289,6 +290,8 @@ export function TradeDashboardForm({ mode, onDone, onOpenHistory, editId }: Trad
 
   // Additional costs (Transport, Landing)
   const [transportCost, setTransportCost] = useState('');
+  const [transportPurchaseInvoiceNo, setTransportPurchaseInvoiceNo] = useState('');
+  const [transportPurchaseFocused, setTransportPurchaseFocused] = useState(false);
   const [transportExpenseId, setTransportExpenseId] = useState<string>();
   const [landingExpenseId, setLandingExpenseId] = useState<string>();
 
@@ -353,6 +356,8 @@ export function TradeDashboardForm({ mode, onDone, onOpenHistory, editId }: Trad
       });
       if (unsupportedPaymentLines.length) setEditPaymentUnsupported(true);
       if (transportPayments.length) setTransportCost(String(transportPayments.reduce((sum, p) => sum + p.amount, 0)));
+      const contraTransport = transportPayments.find(p => p.contraPurchaseInvoiceNo);
+      setTransportPurchaseInvoiceNo(contraTransport?.contraPurchaseInvoiceNo ?? '');
       for (const p of ordinaryPaymentLines) {
         const account = moneyAccounts.find(a => a.id === p.accountId);
         if (account?.type === 'bank' || account?.type === 'cash') {
@@ -462,14 +467,11 @@ export function TradeDashboardForm({ mode, onDone, onOpenHistory, editId }: Trad
 
   // Filtered lists for autocomplete
   const filteredParties = useMemo(() => {
-    const q = partyName.trim().toLowerCase();
-    const codeQ = partyCode.trim().toLowerCase();
-    if (!q && !codeQ) return parties.slice(0, 8);
+    const q = (partyCode.trim() || partyName.trim()).toLowerCase();
+    if (!q) return parties.slice(0, 8);
     return parties.filter(p => {
       const pCode = p.code?.trim().toLowerCase() ?? '';
-      const matchesName = !q || p.name.toLowerCase().includes(q);
-      const matchesCode = !codeQ || pCode === codeQ;
-      return matchesName || matchesCode;
+      return p.name.toLowerCase().startsWith(q) || pCode.startsWith(q) || (p.mobile ?? '').toLowerCase().startsWith(q);
     }).slice(0, 8);
   }, [parties, partyName, partyCode]);
 
@@ -646,8 +648,8 @@ export function TradeDashboardForm({ mode, onDone, onOpenHistory, editId }: Trad
     const normalized = query.trim().toLowerCase();
     if (!normalized) return products;
     return products.filter(product =>
-      product.name.toLowerCase().includes(normalized) ||
-      (product.code ?? '').trim().toLowerCase() === normalized
+      product.name.toLowerCase().startsWith(normalized) ||
+      (product.code ?? '').trim().toLowerCase().startsWith(normalized)
     );
   }, [products]);
 
@@ -741,6 +743,7 @@ export function TradeDashboardForm({ mode, onDone, onOpenHistory, editId }: Trad
       }
     }
     setSelectedPartyId(defId);
+    partyCodeEditedRef.current = false;
     setPartyCode(defCode);
     setPartyName(defName);
     setPartyMobile(defMobile);
@@ -844,6 +847,12 @@ export function TradeDashboardForm({ mode, onDone, onOpenHistory, editId }: Trad
     if (hasInvalidLine) {
       showFormError(isSale ? tx('পণ্যের সঠিক বিক্রয় দর দিন।', 'Enter a valid sale rate.') : tx('পণ্যের সঠিক ক্রয় দর দিন।', 'Enter a valid purchase rate.'));
       return;
+    }
+
+    if (isSale && numTransport > 0 && transportPurchaseInvoiceNo.trim()) {
+      const contraPurchase = purchases.find(p => p.invoiceNo?.trim().toLocaleLowerCase() === transportPurchaseInvoiceNo.trim().toLocaleLowerCase());
+      if (!contraPurchase) { showFormError(tx('ক্রয়ের ইনভয়েস নম্বরটি খুঁজে পাওয়া যায়নি।', 'Purchase invoice number not found.')); return; }
+      if (contraPurchase.due + 0.009 < numTransport) { showFormError(tx('ক্রয় ইনভয়েসের বকেয়া পরিবহন পেমেন্টের চেয়ে কম।', 'Purchase invoice balance is less than the transport payment.')); return; }
     }
 
     // Default cash receive (sale) or cash payment (purchase) to the exact invoice amount
@@ -961,6 +970,7 @@ export function TradeDashboardForm({ mode, onDone, onOpenHistory, editId }: Trad
           discount: numDiscount,
           paid: totalPaid,
           transportPaid: numTransport,
+          transportContraPurchaseNo: transportPurchaseInvoiceNo.trim() || undefined,
           transportPaymentNote: tx('পরিবহন পেমেন্ট (গ্রাহক সরাসরি দিয়েছেন)', 'Transport payment (paid directly by customer)'),
           accountId: chosenAccountId,
           payments: paymentLines.map(({ accountId, amount }) => ({ accountId, amount })),
@@ -1435,9 +1445,10 @@ export function TradeDashboardForm({ mode, onDone, onOpenHistory, editId }: Trad
                   autoFocus
                   value={partyCode}
                   onChangeText={v => {
+                    partyCodeEditedRef.current = true;
                     setPartyCode(v);
                     setPartyDropdownOpen(true);
-                    if (v.trim().length >= 3) {
+                    if (v.trim().length > 0) {
                       const match = findPartyByCode(v.trim());
                       if (match) {
                         setSelectedPartyId(match.party.id);
@@ -2599,6 +2610,40 @@ export function TradeDashboardForm({ mode, onDone, onOpenHistory, editId }: Trad
                           {tx('গ্রাহক সরাসরি পরিবহন বাবদ দিয়েছেন:', 'Paid directly by customer for transport:')} ৳{lang === 'bn' ? toBnDigits(String(numTransport)) : numTransport}
                         </Text>
                       )}
+                      <Field
+                        label={tx('যে ক্রয় ইনভয়েসের বিপরীতে সমন্বয় হবে', 'Purchase invoice to settle against')}
+                        value={transportPurchaseInvoiceNo}
+                        onChange={setTransportPurchaseInvoiceNo}
+                        accessibilityLabel={tx('ক্রয় ইনভয়েস নম্বর', 'Purchase invoice number')}
+                        returnKeyType="done"
+                        onSubmitEditing={() => executeTransaction()}
+                        onFocus={() => setTransportPurchaseFocused(true)}
+                      />
+                      {transportPurchaseFocused ? (() => {
+                        const query = transportPurchaseInvoiceNo.trim().toLocaleLowerCase();
+                        const suggestions = [...purchases]
+                          .filter(p => !query || (p.invoiceNo ?? '').toLocaleLowerCase().startsWith(query))
+                          .sort((a, b) => (b.date ?? '').localeCompare(a.date ?? ''))
+                          .slice(0, 8);
+                        return suggestions.length ? <ScrollView keyboardShouldPersistTaps="handled" style={{ maxHeight: 180, marginTop: -6, marginBottom: 6, borderWidth: 1, borderColor: '#CBD5E1', borderRadius: 7, backgroundColor: '#FFFFFF' }}>
+                          {suggestions.map(p => {
+                            const supplier = vendors.find(v => v.id === p.vendorId);
+                            return <TouchableOpacity key={p.id} onPress={() => { setTransportPurchaseInvoiceNo(p.invoiceNo ?? ''); setTransportPurchaseFocused(false); }} style={{ paddingHorizontal: 9, paddingVertical: 7, borderBottomWidth: 1, borderBottomColor: '#E2E8F0' }}>
+                              <Text style={{ fontSize: 12, fontWeight: '700', color: '#0F2B48' }}>{p.invoiceNo ?? '—'} · {supplier?.code ? `${tx('কোড', 'Code')}: ${supplier.code} · ` : ''}{supplier?.name ?? tx('সরবরাহকারী অজানা', 'Supplier unavailable')}</Text>
+                              <Text style={{ fontSize: 11, color: '#64748B', marginTop: 2 }}>{p.date ?? ''} · {tx('বকেয়া', 'Due')}: ৳{localeDigits(String(p.due), lang)}</Text>
+                            </TouchableOpacity>;
+                          })}
+                        </ScrollView> : null;
+                      })() : null}
+                      {transportPurchaseInvoiceNo.trim() ? (() => {
+                        const contraPurchase = purchases.find(p => p.invoiceNo?.trim().toLocaleLowerCase() === transportPurchaseInvoiceNo.trim().toLocaleLowerCase());
+                        const supplier = contraPurchase ? vendors.find(v => v.id === contraPurchase.vendorId) : undefined;
+                        return <Text style={{ fontSize: 11, color: contraPurchase && contraPurchase.due >= numTransport ? '#15803D' : '#B91C1C', marginTop: 2 }}>
+                          {contraPurchase
+                            ? `${supplier?.code ? `${tx('কোড', 'Code')}: ${supplier.code} · ` : ''}${supplier?.name ?? tx('সরবরাহকারী অজানা', 'Supplier unavailable')} · ${tx('বকেয়া', 'Due')}: ৳${localeDigits(String(contraPurchase.due), lang)}`
+                            : tx('ক্রয় ইনভয়েস পাওয়া যায়নি', 'Purchase invoice not found')}
+                        </Text>;
+                      })() : <Text style={{ fontSize: 11, color: '#64748B', marginTop: 2 }}>{tx('ঐচ্ছিক: এখানে নম্বর দিলে কাস্টমারের পাওনা ও সরবরাহকারীর দেনা সমন্বয় হবে।', 'Optional: entering an invoice number offsets the customer receivable against that supplier payable.')}</Text>}
                     </View> : null}
 
                     {!isSale && totalOtherCost > 0 && (

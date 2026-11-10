@@ -5,14 +5,15 @@ import { BagUnit, CartLine, kgPerUnit, toKg, lineTotal } from './bags';
 import { Card, Title, Muted, Btn, Field, RequiredLabel, Chips, Row, Empty, Screen, SectionHead, PageHeader, ListPageHeader, ListTable, type TableColumn, type TableSort, AccountPicker, ACCOUNT_TYPES, methodIcon, methodName, useMoney, useNum, useDateStr, color } from './ui';
 import { AppIcon, icons } from './icons';
 import { RGrid, TwoPanel, FormGrid, useFs, useBreakpoint } from './responsive';
-import { SearchToggle, SearchableSelect, SearchDropdown, NoResult, matchProduct, matchParty, exactCode } from './search';
-import { api, ApiError, type TxnPayment, type SettlementStatus, DetailItem, RecvDetail, PayDetail, TrashItem, SaleDetail, PurchaseDetail, ReturnDetail, ReturnableTxn, type AccountType, type Expense, type MoneyBalance, type MoneyMethod, type ChartAccountRow, type SavedJournalEntry, type JournalWrite } from './api';
+import { SearchToggle, SearchableSelect, SearchDropdown, NoResult, matchProduct, matchParty, codeStartsWith } from './search';
+import { api, ApiError, type TxnPayment, type SettlementStatus, DetailItem, RecvDetail, PayDetail, TrashItem, SaleDetail, PurchaseDetail, ReturnDetail, ReturnableTxn, type AccountType, type Expense, type MoneyBalance, type MoneyMethod, type MoneyMovementRow, type ChartAccountRow, type SavedJournalEntry, type JournalWrite } from './api';
 import { unitDetail, fmtTime, buildInvoiceText, buildInvoiceHTML, InvData, UnitNames } from './invoice';
 import { tp, Key } from './i18n';
 import { toEnDigits, toBnDigits, parseNum, localeDigits } from './bn';
 import { printReport, printedAtStamp, downloadReportCSV, type ReportDoc, type ReportRow } from './report';
 import { downloadCSV } from './stockReport';
 import { showEntryError } from './entryDialog';
+import { EntryReportButtons } from './EntryReportButtons';
 import { TradeDashboardForm } from './screens/TradeDashboardForm';
 import { StockDashboard } from './screens/StockDashboard';
 import { ExpenseDashboard } from './screens/ExpenseDashboard';
@@ -708,11 +709,11 @@ function TxnHistory({ kind, onNew, focus, onFocusDone }: {
   const partyNameNeedle = partyNameQuery.trim().toLowerCase();
   const partyCodeNeedle = partyCodeQuery.trim().toLowerCase();
   const shown = base.filter(r =>
-    (!needle || r.no.toLowerCase() === needle || r.partyName.toLowerCase().includes(needle) || exactCode(r.partyCode, needle) || r.productNames.some(name => name.toLowerCase().includes(needle)) || r.productCodes.some(code => exactCode(code, needle)))
-    && (!memoNeedle || r.no.toLowerCase() === memoNeedle)
-    && (!partyNameNeedle || r.partyName.toLowerCase().includes(partyNameNeedle))
-    && (!partyCodeNeedle || exactCode(r.partyCode, partyCodeNeedle))
-    && (!productNeedle || r.productNames.some(name => name.toLowerCase().includes(productNeedle)) || r.productCodes.some(code => exactCode(code, productNeedle)))
+    (!needle || (isSale ? r.no.toLowerCase() === needle : r.no.toLowerCase().startsWith(needle)) || r.partyName.toLowerCase().startsWith(needle) || codeStartsWith(r.partyCode, needle) || r.productNames.some(name => name.toLowerCase().startsWith(needle)) || r.productCodes.some(code => codeStartsWith(code, needle)))
+    && (!memoNeedle || (isSale ? r.no.toLowerCase() === memoNeedle : r.no.toLowerCase().startsWith(memoNeedle)))
+    && (!partyNameNeedle || r.partyName.toLowerCase().startsWith(partyNameNeedle))
+    && (!partyCodeNeedle || codeStartsWith(r.partyCode, partyCodeNeedle))
+    && (!productNeedle || r.productNames.some(name => name.toLowerCase().startsWith(productNeedle)) || r.productCodes.some(code => codeStartsWith(code, productNeedle)))
   );
   const rows = useMemo(() => [...shown].sort((a, b) => (a.date < b.date ? 1 : a.date > b.date ? -1 : 0)), [shown]);
 
@@ -815,7 +816,7 @@ function TxnHistory({ kind, onNew, focus, onFocusDone }: {
         placeholder={isSale ? t('searchSales') : t('searchPurchases')}
         match={(r, _n) => {
           const n = q.trim().toLowerCase();
-          return !n || r.no.toLowerCase().includes(n) || r.partyName.toLowerCase().includes(n) || (r.partyCode ?? '').toLowerCase().includes(n) || r.productNames.some(product => product.toLowerCase().includes(n));
+          return !n || (isSale ? r.no.toLowerCase() === n : r.no.toLowerCase().startsWith(n)) || r.partyName.toLowerCase().startsWith(n) || (r.partyCode ?? '').toLowerCase().startsWith(n) || r.productNames.some(product => product.toLowerCase().startsWith(n));
         }}
         titleOf={r => r.no}
         subOf={r => `${fd(r.date)} • ${r.partyName}`}
@@ -1005,8 +1006,8 @@ export function Products() {
   const [productCodeQuery, setProductCodeQuery] = useState('');
   const [productNameQuery, setProductNameQuery] = useState('');
   const listed = products.filter(p =>
-    (!productCodeQuery.trim() || exactCode(p.code, productCodeQuery)) &&
-    (!productNameQuery.trim() || p.name.toLowerCase().includes(productNameQuery.trim().toLowerCase()))
+    (!productCodeQuery.trim() || codeStartsWith(p.code, productCodeQuery)) &&
+    (!productNameQuery.trim() || p.name.toLowerCase().startsWith(productNameQuery.trim().toLowerCase()))
   );
   const open = (p?: Product) => {
     setF(p ?? { id: '', name: '', cost: 0, price: 0, opening: 0, qty: 0, uom: 'kg', smallBagKg: 25, mediumBagKg: 40, largeBagKg: 50 });
@@ -1150,7 +1151,7 @@ export function Parties({ kind, focus, onFocusDone, onReturn, onEditTransaction 
   }, []);
   const listed = list.filter(p => {
     const code = getPartyCode(p);
-    const codeMatch = exactCode(code, pq);
+    const codeMatch = codeStartsWith(code, pq);
     return matchParty(p, pq) || codeMatch;
   });
   // Newest transaction date per party, from the same local ledger that backs
@@ -1345,7 +1346,7 @@ export function Parties({ kind, focus, onFocusDone, onReturn, onEditTransaction 
       if (txKind === 'return' && x.kind !== 'sreturn' && x.kind !== 'preturn') return false;
       const paymentCode = x.kind === 'payment' ? `${isC ? 'REC' : 'PAY'}-${refNo(x.id)}` : '';
       const q = txSearch.trim().toLowerCase();
-      return !q || [x.ref, x.note, paymentCode, x.id].some(value => String(value ?? '').toLowerCase().includes(q));
+      return !q || [x.ref, x.note, paymentCode, x.id].some(value => String(value ?? '').toLowerCase().startsWith(q));
     }).sort((a, b2) => b2.date.localeCompare(a.date) || String(a.createdAt ?? '').localeCompare(String(b2.createdAt ?? '')) || a.id.localeCompare(b2.id));
     const latestTx = [...txs].sort((a, b2) => b2.date.localeCompare(a.date) || String(b2.createdAt ?? '').localeCompare(String(a.createdAt ?? '')))[0];
     const setFilter = (value: typeof txKind, label: string) => (
@@ -1620,8 +1621,8 @@ export function Money({ kind, done }: { kind: 'c' | 'v'; done: () => void }) {
   const reportPayments = (isC ? cTx : vTx).filter(x => x.kind === 'payment'
     && (!reportFrom || x.date >= reportFrom)
     && (!reportTo || x.date <= reportTo)
-    && (!reportPartyName.trim() || (parties.find(p => p.id === x.partyId)?.name ?? '').toLocaleLowerCase().includes(reportPartyName.trim().toLocaleLowerCase()))
-    && (!reportPartyCode.trim() || (parties.find(p => p.id === x.partyId)?.code ?? '').toLocaleLowerCase().includes(reportPartyCode.trim().toLocaleLowerCase())))
+    && (!reportPartyName.trim() || (parties.find(p => p.id === x.partyId)?.name ?? '').toLocaleLowerCase().startsWith(reportPartyName.trim().toLocaleLowerCase()))
+    && (!reportPartyCode.trim() || (parties.find(p => p.id === x.partyId)?.code ?? '').toLocaleLowerCase().startsWith(reportPartyCode.trim().toLocaleLowerCase())))
     .sort((a, b) => b.date.localeCompare(a.date) || String(b.createdAt ?? '').localeCompare(String(a.createdAt ?? '')));
   const reportRows: ReportRow[] = reportPayments.map(tx => {
     const txParty = parties.find(p => p.id === tx.partyId);
@@ -1653,7 +1654,7 @@ export function Money({ kind, done }: { kind: 'c' | 'v'; done: () => void }) {
   };
   const matches = codeQuery.trim() ? parties.filter(p => {
     const q = codeQuery.trim().toLocaleLowerCase();
-    return codeOf(p).toLocaleLowerCase().includes(q) || p.name.toLocaleLowerCase().includes(q);
+    return codeOf(p).toLocaleLowerCase().startsWith(q) || p.name.toLocaleLowerCase().startsWith(q);
   }).slice(0, 8) : [];
   const setParty = (p: Party) => {
     setPartyId(p.id); setCodeQuery(codeOf(p)); setMessage('');
@@ -2252,24 +2253,39 @@ export function DateField({ label, value, onChange, clearable, allowPast = true,
   );
 }
 
-export function ExpenseModal({ init, onClose, onSave, onTrash }: {
+export function ExpenseModal({ init, onClose, onSave, onTrash, inline = false }: {
   init: Expense | null;
   onClose: () => void;
-  onSave: (v: { id?: string; category: string; customName?: string; amount: number; accountId: string; date: string; note?: string }) => Promise<void>;
+  onSave: (v: { id?: string; category: string; customName?: string; payments: { accountId: string; amount: number }[]; date: string; note?: string }) => Promise<void>;
   onTrash: (id: string) => Promise<void>;
+  inline?: boolean;
 }) {
-  const { t, lang } = useApp();
+  const { t, lang, moneyAccounts } = useApp();
   const [cat, setCat] = useState(init?.category ?? '');
   const [name, setName] = useState(init?.customName ?? '');
-  const [amt, setAmt] = useState(init ? String(init.amount) : '');
   const [date, setDate] = useState(init?.date ?? dhakaToday());
   const [note, setNote] = useState(init?.note ?? '');
-  const [accountId, setAccountId] = useState<string | undefined>(init?.accountId);
+  const activeEntryAccounts = moneyAccounts.filter(account => account.active && (account.type === 'cash' || account.type === 'bank'))
+    .sort((a, b) => Number(b.type === 'cash') - Number(a.type === 'cash'));
+  const moneyEntryAccounts = init?.accountId ? activeEntryAccounts.filter(account => account.id === init.accountId) : activeEntryAccounts;
+  const [amounts, setAmounts] = useState<Record<string, string>>(() => init?.accountId ? { [init.accountId]: String(init.amount) } : {});
   const [categoryListOpen, setCategoryListOpen] = useState(false);
   const [customCategories, setCustomCategories] = useState<{ id: string; name: string; kind: string }[]>([]);
   const [customCategoryName, setCustomCategoryName] = useState('');
   const nameInput = useRef<TextInput>(null);
   const amountInput = useRef<TextInput>(null);
+  const amountRefs = useRef<TextInput[]>([]);
+  const categoryButton = useRef<any>(null);
+  const noteInput = useRef<TextInput>(null);
+  useEffect(() => {
+    setCat(init?.category ?? '');
+    setName(init?.customName ?? '');
+    setDate(init?.date ?? dhakaToday());
+    setNote(init?.note ?? '');
+    setAmounts(init?.accountId ? { [init.accountId]: String(init.amount) } : {});
+    setCustomCategoryName(init?.category === 'other' ? init.customName ?? '' : '');
+    setCategoryListOpen(false);
+  }, [init?.id, init?.category, init?.customName, init?.amount, init?.date, init?.note, init?.accountId]);
   useEffect(() => {
     let live = true;
     api.expenseCategories().then(rows => {
@@ -2281,12 +2297,12 @@ export function ExpenseModal({ init, onClose, onSave, onTrash }: {
   }, [init?.category, init?.customName]);
   const save = () => {
     if (!cat) return showEntryError(lang, t('selectType'));
-    if (!(num(amt) > 0)) return showEntryError(lang, t('invalidAmount'));
+    const payments = moneyEntryAccounts.map(account => ({ accountId: account.id, amount: num(amounts[account.id] ?? '') })).filter(payment => payment.amount > 0);
+    if (!payments.length) return showEntryError(lang, lang === 'bn' ? 'ক্যাশ বা ব্যাংকের অন্তত একটি পরিমাণ লিখুন।' : 'Enter an amount for at least one cash or bank account.');
     if (cat === 'other' && !customCategoryName && !name.trim()) return showEntryError(lang, t('needExpName'));
-    if (!accountId) return showEntryError(lang, t('needAccount'));
     (async () => {
       try {
-        await onSave({ id: init?.id, category: cat, customName: cat === 'other' ? (customCategoryName || name.trim()) : undefined, amount: num(amt), accountId, date: date || today(), note: note.trim() || undefined });
+        await onSave({ id: init?.id, category: cat, customName: cat === 'other' ? (customCategoryName || name.trim()) : undefined, payments, date: date || today(), note: note.trim() || undefined });
       } catch (e) {
         showEntryError(lang, e instanceof Error ? e.message : t('invalid'));
       }
@@ -2303,34 +2319,46 @@ export function ExpenseModal({ init, onClose, onSave, onTrash }: {
       },
     }]);
   };
-  return (
-    <DetailShell title={init ? (init.category === 'other' && init.customName ? init.customName : t(exKey(init.category))) : t('addExpense')} onClose={onClose}>
+  const form = (
       <Card>
-        <DateField label={t('date')} value={date} onChange={setDate} allowPast={false} required />
+        <DateField label={t('date')} value={date} onChange={value => { setDate(value); requestAnimationFrame(() => categoryButton.current?.focus?.()); }} allowPast required />
         <RequiredLabel text={t('expenseType')} required />
-        <TouchableOpacity accessibilityRole="button" accessibilityLabel={t('expenseType')} onPress={() => setCategoryListOpen(open => !open)} style={{ minHeight: 48, paddingHorizontal: 12, borderWidth: 1, borderColor: categoryListOpen ? color.primary : color.line, borderRadius: 10, backgroundColor: '#FFFFFF', flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }}>
+        <TouchableOpacity ref={categoryButton} accessibilityRole="button" accessibilityLabel={t('expenseType')} accessibilityState={{ expanded: categoryListOpen }} onPress={() => setCategoryListOpen(open => !open)} {...({ onKeyDown: (event: any) => { if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); setCategoryListOpen(open => !open); } } } as any)} style={{ minHeight: 48, paddingHorizontal: 12, borderWidth: 1, borderColor: categoryListOpen ? color.primary : color.line, borderRadius: 10, backgroundColor: '#FFFFFF', flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }}>
           <Text style={{ color: cat ? color.text : color.muted, fontSize: 16 }}>{customCategoryName || (cat ? t(exKey(cat)) : t('expenseType'))}</Text>
           <AppIcon name={categoryListOpen ? 'chevron-up' : 'chevron-down'} size={18} iconColor={color.muted} />
         </TouchableOpacity>
         {categoryListOpen ? <ScrollView nestedScrollEnabled showsVerticalScrollIndicator keyboardShouldPersistTaps="handled" style={{ maxHeight: 220, marginTop: 4, borderWidth: 1, borderColor: color.line, borderRadius: 10, backgroundColor: '#FFFFFF' }}>
-          {EXPENSE_CATS.map(c => <TouchableOpacity key={c} accessibilityRole="button" onPress={() => { setCat(c); setCustomCategoryName(''); if (c !== 'other') setName(''); setCategoryListOpen(false); requestAnimationFrame(() => (c === 'other' ? nameInput.current : amountInput.current)?.focus()); }} style={{ minHeight: 44, justifyContent: 'center', paddingHorizontal: 12, borderBottomWidth: 1, borderBottomColor: color.line, backgroundColor: cat === c && !customCategoryName ? '#EFF6FF' : '#FFFFFF' }}>
+          {EXPENSE_CATS.map(c => <TouchableOpacity key={c} accessibilityRole="button" onPress={() => { setCat(c); setCustomCategoryName(''); if (c !== 'other') setName(''); setCategoryListOpen(false); requestAnimationFrame(() => (c === 'other' ? nameInput.current : noteInput.current)?.focus()); }} style={{ minHeight: 44, justifyContent: 'center', paddingHorizontal: 12, borderBottomWidth: 1, borderBottomColor: color.line, backgroundColor: cat === c && !customCategoryName ? '#EFF6FF' : '#FFFFFF' }}>
             <Text style={{ color: color.text, fontWeight: cat === c ? '700' : '500' }}>{t(exKey(c))}</Text>
           </TouchableOpacity>)}
-          {customCategories.map(c => <TouchableOpacity key={c.id} accessibilityRole="button" onPress={() => { setCat('other'); setCustomCategoryName(c.name); setName(''); setCategoryListOpen(false); requestAnimationFrame(() => amountInput.current?.focus()); }} style={{ minHeight: 44, justifyContent: 'center', paddingHorizontal: 12, borderBottomWidth: 1, borderBottomColor: color.line, backgroundColor: customCategoryName === c.name ? '#EFF6FF' : '#FFFFFF' }}>
+          {customCategories.map(c => <TouchableOpacity key={c.id} accessibilityRole="button" onPress={() => { setCat('other'); setCustomCategoryName(c.name); setName(''); setCategoryListOpen(false); requestAnimationFrame(() => noteInput.current?.focus()); }} style={{ minHeight: 44, justifyContent: 'center', paddingHorizontal: 12, borderBottomWidth: 1, borderBottomColor: color.line, backgroundColor: customCategoryName === c.name ? '#EFF6FF' : '#FFFFFF' }}>
             <Text style={{ color: color.text, fontWeight: customCategoryName === c.name ? '700' : '500' }}>{c.name}</Text>
           </TouchableOpacity>)}
         </ScrollView> : null}
-        {cat === 'other' && !customCategoryName ? <Field inputRef={nameInput} label={t('expenseName')} value={name} onChange={setName} required /> : null}
-        <Field label={lang === 'bn' ? 'বিবরণ (ঐচ্ছিক)' : 'Description (optional)'} value={note} onChange={setNote} />
+        {cat === 'other' && !customCategoryName ? <Field inputRef={nameInput} label={t('expenseName')} value={name} onChange={setName} required returnKeyType="next" onSubmitEditing={() => noteInput.current?.focus()} /> : null}
+        <Field inputRef={noteInput} label={lang === 'bn' ? 'বিবরণ (ঐচ্ছিক)' : 'Description (optional)'} value={note} onChange={setNote} returnKeyType="next" onSubmitEditing={() => moneyEntryAccounts.length ? amountInput.current?.focus() : save()} />
+        <RequiredLabel text={lang === 'bn' ? 'ক্যাশ বা ব্যাংকের পরিমাণ (একটি বা একাধিক)' : 'Cash or bank amount (enter one or more)'} required />
         <FormGrid>
-          <Field inputRef={amountInput} label={t('amount')} value={amt} onChange={setAmt} num required />
+          {moneyEntryAccounts.map((account, index) => <Field
+            key={account.id}
+            inputRef={node => { amountRefs.current[index] = node as TextInput; if (index === 0) (amountInput as React.MutableRefObject<TextInput | null>).current = node as TextInput; }}
+            label={`${account.name} ${lang === 'bn' ? 'পরিমাণ' : 'amount'}`}
+            value={amounts[account.id] ?? ''}
+            onChange={value => setAmounts(current => ({ ...current, [account.id]: value }))}
+            num
+            returnKeyType={index === moneyEntryAccounts.length - 1 ? 'done' : 'next'}
+            onSubmitEditing={() => index === moneyEntryAccounts.length - 1 ? save() : amountRefs.current[index + 1]?.focus()}
+          />)}
         </FormGrid>
-        <AccountPicker accountId={accountId} onPick={setAccountId} label={t('paymentAccount')} required />
         <Btn icon={icons.save} label={t('saveExpense')} onPress={save} />
-        {init ? <Btn kind="danger" icon={icons.del} label={t('trashMoveBtn')} onPress={trash} /> : <Btn kind="ghost" icon={icons.cancel} label={t('cancel')} onPress={onClose} />}
+        {init ? <Btn kind="danger" icon={icons.del} label={t('trashMoveBtn')} onPress={trash} /> : inline ? null : <Btn kind="ghost" icon={icons.cancel} label={t('cancel')} onPress={onClose} />}
       </Card>
-    </DetailShell>
   );
+  if (inline) return <View style={{ marginBottom: 14 }}>
+    <Title>{init ? (init.category === 'other' && init.customName ? init.customName : t(exKey(init.category))) : t('addExpense')}</Title>
+    {form}
+  </View>;
+  return <DetailShell title={init ? (init.category === 'other' && init.customName ? init.customName : t(exKey(init.category))) : t('addExpense')} onClose={onClose}>{form}</DetailShell>;
 }
 
 /**
@@ -2449,39 +2477,75 @@ export function MoneyTransferModal({ onClose }: { onClose: () => void }) {
 
 /** Transfers shown as ONE business event (name -> name), never two rows. */
 export function MoneyEntry({ direction, onClose, onSaved }: { direction: 'in' | 'out'; onClose: () => void; onSaved: () => Promise<void> }) {
-  const { lang, moneyAccounts, t } = useApp();
+  const { lang, moneyAccounts, t, business } = useApp();
+  const m = useMoney(); const fd = useDateStr();
   const label = (bn: string, en: string) => lang === 'bn' ? bn : en;
-  const [accountId, setAccountId] = useState(moneyAccounts.find(a => a.active)?.id ?? '');
-  const [amount, setAmount] = useState(''), [date, setDate] = useState(today()), [note, setNote] = useState('');
-  const [busy, setBusy] = useState(false), [error, setError] = useState('');
+  const entryAccounts = moneyAccounts.filter(account => account.active && (account.type === 'cash' || account.type === 'bank'))
+    .sort((a, b) => Number(b.type === 'cash') - Number(a.type === 'cash'));
+  const [amounts, setAmounts] = useState<Record<string, string>>({});
+  const [date, setDate] = useState(today());
+  const [note, setNote] = useState('');
+  const [busy, setBusy] = useState(false);
+  const amountRefs = useRef<TextInput[]>([]);
+  const noteRef = useRef<TextInput>(null);
   const lock = useRef(false);
-  const [requestId] = useState(() => `entry-${Date.now()}-${Math.random().toString(36).slice(2)}`);
-  const [saved, setSaved] = useState(false);
+  const requestId = useRef(`entry-${Date.now()}-${Math.random().toString(36).slice(2)}`);
+  const [history, setHistory] = useState<MoneyMovementRow[]>([]);
+  useEffect(() => { api.moneyMovements().then(setHistory).catch(() => {}); }, []);
+  const historyRows = history.filter(row => row.sourceType === (direction === 'in' ? 'deposit' : 'withdrawal')).slice(0, 30);
+  const entryTitle = direction === 'in' ? label('জমা রেজিস্টার', 'Deposit register') : label('উত্তোলন রেজিস্টার', 'Withdrawal register');
+  const reportDoc: ReportDoc = { language: lang, shop: business.name, title: entryTitle, period: label('সাম্প্রতিক এন্ট্রি', 'Recent entries'),
+    sections: [{ title: entryTitle, rows: historyRows.map(row => ({ label: row.transactionNo, sub: `${fd(row.date)} · ${row.moneyAccount?.name ?? ''}${row.note ? ` · ${row.note}` : ''}`, right: m(row.amount), neg: direction === 'out' })) }],
+    total: { label: label('মোট', 'Total'), value: m(historyRows.reduce((sum, row) => sum + row.amount, 0)), neg: direction === 'out' },
+    printedAt: printedAtStamp(lang), printLabel: label('প্রিন্ট', 'Print') };
   const submit = async () => {
     if (lock.current) return;
-    if (!accountId || !(parseNum(amount) > 0)) { const msg = label('একাউন্ট ও সঠিক পরিমাণ দিন', 'Select an account and enter a valid amount'); showEntryError(lang, msg); return; }
-    lock.current = true; setBusy(true); setError('');
+    const entries = entryAccounts.map(account => ({ accountId: account.id, amount: parseNum(amounts[account.id] ?? '') })).filter(entry => entry.amount > 0);
+    if (!entries.length) { showEntryError(lang, label('ক্যাশ বা ব্যাংকের অন্তত একটি পরিমাণ লিখুন।', 'Enter an amount for at least one cash or bank account.')); return; }
+    lock.current = true;
+    setBusy(true);
     try {
-      if (!saved) { await api.moneyEntry({ accountId, direction, amount: parseNum(amount), date: toEnDigits(date), note, requestId }); setSaved(true); }
-      await onSaved(); onClose();
+      for (const entry of entries) await api.moneyEntry({ ...entry, direction, date: toEnDigits(date), note, requestId: `${requestId.current}-${entry.accountId}` });
+      await onSaved();
+      setHistory(await api.moneyMovements());
+      setAmounts({}); setDate(today()); setNote('');
+      requestId.current = `entry-${Date.now()}-${Math.random().toString(36).slice(2)}`;
     } catch (e) {
-      const msg = (e as { code?: string }).code === 'INSUFFICIENT_FUNDS' ? label('এই একাউন্টে পর্যাপ্ত টাকা নেই', 'Insufficient account balance') : label('সংরক্ষণ বা হালনাগাদ করা যায়নি। আবার চেষ্টা করুন।', 'Could not save or refresh. Please try again.'); showEntryError(lang, msg);
-    } finally { lock.current = false; setBusy(false); }
+      const msg = (e as { code?: string }).code === 'INSUFFICIENT_FUNDS'
+        ? label('এই অ্যাকাউন্টে পর্যাপ্ত টাকা নেই।', 'Insufficient account balance.')
+        : label('সংরক্ষণ করা যায়নি। আবার চেষ্টা করুন।', 'Could not save. Please try again.');
+      showEntryError(lang, msg);
+    } finally {
+      lock.current = false;
+      setBusy(false);
+    }
   };
   return <DetailShell title={direction === 'in' ? label('টাকা জমা', 'Deposit') : label('টাকা উত্তোলন', 'Withdraw')} onClose={onClose}>
     <Card>
-      <View pointerEvents={busy || saved ? 'none' : 'auto'}>
-        <AccountPicker accountId={accountId} onPick={setAccountId} label={label('Account', 'অ্যাকাউন্ট')} required />
-        <Field label={label('পরিমাণ', 'Amount')} value={amount} onChange={setAmount} num required />
-        <DateField label={label('তারিখ', 'Date')} value={date} onChange={setDate} allowPast required />
-        <Field label={label('বিবরণ', 'Note')} value={note} onChange={setNote} />
+      <View pointerEvents={busy ? 'none' : 'auto'}>
+        <DateField label={label('তারিখ', 'Date')} value={date} onChange={value => { setDate(value); requestAnimationFrame(() => amountRefs.current[0]?.focus()); }} allowPast required />
+        <RequiredLabel text={label('ক্যাশ বা ব্যাংকের পরিমাণ (একটি বা একাধিক)', 'Cash or bank amount (enter one or more)')} required />
+        {entryAccounts.map((account, index) => <Field
+          key={account.id}
+          inputRef={node => { amountRefs.current[index] = node as TextInput; }}
+          label={`${account.name} ${label('পরিমাণ', 'amount')}`}
+          value={amounts[account.id] ?? ''}
+          onChange={value => setAmounts(current => ({ ...current, [account.id]: value }))}
+          num
+          returnKeyType="next"
+          onSubmitEditing={() => index < entryAccounts.length - 1 ? amountRefs.current[index + 1]?.focus() : noteRef.current?.focus()}
+        />)}
+        <Field inputRef={noteRef} label={label('বিবরণ', 'Note')} value={note} onChange={setNote} returnKeyType="done" onSubmitEditing={submit} />
       </View>
-      {error ? <Text accessibilityRole="alert" style={{ color: color.red, marginBottom: 12 }}>{error}</Text> : null}
       <Btn label={busy ? t('wait') : t('save')} onPress={submit} testID="save-money-entry" />
+    </Card>
+    <Card>
+      <SectionHead icon={direction === 'in' ? icons.moneyIn : icons.moneyOut}>{entryTitle}</SectionHead>
+      <EntryReportButtons doc={reportDoc} filename={`${direction === 'in' ? 'deposit' : 'withdrawal'}_register_${today()}.csv`} />
+      {historyRows.length ? historyRows.map(row => <Row key={row.id} left={row.transactionNo} sub={`${fd(row.date)} · ${row.moneyAccount?.name ?? ''}${row.note ? ` · ${row.note}` : ''}`} right={m(row.amount)} neg={direction === 'out'} />) : <Empty />}
     </Card>
   </DetailShell>;
 }
-
 function TransferHistory({ limit = 8 }: { limit?: number }) {
   const { t, moneyTransfers, moneyAccounts } = useApp();
   const m = useMoney(); const fd = useDateStr();
@@ -2517,9 +2581,9 @@ export function JournalEntryModal({ onClose, onSaved, initial }: { onClose: () =
   const label = (en: string, bn: string) => lang === 'bn' ? bn : en;
   useEffect(() => { api.chartAccounts().then(rows => { setAccounts(rows.filter(a => a.active)); setLines(current => current.map(l => ({ ...l, accountId: l.accountId || rows.find(a => a.active)?.id || '' }))); }).catch(e => Alert.alert('Chart of accounts', e.message)); }, []);
   const setLine = (index: number, update: Partial<JournalDraftLine>) => setLines(current => current.map((line, i) => i === index ? { ...line, ...update } : line));
-  const save = async () => {
+  const save = async (status: 'draft' | 'posted' = initial ? 'draft' : 'posted') => {
     if (!date.match(/^\d{4}-\d{2}-\d{2}$/) || !memo.trim()) return showEntryError(lang, label('Date and memo are required.', 'তারিখ ও বিবরণ আবশ্যক।'), label('Enter a valid date and add a memo, then save again.', 'সঠিক তারিখ দিন এবং বিবরণ লিখে আবার সংরক্ষণ করুন।'));
-    const payload: JournalWrite = { date, memo: memo.trim(), sourceType: 'manual',
+    const payload: JournalWrite = { date, memo: memo.trim(), sourceType: 'manual', status,
       lines: lines.map(l => ({ accountId: l.accountId, description: l.description.trim(), debit: parseNum(l.debit), credit: parseNum(l.credit) })) };
     try { setBusy(true); if (initial) await api.updateJournalEntry(initial.id, payload); else await api.createJournalEntry(payload); onSaved?.(); onClose(); }
     catch (e) { showEntryError(lang, e instanceof Error ? e.message : label('Could not save journal entry.', 'জার্নাল এন্ট্রি সংরক্ষণ করা যায়নি।')); }
@@ -2536,7 +2600,7 @@ export function JournalEntryModal({ onClose, onSaved, initial }: { onClose: () =
         <Field label={label('Line description', 'লাইনের বিবরণ')} value={line.description} onChange={v => setLine(index, { description: v })} />
         <RequiredLabel text={label('Debit or credit amount', 'ডেবিট বা ক্রেডিটের পরিমাণ')} required /><View style={{ flexDirection: 'row', gap: 8 }}><View style={{ flex: 1 }}><Field label="Debit" value={line.debit} onChange={v => setLine(index, { debit: v, credit: '' })} num /></View><View style={{ flex: 1 }}><Field label="Credit" value={line.credit} onChange={v => setLine(index, { credit: v, debit: '' })} num /></View></View>
       </Card>; })}
-      <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8 }}><Btn kind="ghost" label={label('Add line', 'লাইন যোগ')} onPress={() => setLines(current => [...current, { accountId: accounts[0]?.id ?? '', description: '', debit: '', credit: '' }])} /><Btn label={busy ? label('Saving…', 'সংরক্ষণ হচ্ছে…') : label('Save balanced entry', 'সুষম এন্ট্রি সংরক্ষণ')} onPress={() => { if (!busy) void save(); }} /></View>
+      <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8 }}><Btn kind="ghost" label={label('Add line', 'লাইন যোগ')} onPress={() => setLines(current => [...current, { accountId: accounts[0]?.id ?? '', description: '', debit: '', credit: '' }])} />{initial ? <Btn label={busy ? label('Saving…', 'সংরক্ষণ হচ্ছে…') : label('Save draft changes', 'খসড়ার পরিবর্তন সংরক্ষণ')} onPress={() => { if (!busy) void save('draft'); }} /> : <><Btn kind="ghost" label={busy ? label('Saving…', 'সংরক্ষণ হচ্ছে…') : label('Save as draft', 'খসড়া হিসেবে সংরক্ষণ')} onPress={() => { if (!busy) void save('draft'); }} /><Btn label={busy ? label('Saving…', 'সংরক্ষণ হচ্ছে…') : label('Post entry', 'এন্ট্রি পোস্ট করুন')} onPress={() => { if (!busy) void save('posted'); }} /></>}</View>
     </ScrollView>
   </View></View></Modal>;
 }
@@ -3086,7 +3150,7 @@ export function InvoiceModal({ kind, id, onClose, onReturn, onBack, onEdit }: {
             {doc.next ? <Row left={doc.labels.payDate} right={doc.next} /> : null}
             {extra.payments?.map(p => (
               <Row key={p.id} left={p.advance ? (lang === 'bn' ? 'পার্টি পেমেন্ট সমন্বয়' : 'Party payment applied') : t('payment')}
-                sub={[p.date ? fd(p.date) : '', p.accountName ?? '', p.note ?? ''].filter(Boolean).join(' · ')} right={m(p.amount)} />
+                sub={[p.date ? fd(p.date) : '', p.accountName ?? '', p.transportContra ? `${lang === 'bn' ? 'পরিবহন সমন্বয়' : 'Transport contra settlement'}${p.contraSaleInvoiceNo ? ` · ${lang === 'bn' ? 'বিক্রয় ইনভয়েস' : 'Sales invoice'} ${p.contraSaleInvoiceNo}` : ''}` : p.note ?? ''].filter(Boolean).join(' · ')} right={m(p.amount)} />
             ))}
           </Card>
           <Btn icon={icons.print} label={t('printInvoice')} onPress={() => printTxn(kind, id)} />
@@ -3923,9 +3987,9 @@ export function ReturnHome({ focus, onFocusDone, initialKind }: {
           placeholder={t('searchInvoice')}
           match={(it: any, qq: string) => {
             const nq = qq.trim().toLowerCase();
-            return it.no.toLowerCase().includes(nq)
-              || (it.partyName ?? '').toLowerCase().includes(nq)
-              || (it.partyMobile ?? '').toLowerCase().includes(nq);
+            return (it.kind === 'sale' ? it.no.toLowerCase() === nq : it.no.toLowerCase().startsWith(nq))
+              || (it.partyName ?? '').toLowerCase().startsWith(nq)
+              || (it.partyMobile ?? '').toLowerCase().startsWith(nq);
           }}
           subOf={(it: any) => `${it.partyName ?? ''} • ${fd(it.date)}`}
           emptyText={t('noResult')}

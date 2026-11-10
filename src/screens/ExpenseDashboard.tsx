@@ -210,7 +210,7 @@ export function ExpenseDashboard(_props: ExpenseDashboardProps) {
       .filter(e => {
         if (!q) return true;
         return [e.voucherNo, catLabel(e), e.note, accountName(e.accountId), String(e.amount)]
-          .some(v => String(v ?? '').toLowerCase().includes(q));
+          .some(v => String(v ?? '').toLowerCase().startsWith(q));
       })
       .sort((a, b) => b.date.localeCompare(a.date));
   }, [expenses, catFilter, search, catIdOf, catLabel, accountName]);

@@ -118,7 +118,7 @@ export function StockDashboard() {
   const filteredRows = useMemo(() => {
     const code = codeQuery.trim().toLowerCase();
     const name = nameQuery.trim().toLowerCase();
-    return stockData.filter(r => (!code || r.code.trim().toLowerCase() === code) && (!name || r.name.toLowerCase().includes(name)));
+    return stockData.filter(r => (!code || r.code.trim().toLowerCase().startsWith(code)) && (!name || r.name.toLowerCase().startsWith(name)));
   }, [stockData, codeQuery, nameQuery]);
 
   // Audit rows computation
@@ -225,7 +225,7 @@ export function StockDashboard() {
     if (showOnlyDiscrepancies) {
       list = list.filter(r => r.physicalKg !== null && Math.abs(r.deltaKg) >= 0.01);
     }
-    if (code || name) list = list.filter(r => (!code || r.code.trim().toLowerCase() === code) && (!name || r.name.toLowerCase().includes(name)));
+    if (code || name) list = list.filter(r => (!code || r.code.trim().toLowerCase().startsWith(code)) && (!name || r.name.toLowerCase().startsWith(name)));
     return list;
   }, [auditRows, showOnlyDiscrepancies, codeQuery, nameQuery]);
 

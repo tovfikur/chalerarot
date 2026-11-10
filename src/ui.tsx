@@ -82,12 +82,12 @@ export const Btn = ({ label, onPress, kind = 'primary', icon, testID }: { label:
     </TouchableOpacity>
   );
 };
-export const Field = ({ label, value, onChange, num, accessibilityLabel, inputRef, required = false }: { label: string; value: string; onChange: (v: string) => void; num?: boolean; accessibilityLabel?: string; inputRef?: React.Ref<TextInput>; required?: boolean }) => {
+export const Field = ({ label, value, onChange, num, accessibilityLabel, inputRef, required = false, returnKeyType, onSubmitEditing, onFocus, onBlur }: { label: string; value: string; onChange: (v: string) => void; num?: boolean; accessibilityLabel?: string; inputRef?: React.Ref<TextInput>; required?: boolean; returnKeyType?: 'done' | 'go' | 'next' | 'search' | 'send'; onSubmitEditing?: () => void; onFocus?: () => void; onBlur?: () => void }) => {
   const fs = useFs(17, 15);
   return (
     <View style={{ marginBottom: 10 }}>
       <RequiredLabel text={label} required={required} />
-      <TextInput ref={inputRef} value={value} onChangeText={onChange} accessibilityLabel={accessibilityLabel ?? label} keyboardType={num ? 'numeric' : 'default'} inputMode={num ? 'decimal' : undefined} style={[s.input, { fontSize: fs }]} />
+      <TextInput ref={inputRef} value={value} onChangeText={onChange} accessibilityLabel={accessibilityLabel ?? label} keyboardType={num ? 'decimal-pad' : 'default'} inputMode={num ? 'decimal' : undefined} returnKeyType={returnKeyType} onSubmitEditing={onSubmitEditing} onFocus={onFocus} onBlur={onBlur} style={[s.input, { fontSize: fs }]} />
     </View>
   );
 };

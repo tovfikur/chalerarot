@@ -74,7 +74,7 @@ products.post('/bulk', async (req: Request, res: Response) => {
         }
         let code = String(item.code ?? '').trim() || null;
         if (code) {
-          const codeCheck = await lockAndCheckCode(tx, code);
+          const codeCheck = await lockAndCheckCode(tx, code, 'product');
           const codeKey = codeCheck.normalized.toUpperCase();
           if (codeCheck.invalid) {
             errors.push({ row: rowNum, name, error: 'Code must use English letters or numbers; hyphen, underscore, dot and slash are allowed' });
@@ -169,7 +169,7 @@ products.post('/', async (req: Request, res: Response) => {
     const openingValue = round2(o * c);
     const p = await db.$transaction(async tx => {
       const codeValue = String(code ?? '').trim();
-      const codeCheck = codeValue ? await lockAndCheckCode(tx, codeValue) : { normalized: '' };
+      const codeCheck = codeValue ? await lockAndCheckCode(tx, codeValue, 'product') : { normalized: '' };
       if (codeCheck.invalid) throw Object.assign(new Error('Code must use English letters or numbers; hyphen, underscore, dot and slash are allowed'), { code: 'CODE_INVALID' });
       if (codeCheck.conflict) throw Object.assign(new Error('Code is already in use'), { code: 'CODE_EXISTS', conflict: codeCheck.conflict });
       const created = await tx.product.create({
@@ -220,7 +220,7 @@ products.put('/:id', async (req: Request, res: Response) => {
     const day = businessToday();
     const updated = await db.$transaction(async tx => {
       const nextCode = code === undefined ? cur.code : String(code ?? '').trim();
-      const codeCheck = nextCode ? await lockAndCheckCode(tx, nextCode, { entity: 'product', id: cur.id }) : { normalized: '' };
+      const codeCheck = nextCode ? await lockAndCheckCode(tx, nextCode, 'product', { entity: 'product', id: cur.id }) : { normalized: '' };
       if (codeCheck.invalid) throw Object.assign(new Error('Code must use English letters or numbers; hyphen, underscore, dot and slash are allowed'), { code: 'CODE_INVALID' });
       if (codeCheck.conflict) throw Object.assign(new Error('Code is already in use'), { code: 'CODE_EXISTS', conflict: codeCheck.conflict });
       const data: Record<string, unknown> = {

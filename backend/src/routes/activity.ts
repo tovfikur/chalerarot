@@ -45,9 +45,9 @@ activity.get('/', async (req, res) => {
     const q = typeof req.query.q === 'string' ? req.query.q.trim() : '';
     if (q) {
       where.OR = [
-        { userName: { contains: q, mode: 'insensitive' } },
-        { reference: { contains: q, mode: 'insensitive' } },
-        { summary: { contains: q, mode: 'insensitive' } },
+        { userName: { startsWith: q, mode: 'insensitive' } },
+        { reference: { startsWith: q, mode: 'insensitive' } },
+        { summary: { startsWith: q, mode: 'insensitive' } },
       ];
     }
 

@@ -35,14 +35,16 @@ import {
   Empty,
   Btn,
   Field,
-  AccountPicker,
+  RequiredLabel,
 } from '../ui';
 import { AppIcon, icons } from '../icons';
 import { useBreakpoint } from '../responsive';
+import { SearchableSelect, matchParty, matchProduct } from '../search';
 import { printReport, previewReport, printedAtStamp, downloadReportCSV, type ReportDoc, type ReportRow } from '../report';
 import { api } from '../api';
 import { showEntryError } from '../entryDialog';
-import type { GeneralLedger, JournalEntries, SavedJournalEntry, HouseExpenseRow } from '../api';
+import { EntryReportButtons } from '../EntryReportButtons';
+import type { GeneralLedger, JournalEntries, SavedJournalEntry, HouseExpenseRow, MoneyMovementRow, StockMovementReportRow } from '../api';
 import type { Key } from '../i18n';
 import {
   FilterModal,
@@ -65,48 +67,61 @@ interface AccountsDashboardProps {
   onFocusDone?: () => void;
 }
 
-function HouseExpenseEntryForm({ onCancel, onSaved }: { onCancel: () => void; onSaved: () => Promise<void> }) {
+function HouseExpenseEntryForm({ onSaved }: { onSaved: () => Promise<void> }) {
   const { lang, t, moneyAccounts } = useApp();
   const label = (en: string, bn: string) => lang === 'bn' ? bn : en;
-  const [accountId, setAccountId] = useState(moneyAccounts.find(account => account.active)?.id ?? '');
-  const [amount, setAmount] = useState('');
+  const entryAccounts = moneyAccounts.filter(account => account.active && (account.type === 'cash' || account.type === 'bank'))
+    .sort((a, b) => Number(b.type === 'cash') - Number(a.type === 'cash'));
+  const [amounts, setAmounts] = useState<Record<string, string>>({});
   const [date, setDate] = useState(today());
   const [description, setDescription] = useState('');
   const [note, setNote] = useState('');
   const [busy, setBusy] = useState(false);
-  const [error, setError] = useState('');
   const requestId = useRef(`house-${Date.now()}-${Math.random().toString(36).slice(2)}`);
-  useEffect(() => {
-    if (!accountId) setAccountId(moneyAccounts.find(account => account.active)?.id ?? '');
-  }, [moneyAccounts, accountId]);
+  const amountRefs = useRef<TextInput[]>([]);
+  const descriptionRef = useRef<TextInput>(null);
+  const noteRef = useRef<TextInput>(null);
   const save = async () => {
-    if (!accountId || !(parseNum(amount) > 0) || !description.trim()) {
-      const message = label('Choose an account, enter an amount, and add a description.', 'অ্যাকাউন্ট নির্বাচন করুন, পরিমাণ লিখুন এবং বিবরণ দিন।'); showEntryError(lang, message);
+    if (busy) return;
+    const entries = entryAccounts.map(account => ({ accountId: account.id, amount: parseNum(amounts[account.id] ?? '') })).filter(entry => entry.amount > 0);
+    if (!entries.length || !description.trim()) {
+      showEntryError(lang, label('Enter at least one cash or bank amount and a description.', 'ক্যাশ বা ব্যাংকের অন্তত একটি পরিমাণ ও বিবরণ লিখুন।'));
       return;
     }
-    setBusy(true); setError('');
+    setBusy(true);
     try {
-      await api.createHouseExpense({ accountId, amount: parseNum(amount), date: toEnDigits(date), description: description.trim(), note: note.trim(), requestId: requestId.current });
+      for (const entry of entries) await api.createHouseExpense({ ...entry, date: toEnDigits(date), description: description.trim(), note: note.trim(), requestId: `${requestId.current}-${entry.accountId}` });
       await onSaved();
+      setAmounts({});
+      setDate(today());
+      setDescription('');
+      setNote('');
+      requestId.current = `house-${Date.now()}-${Math.random().toString(36).slice(2)}`;
     } catch (e) {
-      const message = e instanceof Error ? e.message : label('Could not save house expense.', 'বাসার খরচ সংরক্ষণ করা যায়নি।'); showEntryError(lang, message);
+      showEntryError(lang, e instanceof Error ? e.message : label('Could not save house expense.', 'বাসার খরচ সংরক্ষণ করা যায়নি।'));
     } finally { setBusy(false); }
   };
   return <View style={{ backgroundColor: '#F8FAFC', borderWidth: 1, borderColor: '#DBEAFE', borderRadius: 14, padding: 14, marginBottom: 14 }}>
     <Text style={{ fontSize: 17, fontWeight: '800', color: '#123D64', marginBottom: 8 }}>{label('Record house expense withdrawal', 'বাসার খরচ উত্তোলন নথিভুক্ত করুন')}</Text>
-    <AccountPicker accountId={accountId} onPick={setAccountId} label={label('Withdraw from account', 'যে অ্যাকাউন্ট থেকে উত্তোলন')} required />
-    <Field label={label('Amount', 'পরিমাণ')} value={amount} onChange={setAmount} num required />
-    <DateField label={label('Date', 'তারিখ')} value={date} onChange={setDate} allowPast required />
-    <Field label={label('Description', 'বিবরণ')} value={description} onChange={setDescription} required />
-    <Field label={label('Log note (optional)', 'লগ নোট (ঐচ্ছিক)')} value={note} onChange={setNote} />
-    {error ? <Text accessibilityRole="alert" style={{ color: '#DC2626', marginBottom: 8 }}>{error}</Text> : null}
+    <DateField label={label('Date', 'তারিখ')} value={date} onChange={value => { setDate(value); requestAnimationFrame(() => amountRefs.current[0]?.focus()); }} allowPast required />
+    <RequiredLabel text={label('Cash or bank amount (enter one or more)', 'ক্যাশ বা ব্যাংকের পরিমাণ (একটি বা একাধিক)')} required />
+    {entryAccounts.map((account, index) => <Field
+      key={account.id}
+      inputRef={node => { amountRefs.current[index] = node as TextInput; }}
+      label={`${account.name} ${label('Amount', 'পরিমাণ')}`}
+      value={amounts[account.id] ?? ''}
+      onChange={value => setAmounts(current => ({ ...current, [account.id]: value }))}
+      num
+      returnKeyType={index === entryAccounts.length - 1 ? 'done' : 'next'}
+      onSubmitEditing={() => index < entryAccounts.length - 1 ? amountRefs.current[index + 1]?.focus() : descriptionRef.current?.focus()}
+    />)}
+    <Field inputRef={descriptionRef} label={label('Description', 'বিবরণ')} value={description} onChange={setDescription} required returnKeyType="next" onSubmitEditing={() => noteRef.current?.focus()} />
+    <Field inputRef={noteRef} label={label('Log note (optional)', 'লগ নোট (ঐচ্ছিক)')} value={note} onChange={setNote} returnKeyType="done" onSubmitEditing={() => { void save(); }} />
     <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginTop: 8 }}>
       <Btn label={busy ? t('wait') : label('Save withdrawal', 'উত্তোলন সংরক্ষণ')} icon={icons.moneyOut} onPress={() => { if (!busy) void save(); }} />
-      <Btn label={label('Cancel', 'বাতিল')} kind="ghost" onPress={onCancel} />
     </View>
   </View>;
 }
-
 // Preset Range Calculator
 const pad2n = (n: number) => String(n).padStart(2, '0');
 const addDays = (ds: string, delta: number) => {
@@ -133,6 +148,18 @@ const presetRange = (id: 'today' | 'last7' | 'thisMonth' | 'last3m' | 'thisYear'
   return { from: td, to: td };
 };
 const expenseTranslationKey = (category: string) => `ex${category.charAt(0).toUpperCase()}${category.slice(1)}` as Key;
+type AccountReportType = 'sales' | 'purchases' | 'collections' | 'supplierPayments' | 'deposits' | 'withdrawals' | 'expenses' | 'houseExpenses' | 'inventory' | 'stockMovements' | 'returns' | 'customerBalances' | 'supplierBalances' | 'customers' | 'suppliers' | 'transfers' | 'cashflow' | 'profitLoss' | 'journal';
+const ACCOUNT_REPORT_TYPES: { id: AccountReportType; en: string; bn: string }[] = [
+  { id: 'sales', en: 'Sales', bn: 'বিক্রয়' }, { id: 'purchases', en: 'Purchases', bn: 'ক্রয়' },
+  { id: 'collections', en: 'Customer collections', bn: 'গ্রাহক আদায়' }, { id: 'supplierPayments', en: 'Supplier payments', bn: 'সরবরাহকারী পরিশোধ' },
+  { id: 'deposits', en: 'Deposits', bn: 'জমা' }, { id: 'withdrawals', en: 'Withdrawals', bn: 'উত্তোলন' },
+  { id: 'expenses', en: 'Expenses', bn: 'ব্যয়' }, { id: 'houseExpenses', en: 'House expenses', bn: 'বাসার খরচ' },
+  { id: 'inventory', en: 'Current inventory', bn: 'বর্তমান মজুদ' }, { id: 'stockMovements', en: 'Inventory movements', bn: 'মজুদ লেনদেন' }, { id: 'returns', en: 'Sales and purchase returns', bn: 'বিক্রয় ও ক্রয় ফেরত' },
+  { id: 'customerBalances', en: 'Customer balances', bn: 'গ্রাহক পাওনা' }, { id: 'supplierBalances', en: 'Supplier balances', bn: 'সরবরাহকারী দেনা' },
+  { id: 'customers', en: 'Customer directory', bn: 'গ্রাহক তালিকা' }, { id: 'suppliers', en: 'Supplier directory', bn: 'সরবরাহকারী তালিকা' },
+  { id: 'transfers', en: 'Account transfers', bn: 'অ্যাকাউন্ট স্থানান্তর' }, { id: 'cashflow', en: 'Cash flow', bn: 'নগদ প্রবাহ' },
+  { id: 'profitLoss', en: 'Profit and loss', bn: 'লাভ-ক্ষতি' }, { id: 'journal', en: 'Journal entries', bn: 'জার্নাল এন্ট্রি' },
+];
 
 export function AccountsDashboard({ go, focus, onFocusDone }: AccountsDashboardProps) {
   const {
@@ -151,6 +178,7 @@ export function AccountsDashboard({ go, focus, onFocusDone }: AccountsDashboardP
     products = [],
     moneyAccounts = [],
     moneyBalances = [],
+    moneyTransfers = [],
     saveExpense,
     deleteExpense,
     loadFinance,
@@ -183,7 +211,20 @@ export function AccountsDashboard({ go, focus, onFocusDone }: AccountsDashboardP
   const [accountRefresh, setAccountRefresh] = useState(0);
   const [houseExpenseRows, setHouseExpenseRows] = useState<HouseExpenseRow[]>([]);
   const [houseExpenseLoading, setHouseExpenseLoading] = useState(false);
-  const [houseExpenseFormOpen, setHouseExpenseFormOpen] = useState(false);
+  const [reportCenterOpen, setReportCenterOpen] = useState(false);
+  const [selectedReportTypes, setSelectedReportTypes] = useState<AccountReportType[]>(['sales', 'purchases']);
+  const [reportFrom, setReportFrom] = useState('');
+  const [reportTo, setReportTo] = useState('');
+  const [reportCustomerId, setReportCustomerId] = useState<string | undefined>();
+  const [reportSupplierId, setReportSupplierId] = useState<string | undefined>();
+  const [reportProductId, setReportProductId] = useState<string | undefined>();
+  const [customReportTitle, setCustomReportTitle] = useState('');
+  const [reportMoneyRows, setReportMoneyRows] = useState<MoneyMovementRow[]>([]);
+  const [reportStockRows, setReportStockRows] = useState<StockMovementReportRow[]>([]);
+  const [reportHouseRows, setReportHouseRows] = useState<HouseExpenseRow[]>([]);
+  const [reportDataLoading, setReportDataLoading] = useState(false);
+  const [reportGenerating, setReportGenerating] = useState(false);
+  const [generatedReport, setGeneratedReport] = useState<ReportDoc | null>(null);
 
   // Focus effect for navigation from outside
   useEffect(() => {
@@ -236,6 +277,20 @@ export function AccountsDashboard({ go, focus, onFocusDone }: AccountsDashboardP
     return () => { on = false; };
   }, [activeTab, accountRefresh, lang]);
 
+  useEffect(() => {
+    if (!reportCenterOpen) return;
+    let on = true;
+    setReportDataLoading(true);
+    Promise.all([api.moneyMovements(5000), api.stockMovements(5000), api.houseExpenses()])
+      .then(([moneyRows, stockRows, houseRows]) => {
+        if (!on) return;
+        setReportMoneyRows(moneyRows); setReportStockRows(stockRows); setReportHouseRows(houseRows);
+      })
+      .catch(() => { if (on) Alert.alert(label('Could not load report data', 'রিপোর্টের তথ্য লোড করা যায়নি')); })
+      .finally(() => { if (on) setReportDataLoading(false); });
+    return () => { on = false; };
+  }, [reportCenterOpen, accountRefresh, lang]);
+
   const f: PeriodFinance | null = finFor === finKey ? financePeriod : null;
 
   // Modals state
@@ -247,6 +302,11 @@ export function AccountsDashboard({ go, focus, onFocusDone }: AccountsDashboardP
   const [generalLedgerData, setGeneralLedgerData] = useState<GeneralLedger | null>(null);
   const [selectedLedgerAccount, setSelectedLedgerAccount] = useState<string | null>(null);
   const [journalData, setJournalData] = useState<JournalEntries | null>(null);
+  const [selectedJournalEntry, setSelectedJournalEntry] = useState<JournalEntries['entries'][number] | null>(null);
+  const [journalDetailTab, setJournalDetailTab] = useState<'items' | 'info'>('items');
+  const [journalSearch, setJournalSearch] = useState('');
+  const [journalAccountFilter, setJournalAccountFilter] = useState('');
+  const [journalStatusFilter, setJournalStatusFilter] = useState('all');
   const [journalComposer, setJournalComposer] = useState<{ initial?: SavedJournalEntry } | null>(null);
   const [chartModalOpen, setChartModalOpen] = useState(false);
   const [journalFrom, setJournalFrom] = useState(flt.from);
@@ -466,19 +526,35 @@ export function AccountsDashboard({ go, focus, onFocusDone }: AccountsDashboardP
 
   const printJournalEntries = async () => {
     setJournalFrom(flt.from); setJournalTo(flt.to);
-    const j = await api.journalEntries(flt.from, flt.to);
+    setJournalSearch(''); setJournalAccountFilter(''); setJournalStatusFilter('all'); setSelectedJournalEntry(null);
+    const j = await api.journalEntries(flt.from, flt.to, true);
     setJournalData(j);
     setReportViewDoc(journalEntriesReportDoc(j));
   };
 
   const applyJournalDateFilter = async () => {
     try {
-      const j = await api.journalEntries(journalFrom, journalTo);
+      const j = await api.journalEntries(journalFrom, journalTo, true);
       setJournalData(j);
+      setSelectedJournalEntry(null);
       setReportViewDoc(journalEntriesReportDoc(j));
     } catch {
       showEntryError(lang, lang === 'bn' ? 'YYYY-MM-DD ফরম্যাটে শুরু ও শেষ তারিখ দিন।' : 'Enter valid start and end dates in YYYY-MM-DD format.');
     }
+  };
+
+  const changeJournalStatus = async (entry: NonNullable<typeof selectedJournalEntry>, status: 'draft' | 'posted' | 'cancelled') => {
+    if (!entry.entryId) return;
+    const prompt = status === 'cancelled'
+      ? (lang === 'bn' ? 'এই জার্নাল এন্ট্রি বাতিল করবেন?' : 'Cancel this journal entry?')
+      : status === 'draft' ? (lang === 'bn' ? 'এন্ট্রিটি খসড়ায় ফেরত যাবে এবং হিসাব থেকে বাদ যাবে।' : 'This entry will return to draft and be removed from posted balances.')
+      : (lang === 'bn' ? 'এই খসড়া এন্ট্রি পোস্ট করবেন?' : 'Post this draft entry?');
+    Alert.alert(lang === 'bn' ? 'নিশ্চিত করুন' : 'Confirm', prompt, [
+      { text: lang === 'bn' ? 'বাতিল' : 'Back', style: 'cancel' },
+      { text: status === 'cancelled' ? (lang === 'bn' ? 'বাতিল করুন' : 'Cancel entry') : status === 'draft' ? (lang === 'bn' ? 'খসড়ায় ফেরত' : 'Reset to draft') : (lang === 'bn' ? 'পোস্ট' : 'Post'), style: status === 'cancelled' ? 'destructive' : 'default', onPress: () => {
+        void api.setJournalEntryStatus(entry.entryId!, status).then(() => applyJournalDateFilter()).catch(error => showEntryError(lang, error instanceof Error ? error.message : (lang === 'bn' ? 'জার্নাল স্ট্যাটাস পরিবর্তন করা যায়নি।' : 'Could not update journal status.')));
+      } },
+    ]);
   };
 
   const ledgerReportDoc = (g: GeneralLedger, account?: GeneralLedger['accounts'][number]): ReportDoc => {
@@ -503,37 +579,7 @@ export function AccountsDashboard({ go, focus, onFocusDone }: AccountsDashboardP
     setReportViewDoc(ledgerReportDoc(g));
   };
 
-  const downloadActiveReport = () => {
-    const titles: Record<typeof activeTab, string> = {
-      overview: lang === 'bn' ? 'হিসাবের সারসংক্ষেপ' : 'Accounts overview',
-      reports: lang === 'bn' ? 'আর্থিক প্রতিবেদন' : 'Financial reports',
-      due: lang === 'bn' ? 'গ্রাহক পাওনা' : 'Customer receivables',
-      pay: lang === 'bn' ? 'সরবরাহকারী দেনা' : 'Supplier payables',
-      expense: lang === 'bn' ? 'খরচের তালিকা' : 'Expense register',
-      houseExpense: lang === 'bn' ? 'বাসার খরচ উত্তোলন' : 'House expense withdrawals',
-    };
-    const moneyRow = (label: string, value: number): ReportRow => ({ label, right: m(value) });
-    const sections: ReportDoc['sections'] = activeTab === 'due'
-      ? [{ title: titles.due, rows: customerDues.map(x => ({ label: x.customer.name, sub: localeDigits(x.customer.mobile, lang), right: m(x.balance) })) }]
-      : activeTab === 'pay'
-      ? [{ title: titles.pay, rows: vendorPayables.map(x => ({ label: x.vendor.name, sub: localeDigits(x.vendor.mobile, lang), right: m(x.balance) })) }]
-      : activeTab === 'expense'
-      ? [{ title: titles.expense, rows: filteredExpensesList.map(x => ({ label: expenseCategoryLabel(x.category, x.customName), sub: `${x.capitalized ? (lang === 'bn' ? 'মজুদে অন্তর্ভুক্ত' : 'Capitalized to inventory') + ' · ' : ''}${x.date}${x.note ? ` · ${x.note}` : ''}`, right: m(x.amount) })) }]
-      : activeTab === 'houseExpense'
-      ? [{ title: titles.houseExpense, rows: houseExpenseRows.map(x => ({ label: x.description, sub: `${x.date} · ${x.accountName}${x.note ? ` · ${x.note}` : ''}`, right: `−${m(x.amount)}` })) }]
-      : [{ title: titles[activeTab], rows: [
-        moneyRow(lang === 'bn' ? 'নগদ ও ব্যাংক' : 'Cash and bank', totalLiquidMoney),
-        moneyRow(lang === 'bn' ? 'গ্রাহক পাওনা' : 'Receivables', totalDueAmount),
-        moneyRow(lang === 'bn' ? 'সরবরাহকারী দেনা' : 'Payables', totalPayableAmount),
-        moneyRow(lang === 'bn' ? 'নিট বিক্রয়' : 'Net sales', fSale),
-        moneyRow(lang === 'bn' ? 'নিট ক্রয়' : 'Net purchases', f?.netPurchase ?? 0),
-        moneyRow(lang === 'bn' ? 'নিট মজুদে অন্তর্ভুক্ত ল্যান্ডিং খরচ' : 'Net landed cost capitalized', f?.capitalizedLandedCost ?? 0),
-        moneyRow(lang === 'bn' ? 'খরচ' : 'Expenses', fExp),
-        moneyRow(lang === 'bn' ? 'নিট লাভ' : 'Net profit', fProfit),
-      ] }];
-    downloadReportCSV({ language: lang, shop: business.name, title: titles[activeTab], period: formatPeriodLabel(flt.from, flt.to), sections,
-      printedAt: printedAtStamp(lang), printLabel: lang === 'bn' ? 'প্রিন্ট করুন' : 'Print' }, `chaler_accounts_${activeTab}_${td}.csv`);
-  };
+  const downloadActiveReport = () => setReportCenterOpen(true);
 
   // Net Working Capital & Solvency
   const netSolvencyScore = totalLiquidMoney + totalDueAmount - totalPayableAmount;
@@ -761,7 +807,7 @@ export function AccountsDashboard({ go, focus, onFocusDone }: AccountsDashboardP
     const q = dueSearch.trim().toLowerCase();
     if (!q) return customerDues;
     return customerDues.filter(item =>
-      item.customer.name.toLowerCase().includes(q) || (item.customer.mobile && item.customer.mobile.includes(q))
+      item.customer.name.toLowerCase().startsWith(q) || (item.customer.mobile && item.customer.mobile.startsWith(q))
     );
   }, [customerDues, dueSearch]);
 
@@ -769,7 +815,7 @@ export function AccountsDashboard({ go, focus, onFocusDone }: AccountsDashboardP
     const q = paySearch.trim().toLowerCase();
     if (!q) return vendorPayables;
     return vendorPayables.filter(item =>
-      item.vendor.name.toLowerCase().includes(q) || (item.vendor.mobile && item.vendor.mobile.includes(q))
+      item.vendor.name.toLowerCase().startsWith(q) || (item.vendor.mobile && item.vendor.mobile.startsWith(q))
     );
   }, [vendorPayables, paySearch]);
 
@@ -777,14 +823,191 @@ export function AccountsDashboard({ go, focus, onFocusDone }: AccountsDashboardP
     const q = expSearch.trim().toLowerCase();
     return expenses
       .filter(e => {
-        if (!inPeriod(e.date)) return false;
         if (expCatFilter !== 'all' && e.category !== expCatFilter) return false;
         if (!q) return true;
         const catName = expenseCategoryLabel(e.category, e.customName);
-        return catName.toLowerCase().includes(q) || e.category.toLowerCase().includes(q) || (e.note && e.note.toLowerCase().includes(q));
+        const accountName = e.accountName ?? moneyAccounts.find(account => account.id === e.accountId)?.name ?? '';
+        return catName.toLowerCase().startsWith(q) || e.category.toLowerCase().startsWith(q) || (e.note && e.note.toLowerCase().startsWith(q)) || (e.voucherNo ?? '').toLowerCase().startsWith(q) || accountName.toLowerCase().startsWith(q);
       })
       .sort((a, b) => (a.date < b.date ? 1 : -1));
-  }, [expenses, flt, expSearch, expCatFilter, expenseCategoryLabel]);
+  }, [expenses, moneyAccounts, expSearch, expCatFilter, expenseCategoryLabel]);
+
+  const expenseRegisterDoc: ReportDoc = {
+    language: lang, shop: business.name, title: label('Expense Register', 'ব্যয় রেজিস্টার'), period: label('Filtered entries', 'ফিল্টার করা এন্ট্রি'),
+    sections: [{ title: label('Expenses', 'ব্যয়সমূহ'), rows: filteredExpensesList.map(e => ({
+      label: expenseCategoryLabel(e.category, e.customName),
+      sub: [fd(e.date), e.voucherNo ? `#${e.voucherNo}` : '', e.accountName ?? moneyAccounts.find(account => account.id === e.accountId)?.name ?? '', e.note ?? ''].filter(Boolean).join(' · '),
+      right: m(Math.abs(e.amount)), neg: true,
+    })) }],
+    total: { label: label('Total expenses', 'মোট ব্যয়'), value: m(filteredExpensesList.reduce((sum, e) => sum + Math.abs(e.amount), 0)), neg: true },
+    printedAt: printedAtStamp(lang), printLabel: label('Print', 'প্রিন্ট'),
+  };
+  const houseExpenseRegisterDoc: ReportDoc = {
+    language: lang, shop: business.name, title: label('House Expenses Register', 'বাসার খরচ রেজিস্টার'), period: label('All recorded entries', 'সকল নথিভুক্ত এন্ট্রি'),
+    sections: [{ title: label('House expenses', 'বাসার খরচ'), rows: houseExpenseRows.map(row => ({ label: row.description, sub: [row.transactionNo, fd(row.date), row.accountName, row.note].filter(Boolean).join(' · '), right: m(row.amount), neg: true })) }],
+    total: { label: label('Total house expenses', 'মোট বাসার খরচ'), value: m(houseExpenseRows.reduce((sum, row) => sum + row.amount, 0)), neg: true },
+    printedAt: printedAtStamp(lang), printLabel: label('Print', 'প্রিন্ট'),
+  };
+
+  const toggleReportType = (id: AccountReportType) => {
+    setGeneratedReport(null);
+    setSelectedReportTypes(current => current.includes(id) ? current.filter(item => item !== id) : [...current, id]);
+  };
+  const generateMultiReport = async () => {
+    if (reportDataLoading) return;
+    if (!selectedReportTypes.length) { showEntryError(lang, label('Select at least one report type.', 'অন্তত একটি রিপোর্টের ধরন নির্বাচন করুন।')); return; }
+    if (reportFrom && reportTo && reportFrom > reportTo) { showEntryError(lang, label('The start date must be before the end date.', 'শুরুর তারিখ শেষ তারিখের আগে হতে হবে।')); return; }
+    setReportGenerating(true);
+    try {
+      const from = reportFrom || '1900-01-01';
+      const to = reportTo || today();
+      const inRange = (date: string) => date >= from && date <= to;
+      const productMatches = (items?: { productId: string }[]) => !reportProductId || Boolean(items?.some(item => item.productId === reportProductId));
+      const selectedCustomer = customers.find(customer => customer.id === reportCustomerId);
+      const selectedSupplier = vendors.find(vendor => vendor.id === reportSupplierId);
+      const selectedProduct = products.find(product => product.id === reportProductId);
+      const sections: ReportDoc['sections'] = [];
+      const addSection = (type: AccountReportType, rows: ReportRow[]) => {
+        const option = ACCOUNT_REPORT_TYPES.find(item => item.id === type)!;
+        sections.push({ title: lang === 'bn' ? option.bn : option.en, rows });
+      };
+      for (const type of selectedReportTypes) {
+        if (type === 'sales') {
+          const rows = sales.filter(row => inRange(row.date) && (!reportCustomerId || row.customerId === reportCustomerId) && productMatches(row.items))
+            .map(row => { const party = customers.find(customer => customer.id === row.customerId); return { label: row.invoiceNo ?? row.id, sub: [row.date, party?.code, party?.name, row.items?.map(item => item.productName).join(', ')].filter(Boolean).join(' · '), right: m(row.total), neg: row.due > 0 }; });
+          addSection(type, rows);
+        } else if (type === 'purchases') {
+          const rows = purchases.filter(row => inRange(row.date) && (!reportSupplierId || row.vendorId === reportSupplierId) && productMatches(row.items))
+            .map(row => { const party = vendors.find(vendor => vendor.id === row.vendorId); return { label: row.invoiceNo ?? row.id, sub: [row.date, party?.code, party?.name, row.items?.map(item => item.productName).join(', ')].filter(Boolean).join(' · '), right: m(row.total), neg: row.due > 0 }; });
+          addSection(type, rows);
+        } else if (type === 'collections' || type === 'supplierPayments') {
+          const customerKind = type === 'collections';
+          const rowsSource = customerKind ? cTx : vTx;
+          const partyList = customerKind ? customers : vendors;
+          const partyFilter = customerKind ? reportCustomerId : reportSupplierId;
+          const rows = rowsSource.filter(row => row.kind === 'payment' && inRange(row.date) && (!partyFilter || row.partyId === partyFilter))
+            .map(row => { const party = partyList.find(item => item.id === row.partyId); return { label: row.transactionNo ?? row.ref ?? row.id, sub: [row.date, party?.code, party?.name, row.note, row.method].filter(Boolean).join(' · '), right: m(row.amount) }; });
+          addSection(type, rows);
+        } else if (type === 'deposits' || type === 'withdrawals') {
+          const sourceType = type === 'deposits' ? 'deposit' : 'withdrawal';
+          addSection(type, reportMoneyRows.filter(row => row.sourceType === sourceType && inRange(row.date)).map(row => ({ label: row.transactionNo, sub: [row.date, row.moneyAccount?.name, row.note].filter(Boolean).join(' · '), right: m(row.amount), neg: type === 'withdrawals' })));
+        } else if (type === 'expenses') {
+          addSection(type, expenses.filter(row => inRange(row.date)).map(row => ({ label: expenseCategoryLabel(row.category, row.customName), sub: [row.date, row.voucherNo, row.accountName, row.note].filter(Boolean).join(' · '), right: m(Math.abs(row.amount)), neg: true })));
+        } else if (type === 'houseExpenses') {
+          addSection(type, reportHouseRows.filter(row => inRange(row.date)).map(row => ({ label: row.description, sub: [row.transactionNo, row.date, row.accountName, row.note].filter(Boolean).join(' · '), right: m(row.amount), neg: true })));
+        } else if (type === 'inventory') {
+          addSection(type, products.filter(product => !reportProductId || product.id === reportProductId).map(product => ({ label: product.name, sub: [product.code, `${localeDigits(String(product.qty), lang)} ${product.uom}`].filter(Boolean).join(' · '), right: m(product.stockValue ?? product.qty * product.cost) })));
+        } else if (type === 'stockMovements') {
+          addSection(type, reportStockRows.filter(row => inRange(row.date) && (!reportProductId || row.productId === reportProductId)).map(row => {
+            const product = products.find(item => item.id === row.productId);
+            return { label: `${product?.name ?? row.productId} · ${row.type}`, sub: [row.date, row.bucket, row.note].filter(Boolean).join(' · '), right: m(row.value), neg: row.value < 0 };
+          }));
+        } else if (type === 'returns') {
+          addSection(type, returns.filter(row => inRange(row.date)).map(row => ({ label: row.returnNo ?? row.id, sub: `${row.date} · ${row.kind === 'sale' ? label('Sales return', 'বিক্রয় ফেরত') : label('Purchase return', 'ক্রয় ফেরত')}`, right: m(row.amount) })));
+        } else if (type === 'customerBalances') {
+          const rows = customers.filter(customer => (!reportCustomerId || customer.id === reportCustomerId) && (!reportProductId || sales.some(saleRow => saleRow.customerId === customer.id && saleRow.items?.some(item => item.productId === reportProductId))))
+            .map(customer => ({ label: `${customer.code ?? ''} ${customer.name}`.trim(), sub: localeDigits(customer.mobile, lang), right: m(bal('c', customer.id).balance) }));
+          addSection(type, rows);
+        } else if (type === 'supplierBalances') {
+          const rows = vendors.filter(vendor => (!reportSupplierId || vendor.id === reportSupplierId) && (!reportProductId || purchases.some(purchaseRow => purchaseRow.vendorId === vendor.id && purchaseRow.items?.some(item => item.productId === reportProductId))))
+            .map(vendor => ({ label: `${vendor.code ?? ''} ${vendor.name}`.trim(), sub: localeDigits(vendor.mobile, lang), right: m(bal('v', vendor.id).balance) }));
+          addSection(type, rows);
+        } else if (type === 'customers') {
+          addSection(type, customers.filter(customer => !reportCustomerId || customer.id === reportCustomerId).map(customer => ({ label: customer.name, sub: [customer.code, localeDigits(customer.mobile, lang), customer.address].filter(Boolean).join(' · '), right: m(bal('c', customer.id).balance) })));
+        } else if (type === 'suppliers') {
+          addSection(type, vendors.filter(vendor => !reportSupplierId || vendor.id === reportSupplierId).map(vendor => ({ label: vendor.name, sub: [vendor.code, localeDigits(vendor.mobile, lang), vendor.address].filter(Boolean).join(' · '), right: m(bal('v', vendor.id).balance) })));
+        } else if (type === 'transfers') {
+          addSection(type, moneyTransfers.filter(row => inRange(row.date)).map(row => ({ label: row.transferNo, sub: `${row.date} · ${row.from} → ${row.to}${row.note ? ` · ${row.note}` : ''}`, right: m(row.amount) })));
+        } else if (type === 'cashflow') {
+          const flow = await api.cashflow(from, to);
+          addSection(type, [
+            { label: label('Customer receipts', 'গ্রাহকের কাছ থেকে আদায়'), right: m(flow.customerReceipts) },
+            { label: label('Supplier payments', 'সরবরাহকারীকে পরিশোধ'), right: m(flow.supplierPayments), neg: true },
+            { label: label('Expenses', 'ব্যয়'), right: m(flow.expensePayments), neg: true },
+            { label: label('Other inflows', 'অন্যান্য জমা'), right: m(flow.otherInflows) },
+            { label: label('Other outflows', 'অন্যান্য উত্তোলন'), right: m(flow.otherOutflows), neg: true },
+            { label: label('Net cash flow', 'নিট নগদ প্রবাহ'), right: m(flow.netCashFlow), neg: flow.netCashFlow < 0, bold: true },
+          ]);
+        } else if (type === 'profitLoss') {
+          const finance = await api.finance('range', from, to);
+          addSection(type, [
+            { label: label('Net sales', 'নিট বিক্রয়'), right: m(finance.netSales) },
+            { label: label('Cost of goods sold', 'বিক্রিত পণ্যের খরচ'), right: m(finance.cogs), neg: true },
+            { label: label('Gross profit', 'মোট মুনাফা'), right: m(finance.grossProfit), bold: true },
+            { label: label('Expenses', 'ব্যয়'), right: m(finance.expense), neg: true },
+            { label: label('Net profit', 'নিট লাভ'), right: m(finance.netProfit), neg: finance.netProfit < 0, bold: true },
+          ]);
+        } else if (type === 'journal') {
+          const journal = await api.journalEntries(from, to);
+          addSection(type, journal.entries.flatMap(entry => entry.lines.map(line => ({ label: `${entry.reference} · ${line.account}`, sub: `${entry.date} · ${line.description}`, right: `${line.debit ? `${label('Dr', 'ডেবিট')} ${m(line.debit)}` : ''}${line.debit && line.credit ? ' · ' : ''}${line.credit ? `${label('Cr', 'ক্রেডিট')} ${m(line.credit)}` : ''}` }))));
+        }
+      }
+      const period = reportFrom || reportTo ? `${reportFrom || '1900-01-01'} – ${reportTo || today()}` : label('All available dates', 'সকল উপলব্ধ তারিখ');
+      const meta = [
+        selectedReportTypes.some(type => type === 'customerBalances' || type === 'supplierBalances' || type === 'customers' || type === 'suppliers')
+          ? { label: label('Balance basis', 'ব্যালেন্সের ভিত্তি'), value: label('Current balances as of today; date range applies only to transaction reports.', 'আজকের বর্তমান ব্যালেন্স; তারিখের সীমা শুধু লেনদেনের রিপোর্টে প্রযোজ্য।') } : null,
+        selectedCustomer ? { label: label('Customer', 'গ্রাহক'), value: `${selectedCustomer.code ?? ''} ${selectedCustomer.name}`.trim() } : null,
+        selectedSupplier ? { label: label('Supplier', 'সরবরাহকারী'), value: `${selectedSupplier.code ?? ''} ${selectedSupplier.name}`.trim() } : null,
+        selectedProduct ? { label: label('Product', 'পণ্য'), value: `${selectedProduct.code ?? ''} ${selectedProduct.name}`.trim() } : null,
+      ].filter((item): item is { label: string; value: string } => Boolean(item));
+      const doc: ReportDoc = { language: lang, shop: business.name, title: customReportTitle.trim() || label('Combined business reports', 'সমন্বিত ব্যবসায়িক প্রতিবেদন'), period, meta, sections,
+        printedAt: printedAtStamp(lang), printLabel: label('Print / Save PDF', 'প্রিন্ট / PDF সংরক্ষণ') };
+      setGeneratedReport(doc);
+    } catch (error) {
+      showEntryError(lang, error instanceof Error ? error.message : label('Could not generate report.', 'রিপোর্ট তৈরি করা যায়নি।'));
+    } finally { setReportGenerating(false); }
+  };
+
+  if (reportCenterOpen) return <View style={{ flex: 1, backgroundColor: '#F1F5F9' }}>
+    <View style={{ backgroundColor: '#123D64', paddingHorizontal: 18, paddingVertical: 15, flexDirection: 'row', alignItems: 'center', gap: 12 }}>
+      <TouchableOpacity accessibilityRole="button" onPress={() => { setReportCenterOpen(false); setGeneratedReport(null); }} style={{ paddingVertical: 8, paddingRight: 6 }}><Text style={{ color: '#FFFFFF', fontSize: 16, fontWeight: '700' }}>‹ {label('Back', 'ফিরে যান')}</Text></TouchableOpacity>
+      <View style={{ flex: 1 }}><Text style={{ color: '#FFFFFF', fontSize: 21, fontWeight: '800' }}>{label('Report center', 'রিপোর্ট কেন্দ্র')}</Text><Text style={{ color: '#D6E7F5', fontSize: 12 }}>{label('Choose multiple reports and apply shared filters.', 'একাধিক রিপোর্ট বেছে নিয়ে সাধারণ ফিল্টার প্রয়োগ করুন।')}</Text></View>
+    </View>
+    <ScrollView keyboardShouldPersistTaps="handled" contentContainerStyle={{ width: '100%', maxWidth: 1100, alignSelf: 'center', padding: 16, gap: 12 }}>
+      <View style={{ backgroundColor: '#FFFFFF', borderRadius: 14, borderWidth: 1, borderColor: '#E2E8F0', padding: 14 }}>
+        <Text style={{ color: '#123D64', fontSize: 16, fontWeight: '800', marginBottom: 10 }}>{label('Customize report', 'রিপোর্ট কাস্টমাইজ করুন')}</Text>
+        <Field label={label('Report title (optional)', 'রিপোর্টের শিরোনাম (ঐচ্ছিক)')} value={customReportTitle} onChange={value => { setCustomReportTitle(value); setGeneratedReport(null); }} />
+        <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 10 }}>
+          <View style={{ flex: 1, minWidth: 190 }}><DateField label={label('From date', 'শুরুর তারিখ')} value={reportFrom} onChange={value => { setReportFrom(value); setGeneratedReport(null); }} clearable /></View>
+          <View style={{ flex: 1, minWidth: 190 }}><DateField label={label('To date', 'শেষ তারিখ')} value={reportTo} onChange={value => { setReportTo(value); setGeneratedReport(null); }} clearable minDate={reportFrom || undefined} /></View>
+        </View>
+        <Text style={{ color: '#475569', fontSize: 12, fontWeight: '700', marginBottom: 5 }}>{label('Optional filters (apply where relevant)', 'ঐচ্ছিক ফিল্টার (প্রযোজ্য রিপোর্টে প্রয়োগ হবে)')}</Text>
+        <SearchableSelect items={customers} value={reportCustomerId} onPick={id => { setReportCustomerId(id); setGeneratedReport(null); }} placeholder={label('Select customer', 'গ্রাহক নির্বাচন করুন')} match={matchParty} subOf={item => item.code ? `${label('Code', 'কোড')}: ${item.code}` : item.mobile} />
+        <SearchableSelect items={vendors} value={reportSupplierId} onPick={id => { setReportSupplierId(id); setGeneratedReport(null); }} placeholder={label('Select supplier', 'সরবরাহকারী নির্বাচন করুন')} match={matchParty} subOf={item => item.code ? `${label('Code', 'কোড')}: ${item.code}` : item.mobile} />
+        <SearchableSelect items={products} value={reportProductId} onPick={id => { setReportProductId(id); setGeneratedReport(null); }} placeholder={label('Select product', 'পণ্য নির্বাচন করুন')} match={matchProduct} subOf={item => item.code} />
+      </View>
+      <View style={{ backgroundColor: '#FFFFFF', borderRadius: 14, borderWidth: 1, borderColor: '#E2E8F0', padding: 14 }}>
+        <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 10, marginBottom: 10 }}>
+          <View><Text style={{ color: '#123D64', fontSize: 16, fontWeight: '800' }}>{label('Report types', 'রিপোর্টের ধরন')}</Text><Text style={{ color: '#64748B', fontSize: 12 }}>{selectedReportTypes.length} {label('selected', 'টি নির্বাচিত')}</Text></View>
+          <View style={{ flexDirection: 'row', gap: 7 }}><Btn kind="ghost" label={label('Select all', 'সব নির্বাচন')} onPress={() => { setSelectedReportTypes(ACCOUNT_REPORT_TYPES.map(item => item.id)); setGeneratedReport(null); }} /><Btn kind="ghost" label={label('Clear', 'মুছুন')} onPress={() => { setSelectedReportTypes([]); setGeneratedReport(null); }} /></View>
+        </View>
+        <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8 }}>
+          {ACCOUNT_REPORT_TYPES.map(option => { const selected = selectedReportTypes.includes(option.id); return <TouchableOpacity key={option.id} accessibilityRole="checkbox" accessibilityState={{ checked: selected }} onPress={() => toggleReportType(option.id)} style={{ borderWidth: 1, borderColor: selected ? '#1D4ED8' : '#CBD5E1', backgroundColor: selected ? '#EFF6FF' : '#FFFFFF', borderRadius: 10, paddingHorizontal: 11, paddingVertical: 9 }}><Text style={{ color: selected ? '#1D4ED8' : '#334155', fontWeight: '700' }}>{selected ? '✓ ' : ''}{lang === 'bn' ? option.bn : option.en}</Text></TouchableOpacity>; })}
+        </View>
+      </View>
+      <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8 }}>
+        <Btn icon={icons.report} label={reportDataLoading ? label('Loading data…', 'তথ্য লোড হচ্ছে…') : reportGenerating ? label('Generating…', 'তৈরি হচ্ছে…') : label('Generate preview', 'প্রিভিউ তৈরি করুন')} onPress={() => { if (!reportGenerating) void generateMultiReport(); }} />
+        {generatedReport ? <>
+          <Btn kind="ghost" icon={icons.print} label={label('Print / Save PDF', 'প্রিন্ট / PDF সংরক্ষণ')} onPress={() => { if (!printReport(generatedReport)) Alert.alert(label('Could not open print dialog', 'প্রিন্ট খোলা যায়নি')); }} />
+          <Btn kind="ghost" icon={icons.excel} label={label('Download Excel (CSV)', 'এক্সেল ডাউনলোড (CSV)')} onPress={() => { downloadReportCSV(generatedReport, `business_reports_${today()}.csv`); }} />
+        </> : null}
+      </View>
+      {reportDataLoading ? <Text style={{ color: '#64748B' }}>{label('Loading report data…', 'রিপোর্টের তথ্য লোড হচ্ছে…')}</Text> : null}
+      {generatedReport ? <View style={{ gap: 10 }}>
+        <View style={{ backgroundColor: '#FFFFFF', borderRadius: 14, borderWidth: 1, borderColor: '#CBD5E1', padding: 14 }}><Text style={{ color: '#0F172A', fontSize: 18, fontWeight: '800' }}>{generatedReport.title}</Text><Text style={{ color: '#64748B', marginTop: 3 }}>{generatedReport.period}</Text>{generatedReport.meta?.map((item, index) => <Text key={index} style={{ color: '#64748B', marginTop: 3 }}>{item.label}: {item.value}</Text>)}</View>
+        {generatedReport.sections.map((section, index) => <View key={`${section.title}-${index}`} style={{ backgroundColor: '#FFFFFF', borderRadius: 12, borderWidth: 1, borderColor: '#E2E8F0', padding: 13 }}><Text style={{ color: '#123D64', fontWeight: '800', marginBottom: 7 }}>{section.title} · {section.rows.length}</Text>{section.rows.slice(0, 6).map((row, rowIndex) => <Row key={`${index}-${rowIndex}`} left={row.label} sub={row.sub} right={row.right} neg={row.neg} />)}{section.rows.length > 6 ? <Text style={{ color: '#64748B', marginTop: 6 }}>{label(`and ${section.rows.length - 6} more rows`, `আরও ${section.rows.length - 6}টি সারি`)}</Text> : null}{section.rows.length === 0 ? <Empty /> : null}</View>)}
+      </View> : null}
+    </ScrollView>
+  </View>;
+
+  const isJournalReport = reportViewDoc?.title === 'Journal entries' || reportViewDoc?.title === 'জার্নাল এন্ট্রি';
+  const journalAccounts = [...new Set(journalData?.entries.flatMap(entry => entry.lines.map(line => line.account)) ?? [])].sort((a, b) => a.localeCompare(b));
+  const visibleJournalEntries = (journalData?.entries ?? []).filter(entry => {
+    const status = entry.status ?? 'posted';
+    const query = journalSearch.trim().toLocaleLowerCase();
+    const matchesSearch = !query || `${entry.reference} ${entry.date} ${entry.lines.map(line => `${line.account} ${line.description}`).join(' ')}`.toLocaleLowerCase().includes(query);
+    return matchesSearch && (!journalAccountFilter || entry.lines.some(line => line.account === journalAccountFilter)) && (journalStatusFilter === 'all' || status === journalStatusFilter);
+  });
 
   if (reportViewDoc) return (<>
     <View style={{ flex: 1, backgroundColor: '#F1F5F9' }}>
@@ -822,7 +1045,71 @@ export function AccountsDashboard({ go, focus, onFocusDone }: AccountsDashboardP
             <TouchableOpacity onPress={() => setJournalComposer({})} style={{ backgroundColor: '#1D4ED8', borderRadius: 9, paddingHorizontal: 13, paddingVertical: 10 }}><Text style={{ color: '#fff', fontWeight: '700' }}>{lang === 'bn' ? 'নতুন জার্নাল এন্ট্রি' : 'New journal entry'}</Text></TouchableOpacity>
             <TouchableOpacity onPress={() => setChartModalOpen(true)} style={{ backgroundColor: '#E2E8F0', borderRadius: 9, paddingHorizontal: 13, paddingVertical: 10 }}><Text style={{ color: '#1E293B', fontWeight: '700' }}>{lang === 'bn' ? 'হিসাবের চার্ট' : 'Chart of accounts'}</Text></TouchableOpacity>
           </View>}
-          {journalData?.entries.filter(e => e.editable && e.entryId).map(e => <TouchableOpacity key={e.entryId} onPress={() => setJournalComposer({ initial: { id: e.entryId!, entryNo: e.reference, date: e.date, memo: e.lines[0]?.description.split(' · ')[0] ?? '', sourceType: e.sourceType ?? 'manual', sourceId: e.sourceId, sourceRef: e.sourceRef, active: true, lines: e.lines.map(l => ({ accountId: l.accountId ?? '', description: l.description, debit: l.debit, credit: l.credit })) } })} style={{ alignSelf: 'flex-end', marginTop: 7, backgroundColor: '#EFF6FF', paddingHorizontal: 10, paddingVertical: 7, borderRadius: 8 }}><Text style={{ color: '#1D4ED8', fontWeight: '700' }}>{lang === 'bn' ? `সম্পাদনা ${e.reference}` : `Edit ${e.reference}`}</Text></TouchableOpacity>)}
+          {isJournalReport && journalData ? <View style={{ marginTop: 16, gap: 12 }}>
+            <View style={{ gap: 9, padding: 13, backgroundColor: '#F8FAFC', borderWidth: 1, borderColor: '#E2E8F0', borderRadius: 12 }}>
+              <Text style={{ color: '#0F172A', fontSize: 16, fontWeight: '800' }}>{lang === 'bn' ? 'জার্নাল ফিল্টার' : 'Journal filters'}</Text>
+              <TextInput value={journalSearch} onChangeText={setJournalSearch} placeholder={lang === 'bn' ? 'জার্নাল নম্বর, অ্যাকাউন্ট বা বিবরণ খুঁজুন' : 'Search journal, account or description'} placeholderTextColor="#94A3B8" style={{ minHeight: 44, borderWidth: 1, borderColor: '#CBD5E1', backgroundColor: '#FFFFFF', borderRadius: 9, paddingHorizontal: 12, color: '#0F172A' }} />
+              <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 6 }}>
+                {[['all', lang === 'bn' ? 'সব স্ট্যাটাস' : 'All statuses'], ['draft', lang === 'bn' ? 'খসড়া' : 'Draft'], ['posted', lang === 'bn' ? 'পোস্ট করা' : 'Posted'], ['cancelled', lang === 'bn' ? 'বাতিল' : 'Cancelled']].map(([key, title]) => <TouchableOpacity key={key} onPress={() => setJournalStatusFilter(key)} style={{ paddingHorizontal: 10, paddingVertical: 7, borderRadius: 16, backgroundColor: journalStatusFilter === key ? '#DBEAFE' : '#FFFFFF', borderWidth: 1, borderColor: journalStatusFilter === key ? '#2563EB' : '#CBD5E1' }}><Text style={{ color: journalStatusFilter === key ? '#1D4ED8' : '#475569', fontWeight: '700', fontSize: 12 }}>{title}</Text></TouchableOpacity>)}
+              </View>
+              {journalAccounts.length ? <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: 6 }}>
+                {[['', lang === 'bn' ? 'সব অ্যাকাউন্ট' : 'All accounts'], ...journalAccounts.map(account => [account, account])].map(([key, title]) => <TouchableOpacity key={key || 'all'} onPress={() => setJournalAccountFilter(key)} style={{ paddingHorizontal: 10, paddingVertical: 7, borderRadius: 16, backgroundColor: journalAccountFilter === key ? '#DBEAFE' : '#FFFFFF', borderWidth: 1, borderColor: journalAccountFilter === key ? '#2563EB' : '#CBD5E1' }}><Text style={{ color: journalAccountFilter === key ? '#1D4ED8' : '#475569', fontWeight: '700', fontSize: 12 }}>{title}</Text></TouchableOpacity>)}
+              </ScrollView> : null}
+            </View>
+            {selectedJournalEntry ? <View style={{ backgroundColor: '#FFFFFF', borderWidth: 1, borderColor: '#CBD5E1', borderRadius: 4, overflow: 'hidden' }}>
+              <View style={{ paddingHorizontal: 18, paddingVertical: 14, borderBottomWidth: 1, borderBottomColor: '#D8DEE5', flexDirection: 'row', alignItems: 'center', gap: 12 }}>
+                <TouchableOpacity onPress={() => setJournalComposer({})} style={{ borderWidth: 1, borderColor: '#7C3AED', borderRadius: 6, paddingHorizontal: 17, paddingVertical: 9 }}><Text style={{ color: '#6D28D9', fontSize: 15 }}>{lang === 'bn' ? 'নতুন' : 'New'}</Text></TouchableOpacity>
+                <View style={{ flex: 1 }}><Text style={{ color: '#0F766E', fontSize: 15, fontWeight: '700' }}>{lang === 'bn' ? 'জার্নাল এন্ট্রি' : 'Journal Entries'}</Text><Text style={{ color: '#334155', fontSize: 16, marginTop: 2 }}>{selectedJournalEntry.reference} <Text style={{ color: '#94A3B8' }}>⚙</Text></Text></View>
+                <TouchableOpacity onPress={() => setSelectedJournalEntry(null)} style={{ paddingHorizontal: 10, paddingVertical: 8 }}><Text style={{ color: '#475569', fontWeight: '700' }}>‹ {lang === 'bn' ? 'তালিকায় ফিরুন' : 'Back to list'}</Text></TouchableOpacity>
+              </View>
+              {selectedJournalEntry.editable && selectedJournalEntry.entryId ? <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8, paddingHorizontal: 18, paddingVertical: 10, borderBottomWidth: 1, borderBottomColor: '#D8DEE5', backgroundColor: '#F8FAFC' }}>
+                {(selectedJournalEntry.status ?? 'posted') === 'draft' ? <>
+                  <Btn label={lang === 'bn' ? 'সম্পাদনা' : 'Edit'} onPress={() => setJournalComposer({ initial: { id: selectedJournalEntry.entryId!, entryNo: selectedJournalEntry.lines[0]?.journalNo ?? selectedJournalEntry.reference, date: selectedJournalEntry.date, memo: selectedJournalEntry.lines[0]?.description.split(' · ')[0] ?? '', sourceType: selectedJournalEntry.sourceType ?? 'manual', sourceId: selectedJournalEntry.sourceId, sourceRef: selectedJournalEntry.sourceRef, active: true, status: 'draft', lines: selectedJournalEntry.lines.map(line => ({ accountId: line.accountId ?? '', description: line.description.includes(' · ') ? line.description.slice(line.description.indexOf(' · ') + 3) : '', debit: line.debit, credit: line.credit })) } })} />
+                  <Btn kind="ghost" label={lang === 'bn' ? 'পোস্ট করুন' : 'Post'} onPress={() => changeJournalStatus(selectedJournalEntry, 'posted')} />
+                </> : <Btn kind="ghost" label={lang === 'bn' ? 'খসড়ায় ফেরত' : 'Reset to Draft'} onPress={() => changeJournalStatus(selectedJournalEntry, 'draft')} />}
+                {(selectedJournalEntry.status ?? 'posted') !== 'cancelled' ? <Btn kind="danger" label={lang === 'bn' ? 'বাতিল করুন' : 'Cancel Entry'} onPress={() => changeJournalStatus(selectedJournalEntry, 'cancelled')} /> : null}
+              </View> : null}
+              <View style={{ padding: 22 }}>
+                <Text style={{ color: '#111827', fontSize: 38, fontWeight: '600', marginBottom: 17 }}>{selectedJournalEntry.lines[0]?.journalNo ?? selectedJournalEntry.reference}</Text>
+                <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 26, marginBottom: 26 }}>
+                  <View style={{ flex: 1, minWidth: 250, gap: 13 }}><View style={{ flexDirection: 'row', gap: 16 }}><Text style={{ width: 105, color: '#111827', fontWeight: '700' }}>{lang === 'bn' ? 'রেফারেন্স' : 'Reference'}</Text><Text style={{ color: '#475569' }}>{selectedJournalEntry.sourceRef ?? selectedJournalEntry.reference}</Text></View></View>
+                  <View style={{ flex: 1, minWidth: 270, gap: 13 }}>
+                    <View style={{ flexDirection: 'row', gap: 16 }}><Text style={{ width: 125, color: '#6B7280', fontWeight: '700' }}>{lang === 'bn' ? 'হিসাবের তারিখ' : 'Accounting Date'}</Text><Text style={{ color: '#475569' }}>{fd(selectedJournalEntry.date)}</Text></View>
+                    <View style={{ flexDirection: 'row', gap: 16 }}><Text style={{ width: 125, color: '#6B7280', fontWeight: '700' }}>{lang === 'bn' ? 'জার্নাল' : 'Journal'}</Text><Text style={{ color: '#475569' }}>{selectedJournalEntry.sourceType === 'manual' ? (lang === 'bn' ? 'ম্যানুয়াল জার্নাল' : 'Miscellaneous Operations') : selectedJournalEntry.lines.find(line => line.accountType === 'asset')?.account ?? (lang === 'bn' ? 'স্বয়ংক্রিয় জার্নাল' : 'Automatic Journal')}</Text></View>
+                  </View>
+                </View>
+                <View style={{ flexDirection: 'row', borderBottomWidth: 1, borderBottomColor: '#CBD5E1', marginBottom: 0 }}>
+                  <TouchableOpacity onPress={() => setJournalDetailTab('items')} style={{ paddingHorizontal: 17, paddingVertical: 11, borderTopWidth: 1, borderLeftWidth: 1, borderRightWidth: 1, borderColor: journalDetailTab === 'items' ? '#A78BFA' : '#D1D5DB', backgroundColor: journalDetailTab === 'items' ? '#FFFFFF' : '#F8FAFC' }}><Text style={{ color: '#334155' }}>{lang === 'bn' ? 'জার্নাল আইটেম' : 'Journal Items'}</Text></TouchableOpacity>
+                  <TouchableOpacity onPress={() => setJournalDetailTab('info')} style={{ paddingHorizontal: 17, paddingVertical: 11, borderTopWidth: 1, borderLeftWidth: 1, borderRightWidth: 1, borderColor: journalDetailTab === 'info' ? '#A78BFA' : '#D1D5DB', backgroundColor: journalDetailTab === 'info' ? '#FFFFFF' : '#F8FAFC' }}><Text style={{ color: '#334155' }}>{lang === 'bn' ? 'অন্যান্য তথ্য' : 'Other Info'}</Text></TouchableOpacity>
+                </View>
+                {journalDetailTab === 'items' ? <ScrollView horizontal showsHorizontalScrollIndicator contentContainerStyle={{ minWidth: 880 }}>
+                  <View style={{ flex: 1 }}>
+                    <View style={{ flexDirection: 'row', backgroundColor: '#F8FAFC', borderBottomWidth: 1, borderColor: '#CBD5E1', paddingVertical: 12, paddingHorizontal: 9 }}>
+                      {[lang === 'bn' ? 'সম্পদ বিভাগ' : 'Asset Category', lang === 'bn' ? 'অ্যাকাউন্ট' : 'Account', lang === 'bn' ? 'লেবেল' : 'Label', lang === 'bn' ? 'ডেবিট' : 'Debit', lang === 'bn' ? 'ক্রেডিট' : 'Credit'].map((heading, i) => <Text key={heading} style={{ flex: [1.1, 2, 4, 1.4, 1.4][i], textAlign: i >= 3 ? 'right' : 'left', color: '#111827', fontWeight: '700', paddingHorizontal: 5 }}>{heading}</Text>)}
+                    </View>
+                    {selectedJournalEntry.lines.map((line, index) => <View key={`${line.accountId}-${index}`} style={{ flexDirection: 'row', paddingVertical: 12, paddingHorizontal: 9, borderBottomWidth: 1, borderColor: '#D1D5DB', alignItems: 'center' }}>
+                      <Text style={{ flex: 1.1, color: '#64748B', paddingHorizontal: 5 }}>{line.accountType ?? ''}</Text>
+                      <Text style={{ flex: 2, color: '#475569', paddingHorizontal: 5 }}>{line.accountCode ? `${line.accountCode} ` : ''}{line.account}</Text>
+                      <Text style={{ flex: 4, color: '#475569', paddingHorizontal: 5 }}>{line.description}</Text>
+                      <Text style={{ flex: 1.4, color: '#475569', textAlign: 'right', paddingHorizontal: 5 }}>{m(line.debit)}</Text>
+                      <Text style={{ flex: 1.4, color: '#475569', textAlign: 'right', paddingHorizontal: 5 }}>{m(line.credit)}</Text>
+                    </View>)}
+                    <View style={{ flexDirection: 'row', justifyContent: 'flex-end', gap: 24, paddingVertical: 13, paddingHorizontal: 15 }}><Text style={{ color: '#334155', fontWeight: '800' }}>{lang === 'bn' ? 'ডেবিট' : 'Debit'}: {m(selectedJournalEntry.debitTotal)}</Text><Text style={{ color: '#334155', fontWeight: '800' }}>{lang === 'bn' ? 'ক্রেডিট' : 'Credit'}: {m(selectedJournalEntry.creditTotal)}</Text></View>
+                  </View>
+                </ScrollView> : <View style={{ minHeight: 120, padding: 17, gap: 12, backgroundColor: '#FFFFFF', borderWidth: 1, borderColor: '#E2E8F0' }}>
+                  <Text style={{ color: '#475569' }}>{lang === 'bn' ? 'বিবরণ' : 'Memo'}: {selectedJournalEntry.lines[0]?.description.split(' · ')[0] ?? ''}</Text>
+                  <Text style={{ color: '#475569' }}>{lang === 'bn' ? 'উৎসের ধরন' : 'Source type'}: {selectedJournalEntry.sourceType}</Text>
+                  <Text style={{ color: '#475569' }}>{lang === 'bn' ? 'স্ট্যাটাস' : 'Status'}: {(selectedJournalEntry.status ?? 'posted').toUpperCase()}</Text>
+                </View>}
+              </View>
+            </View> : <View style={{ gap: 8 }}>
+              {visibleJournalEntries.map(entry => <TouchableOpacity key={entry.entryId ?? entry.reference} onPress={() => setSelectedJournalEntry(entry)} style={{ padding: 13, backgroundColor: '#FFFFFF', borderWidth: 1, borderColor: '#E2E8F0', borderRadius: 11, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 10 }}>
+                <View style={{ flex: 1 }}><Text style={{ color: '#1D4ED8', fontWeight: '800' }}>{entry.reference}</Text><Text style={{ color: '#334155', marginTop: 3 }}>{entry.date} · {entry.lines.map(line => line.account).join(', ')}</Text><Text style={{ color: '#64748B', fontSize: 12, marginTop: 3 }}>{entry.lines[0]?.description}</Text></View>
+                <View style={{ alignItems: 'flex-end' }}><Text style={{ color: '#0F172A', fontWeight: '800' }}>{m(entry.debitTotal)}</Text><Text style={{ color: (entry.status ?? 'posted') === 'posted' ? '#15803D' : (entry.status ?? '') === 'draft' ? '#B45309' : '#B91C1C', fontSize: 11, fontWeight: '800', marginTop: 4 }}>{entry.status ?? 'posted'}</Text></View>
+              </TouchableOpacity>)}
+              {!visibleJournalEntries.length ? <Text style={{ textAlign: 'center', padding: 20, color: '#64748B' }}>{lang === 'bn' ? 'এই ফিল্টারে কোনো জার্নাল নেই।' : 'No journal entries match these filters.'}</Text> : null}
+            </View>}
+          </View> : null}
           {reportViewDoc.title === 'Profit & Loss Statement' && <View style={{ flexDirection: 'row', alignItems: 'flex-end', flexWrap: 'wrap', gap: 10, marginTop: 18, padding: 14, borderRadius: 12, backgroundColor: '#F8FAFC', borderWidth: 1, borderColor: '#E2E8F0' }}>
             <View style={{ flex: 1, minWidth: 145 }}><DateField label={lang === 'bn' ? 'শুরুর তারিখ' : 'From date'} value={profitFrom} onChange={setProfitFrom} clearable /></View>
             <View style={{ flex: 1, minWidth: 145 }}><DateField label={lang === 'bn' ? 'শেষ তারিখ' : 'To date'} value={profitTo} onChange={setProfitTo} clearable minDate={profitFrom || undefined} /></View>
@@ -866,7 +1153,7 @@ export function AccountsDashboard({ go, focus, onFocusDone }: AccountsDashboardP
               </TouchableOpacity>)}
               {!generalLedgerData.accounts.length && <Text style={{ color: '#64748B', paddingVertical: 18, textAlign: 'center' }}>{lang === 'bn' ? 'কোনো অ্যাকাউন্ট লেনদেন পাওয়া যায়নি।' : 'No account activity found.'}</Text>}
             </View>
-          ) : reportViewDoc.sections.map((section, sectionIndex) => (
+          ) : !isJournalReport && reportViewDoc.sections.map((section, sectionIndex) => (
             <View key={`section-${sectionIndex}`} style={{ marginTop: 20 }}>
               {!!section.title && <Text style={{ color: '#123B5D', fontSize: 15, fontWeight: '800', marginBottom: 6 }}>{section.title}</Text>}
               {section.rows.map((row, rowIndex) => (
@@ -953,18 +1240,7 @@ export function AccountsDashboard({ go, focus, onFocusDone }: AccountsDashboardP
 
           <TouchableOpacity
             style={styles.headerActionBtnTranslucent}
-            onPress={() => setExpenseFormItem(null)}
-            activeOpacity={0.85}
-          >
-            <AppIcon name={icons.add} size={16} iconColor="#FFFFFF" />
-            <Text style={styles.headerActionBtnTranslucentText}>
-              {lang === 'bn' ? 'নতুন খরচ' : 'Add Expense'}
-            </Text>
-          </TouchableOpacity>
-
-          <TouchableOpacity
-            style={styles.headerActionBtnTranslucent}
-            onPress={() => setActiveTab('reports')}
+            onPress={() => setReportCenterOpen(true)}
             activeOpacity={0.85}
           >
             <AppIcon name={icons.print} size={16} iconColor="#FFFFFF" />
@@ -1016,7 +1292,7 @@ export function AccountsDashboard({ go, focus, onFocusDone }: AccountsDashboardP
 
         <TouchableOpacity onPress={downloadActiveReport} style={{ alignSelf: 'flex-end', flexDirection: 'row', alignItems: 'center', gap: 7, marginTop: 10, paddingHorizontal: 13, paddingVertical: 9, borderRadius: 10, backgroundColor: '#EAF1F7' }}>
           <AppIcon name={icons.excel} size={17} iconColor="#123B5D" />
-          <Text style={{ color: '#123B5D', fontSize: 13, fontWeight: '700' }}>{lang === 'bn' ? 'এই পাতার রিপোর্ট ডাউনলোড' : 'Download this page report'}</Text>
+          <Text style={{ color: '#123B5D', fontSize: 13, fontWeight: '700' }}>{lang === 'bn' ? 'একাধিক রিপোর্ট ডাউনলোড' : 'Download multiple reports'}</Text>
         </TouchableOpacity>
 
         {/* Business Health Quick Badge */}
@@ -1905,11 +2181,22 @@ export function AccountsDashboard({ go, focus, onFocusDone }: AccountsDashboardP
               <Text style={styles.blockTitle}>{lang === 'bn' ? 'দোকান পরিচালনা ব্যয়ের রেজিস্টার' : 'Expense Register'}</Text>
               
             </View>
-            <TouchableOpacity style={styles.primaryActionButton} onPress={() => setExpenseFormItem(null)}>
-              <AppIcon name={icons.add} size={18} iconColor="#fff" />
-              <Text style={styles.primaryActionText}>{lang === 'bn' ? 'নতুন খরচ যোগ করুন' : 'Add Expense'}</Text>
-            </TouchableOpacity>
           </View>
+
+          <ExpenseModal
+            inline
+            init={expenseFormItem ?? null}
+            onClose={() => setExpenseFormItem(null)}
+            onSave={async val => {
+              for (let index = 0; index < val.payments.length; index += 1) {
+                const payment = val.payments[index];
+                await saveExpense({ id: index === 0 ? val.id : undefined, category: val.category, customName: val.customName, amount: payment.amount, accountId: payment.accountId, date: val.date, note: val.note });
+              }
+              setExpenseFormItem(null);
+            }}
+            onTrash={async id => { await deleteExpense(id); setExpenseFormItem(null); }}
+          />
+          <EntryReportButtons doc={expenseRegisterDoc} filename={`expense_register_${today()}.csv`} />
 
           {/* Search & Category Filter */}
           <View style={[styles.searchBarContainer, { marginBottom: 12 }]}>
@@ -1933,7 +2220,7 @@ export function AccountsDashboard({ go, focus, onFocusDone }: AccountsDashboardP
                   <TouchableOpacity
                     key={e.id}
                     style={styles.expenseItemRow}
-                    onPress={() => setExpenseFormItem(e)}
+                    onPress={() => { if (!e.stockAdjustment) setExpenseFormItem(e); }}
                   >
                     <View style={styles.expIconBox}>
                       <AppIcon name={icons.expense} size={18} iconColor="#D97706" />
@@ -1941,11 +2228,14 @@ export function AccountsDashboard({ go, focus, onFocusDone }: AccountsDashboardP
                     <View style={{ flex: 1 }}>
                       <Text style={styles.expTitle}>{label}</Text>
                       <Text style={styles.expSub}>
-                        {fd(e.date)}
+                        {fd(e.date)} · {e.stockAdjustment ? (lang === 'bn' ? 'স্বয়ংক্রিয়' : 'Automated') : (lang === 'bn' ? 'ম্যানুয়াল এন্ট্রি' : 'Manual entry')}{e.voucherNo ? ` · #${e.voucherNo}` : ''}
+                      </Text>
+                      <Text style={{ color: '#64748B', fontSize: 12, marginTop: 3 }}>
+                        {lang === 'bn' ? 'অ্যাকাউন্ট: ' : 'Account: '}{e.accountName ?? moneyAccounts.find(account => account.id === e.accountId)?.name ?? (lang === 'bn' ? 'অজানা' : 'Unknown')}
                       </Text>
                       {e.note ? <Text style={{ color: '#64748B', fontSize: 12, marginTop: 3 }} numberOfLines={2}>{lang === 'bn' ? 'বিবরণ: ' : 'Description: '}{e.note}</Text> : null}
                     </View>
-                    <Text style={styles.expAmt}>- {m(e.amount)}</Text>
+                    <Text style={[styles.expAmt, { color: e.amount < 0 ? '#047857' : '#DC2626' }]}>{e.amount < 0 ? '+' : '−'} {m(Math.abs(e.amount))}</Text>
                   </TouchableOpacity>
                 );
               })
@@ -1961,20 +2251,15 @@ export function AccountsDashboard({ go, focus, onFocusDone }: AccountsDashboardP
               <Text style={styles.blockTitle}>{lang === 'bn' ? 'বাসার খরচ উত্তোলন রেজিস্টার' : 'House Expenses Register'}</Text>
               <Text style={{ color: '#64748B', fontSize: 12, marginTop: 3 }}>{lang === 'bn' ? 'মালিকানা থেকে আলাদা উত্তোলন হিসেবে নথিভুক্ত হবে' : 'Recorded separately as an owner equity withdrawal'}</Text>
             </View>
-            {!houseExpenseFormOpen ? <TouchableOpacity style={styles.primaryActionButton} onPress={() => setHouseExpenseFormOpen(true)}>
-              <AppIcon name={icons.add} size={18} iconColor="#fff" />
-              <Text style={styles.primaryActionText}>{lang === 'bn' ? 'বাসার খরচ যোগ' : 'Add House Expense'}</Text>
-            </TouchableOpacity> : null}
           </View>
-          {houseExpenseFormOpen ? <HouseExpenseEntryForm
-            onCancel={() => setHouseExpenseFormOpen(false)}
+          <HouseExpenseEntryForm
             onSaved={async () => {
-              setHouseExpenseFormOpen(false);
               await refresh();
               setAccountRefresh(value => value + 1);
               setHouseExpenseRows(await api.houseExpenses());
             }}
-          /> : null}
+          />
+          <EntryReportButtons doc={houseExpenseRegisterDoc} filename={`house_expense_register_${today()}.csv`} />
           <View style={styles.colCard}>
             {houseExpenseLoading ? <Text style={{ padding: 14, color: '#64748B' }}>{lang === 'bn' ? 'লোড হচ্ছে…' : 'Loading…'}</Text>
               : houseExpenseRows.length === 0 ? <Empty />
@@ -2022,22 +2307,6 @@ export function AccountsDashboard({ go, focus, onFocusDone }: AccountsDashboardP
         <PayableModal
           id={selectedVendorId}
           onClose={() => setSelectedVendorId(null)}
-        />
-      )}
-
-      {/* 5. Expense Add / Edit Modal */}
-      {expenseFormItem !== undefined && (
-        <ExpenseModal
-          init={expenseFormItem}
-          onClose={() => setExpenseFormItem(undefined)}
-          onSave={async val => {
-            await saveExpense(val);
-            setExpenseFormItem(undefined);
-          }}
-          onTrash={async id => {
-            await deleteExpense(id);
-            setExpenseFormItem(undefined);
-          }}
         />
       )}
 

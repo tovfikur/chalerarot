@@ -222,7 +222,7 @@ export async function accountBalances(client: typeof db | TxClient = db, today?:
     where: { active: true, sourceType: 'openingAdjust', ...(asOf ? { date: { lte: asOf } } : {}) },
     _sum: { amount: true },
   });
-  const savedJournalLines = await client.journalLine.findMany({ where: { entry: { active: true, sourceType: 'manual', ...(asOf ? { date: { lte: asOf } } : {}) }, account: { moneyAccountId: { not: null } } }, select: { debit: true, credit: true, account: { select: { moneyAccountId: true } } } });
+  const savedJournalLines = await client.journalLine.findMany({ where: { entry: { active: true, status: 'posted', sourceType: 'manual', ...(asOf ? { date: { lte: asOf } } : {}) }, account: { moneyAccountId: { not: null } } }, select: { debit: true, credit: true, account: { select: { moneyAccountId: true } } } });
   const journalByAccount = new Map<string, { debit: number; credit: number }>();
   const journalHistory = new Set<string>();
   for (const line of savedJournalLines) { const id = line.account.moneyAccountId; if (!id) continue; journalHistory.add(id); const sums = journalByAccount.get(id) ?? { debit: 0, credit: 0 }; sums.debit += line.debit; sums.credit += line.credit; journalByAccount.set(id, sums); }
@@ -274,7 +274,7 @@ export async function accountBalance(client: typeof db | TxClient, accountId: st
   const [a, grouped, journal] = await Promise.all([
     client.moneyAccount.findUnique({ where: { id: accountId } }),
     client.moneyMovement.groupBy({ by: ['direction'], where: { moneyAccountId: accountId, active: true }, _sum: { amount: true } }),
-    client.journalLine.findMany({ where: { entry: { active: true, sourceType: 'manual' }, account: { moneyAccountId: accountId } }, select: { debit: true, credit: true } }),
+    client.journalLine.findMany({ where: { entry: { active: true, status: 'posted', sourceType: 'manual' }, account: { moneyAccountId: accountId } }, select: { debit: true, credit: true } }),
   ]);
   if (!a) return 0;
   const sumOf = (d: MoneyDirection) => grouped.find(g => g.direction === d)?._sum.amount ?? 0;
