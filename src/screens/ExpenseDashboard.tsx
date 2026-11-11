@@ -99,6 +99,8 @@ export function ExpenseDashboard(_props: ExpenseDashboardProps) {
   const [note, setNote] = useState('');
   const [saving, setSaving] = useState(false);
   const [formError, setFormError] = useState('');
+  const [confirmDeleteOpen, setConfirmDeleteOpen] = useState(false);
+  const [deleting, setDeleting] = useState(false);
   const [catName, setCatName] = useState('');
   const [catKind, setCatKind] = useState<ExpenseCategoryKind>('operating');
   const [catBusy, setCatBusy] = useState(false);
@@ -225,6 +227,7 @@ export function ExpenseDashboard(_props: ExpenseDashboardProps) {
   useEffect(() => { setPage(1); }, [search, catFilter]);
 
   const openNew = useCallback((initialCat?: string) => {
+    setConfirmDeleteOpen(false);
     setEditId(null);
     setVoucher('');
     setDate(today());
@@ -239,6 +242,7 @@ export function ExpenseDashboard(_props: ExpenseDashboardProps) {
   }, [defaultAccountId, defaultCatId]);
 
   const openEdit = useCallback((e: Expense) => {
+    setConfirmDeleteOpen(false);
     const current = catIdOf(e);
     setEditId(e.id);
     setVoucher(e.voucherNo ?? '');
@@ -281,25 +285,23 @@ export function ExpenseDashboard(_props: ExpenseDashboardProps) {
 
   const remove = () => {
     if (!editId) return;
-    Alert.alert(
-      tx('খরচ মুছবেন?', 'Delete expense?'),
-      tx('এই খরচটি ট্র্যাশে যাবে।', 'This expense will be moved to Trash.'),
-      [
-        { text: tx('বাতিল', 'Cancel'), style: 'cancel' },
-        {
-          text: tx('মুছুন', 'Delete'),
-          style: 'destructive',
-          onPress: async () => {
-            try {
-              await deleteExpense(editId);
-              setFormOpen(false);
-            } catch (e: any) {
-              setFormError(e?.message ?? tx('খরচ মোছা যায়নি।', 'Could not delete the expense.'));
-            }
-          },
-        },
-      ],
-    );
+    setFormError('');
+    setConfirmDeleteOpen(true);
+  };
+
+  const confirmRemove = async () => {
+    if (!editId || deleting) return;
+    setDeleting(true);
+    try {
+      await deleteExpense(editId);
+      setConfirmDeleteOpen(false);
+      setFormOpen(false);
+    } catch (e: any) {
+      setConfirmDeleteOpen(false);
+      setFormError(e?.message ?? tx('খরচ মোছা যায়নি।', 'Could not delete the expense.'));
+    } finally {
+      setDeleting(false);
+    }
   };
 
   const createCategory = async () => {
@@ -557,14 +559,24 @@ export function ExpenseDashboard(_props: ExpenseDashboardProps) {
       {formOpen ? (
         <DetailShell
           title={editId ? tx('খরচ সম্পাদনা', 'Edit Expense') : tx('নতুন খরচ', 'New Expense')}
-          onClose={() => setFormOpen(false)}
-          footer={
+          onClose={() => { setConfirmDeleteOpen(false); setFormOpen(false); }}
+          footer={confirmDeleteOpen ? (
+            <View style={{ gap: 10 }}>
+              <Text style={{ color: color.text, fontWeight: '800', fontSize: 16 }}>{tx('খরচটি মুছবেন?', 'Delete this expense?')}</Text>
+              <Text style={{ color: color.muted, lineHeight: 20 }}>{tx('নিশ্চিত করলে খরচটি রেজিস্টার থেকে সরবে এবং সংশ্লিষ্ট ক্যাশ/ব্যাংক ও খরচের হিসাব সমন্বয় করে লগ নোটে সংরক্ষণ হবে।', 'Confirming removes the expense from this register, reverses its cash/bank and expense impact in active balances, and records the transaction details in the activity log.')}</Text>
+              {formError ? <Text style={{ color: color.red }}>{formError}</Text> : null}
+              <View style={{ flexDirection: 'row', justifyContent: 'flex-end', gap: 8 }}>
+                <Btn kind="ghost" label={tx('ফিরে যান', 'Keep expense')} onPress={() => setConfirmDeleteOpen(false)} />
+                <Btn kind="danger" label={deleting ? tx('মুছছে…', 'Deleting…') : tx('নিশ্চিত করে মুছুন', 'Confirm delete')} onPress={() => { void confirmRemove(); }} />
+              </View>
+            </View>
+          ) : (
             <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
               {editId ? <Btn label={tx('মুছুন', 'Delete')} kind="danger" icon={icons.del} onPress={remove} /> : null}
               <View style={{ flex: 1 }} />
               <Btn label={saving ? tx('সংরক্ষণ হচ্ছে...', 'Saving...') : tx('সংরক্ষণ', 'Save')} onPress={save} />
             </View>
-          }
+          )}
         >
           {voucher ? <Muted>{tx('ভাউচার', 'Voucher')}: #{voucher}</Muted> : null}
           <DateField label={tx('তারিখ', 'Date')} value={date} onChange={setDate} allowPast required />

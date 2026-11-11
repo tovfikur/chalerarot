@@ -173,6 +173,7 @@ export function ActivityLog() {
         const detail = row.detail ?? {};
         const subtitle: string[] = [];
         push(subtitle, row.reference ? '#' + row.reference : '');
+        push(subtitle, detail.transactionNo ? `${l('লেনদেন আইডি', 'Transaction ID')}: ${detail.transactionNo}` : '');
         push(subtitle, detail.partyName);
         if (detail.from || detail.to) push(subtitle, `${detail.from ?? '?'} → ${detail.to ?? '?'}`);
         push(subtitle, detail.accountName);
@@ -180,7 +181,9 @@ export function ActivityLog() {
         if (typeof detail.openingStockValue === 'number') {
           push(subtitle, `${l('প্রারম্ভিক মজুদের মূল্য', 'Opening inventory')}: ${money(detail.openingStockValue)}`);
         }
-        push(subtitle, detail.journalPosting);
+        if (detail.accountingImpact === 'expenseDelete') {
+          push(subtitle, l('হিসাবের প্রভাব: খরচের ডেবিট ও ক্যাশ/ব্যাংকের ক্রেডিট সক্রিয় হিসাব থেকে বাদ দেওয়া হয়েছে; মূল লেনদেনের তথ্য সংরক্ষিত।', 'Accounting impact: expense debit and cash/bank credit were removed from active balances; original transaction details are retained.'));
+        } else push(subtitle, detail.journalPosting);
         if (typeof detail.failedCount === 'number' && detail.failedCount > 0) {
           push(subtitle, `${detail.failedCount} ${l('টি সারি ব্যর্থ', 'rows skipped')}`);
         }
@@ -204,7 +207,7 @@ export function ActivityLog() {
               <Text style={styles.rowTitle}>{title}</Text>
               {row.amount != null ? <Text style={styles.amount}>{money(row.amount)}</Text> : null}
             </View>
-            {subtitle.length ? <Text style={styles.subtitle} numberOfLines={2}>{subtitle.slice(0, 4).join(' · ')}</Text> : null}
+            {subtitle.length ? <Text style={styles.subtitle} numberOfLines={3}>{subtitle.slice(0, 6).join(' · ')}</Text> : null}
             <Text style={styles.by}>{row.userName}{role ? ` · ${role}` : ''} · {timeFmt.format(when)}</Text>
           </View>
         </View>;

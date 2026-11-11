@@ -2271,6 +2271,8 @@ export function ExpenseModal({ init, onClose, onSave, onTrash, inline = false }:
   const moneyEntryAccounts = init?.accountId ? activeEntryAccounts.filter(account => account.id === init.accountId) : activeEntryAccounts;
   const [amounts, setAmounts] = useState<Record<string, string>>(() => init?.accountId ? { [init.accountId]: String(init.amount) } : {});
   const [categoryListOpen, setCategoryListOpen] = useState(false);
+  const [deleteConfirmOpen, setDeleteConfirmOpen] = useState(false);
+  const [deleteBusy, setDeleteBusy] = useState(false);
   const [customCategories, setCustomCategories] = useState<{ id: string; name: string; kind: string }[]>([]);
   const [customCategoryName, setCustomCategoryName] = useState('');
   const nameInput = useRef<TextInput>(null);
@@ -2321,14 +2323,14 @@ export function ExpenseModal({ init, onClose, onSave, onTrash, inline = false }:
   };
   const trash = () => {
     if (!init) return;
-    Alert.alert(t('sure'), t('deleteExpenseAsk'), [{ text: t('cancel') }, {
-      text: t('trashMoveBtn'), onPress: () => {
-        (async () => {
-          try { await onTrash(init.id); }
-          catch (e) { Alert.alert(e instanceof Error ? e.message : t('invalid')); }
-        })();
-      },
-    }]);
+    setDeleteConfirmOpen(true);
+  };
+  const confirmTrash = async () => {
+    if (!init || deleteBusy) return;
+    setDeleteBusy(true);
+    try { await onTrash(init.id); setDeleteConfirmOpen(false); }
+    catch (e) { setDeleteConfirmOpen(false); showEntryError(lang, e instanceof Error ? e.message : t('invalid')); }
+    finally { setDeleteBusy(false); }
   };
   const form = (
       <Card>
@@ -2365,11 +2367,29 @@ export function ExpenseModal({ init, onClose, onSave, onTrash, inline = false }:
         {init ? <Btn kind="danger" icon={icons.del} label={t('trashMoveBtn')} onPress={trash} /> : inline ? null : <Btn kind="ghost" icon={icons.cancel} label={t('cancel')} onPress={onClose} />}
       </Card>
   );
-  if (inline) return <View style={{ marginBottom: 14 }}>
-    <Title>{init ? (init.category === 'other' && init.customName ? init.customName : t(exKey(init.category))) : t('addExpense')}</Title>
-    {form}
-  </View>;
-  return <DetailShell title={init ? (init.category === 'other' && init.customName ? init.customName : t(exKey(init.category))) : t('addExpense')} onClose={onClose}>{form}</DetailShell>;
+  const deleteDialog = <Modal visible={deleteConfirmOpen} transparent animationType="fade" onRequestClose={() => setDeleteConfirmOpen(false)}>
+    <View style={{ flex: 1, backgroundColor: 'rgba(15,23,42,0.5)', justifyContent: 'center', alignItems: 'center', padding: 18 }}>
+      <View style={{ width: '100%', maxWidth: 420, backgroundColor: '#FFFFFF', borderRadius: 16, padding: 20, gap: 12 }}>
+        <Text style={{ color: color.text, fontSize: 18, fontWeight: '800' }}>{label('Delete this expense?', 'এই খরচটি মুছবেন?')}</Text>
+        <Text style={{ color: color.muted, lineHeight: 20 }}>{label('Confirming removes it from the expense register, reverses its cash/bank and expense impact, and records the original transaction details in the activity log.', 'নিশ্চিত করলে খরচটি রেজিস্টার থেকে সরবে, ক্যাশ/ব্যাংক ও খরচের হিসাব সমন্বয় হবে এবং মূল লেনদেনের তথ্য লগ নোটে থাকবে।')}</Text>
+        <View style={{ flexDirection: 'row', justifyContent: 'flex-end', flexWrap: 'wrap', gap: 8 }}>
+          <Btn kind="ghost" label={label('Keep expense', 'খরচ রাখুন')} onPress={() => setDeleteConfirmOpen(false)} />
+          <Btn kind="danger" label={deleteBusy ? label('Deleting…', 'মুছছে…') : label('Confirm delete', 'নিশ্চিত করে মুছুন')} onPress={() => { void confirmTrash(); }} />
+        </View>
+      </View>
+    </View>
+  </Modal>;
+  if (inline) return <>
+    <View style={{ marginBottom: 14 }}>
+      <Title>{init ? (init.category === 'other' && init.customName ? init.customName : t(exKey(init.category))) : t('addExpense')}</Title>
+      {form}
+    </View>
+    {deleteDialog}
+  </>;
+  return <>
+    <DetailShell title={init ? (init.category === 'other' && init.customName ? init.customName : t(exKey(init.category))) : t('addExpense')} onClose={onClose}>{form}</DetailShell>
+    {deleteDialog}
+  </>;
 }
 
 /**

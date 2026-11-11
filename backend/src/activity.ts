@@ -203,8 +203,16 @@ async function build(req: Request, responseBody: any, actor: any) {
     put('accountType', body.type);
     put('bankName', body.bankName);
   } else if (entity === 'expense') {
-    put('category', body.category);
-    put('customName', body.customName);
+    put('category', body.category ?? b.category);
+    put('customName', body.customName ?? b.customName);
+    if (action === 'delete') {
+      put('stage', 'deleted');
+      put('voucherNo', b.voucherNo);
+      put('transactionNo', b.transactionNo);
+      put('accountName', b.accountName);
+      put('accountingImpact', b.accountingImpact);
+      put('journalPosting', 'Expense debit and cash/bank credit removed from active accounting balances; original transaction retained in the activity log.');
+    }
   } else if (entity === 'expenseCategory') {
     put('name', text(body.name ?? b.name));
     put('kind', text(body.kind ?? b.kind));

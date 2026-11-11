@@ -146,10 +146,19 @@ expenses.put('/:id', async (req: Request, res: Response) => {
 expenses.delete('/:id', async (req: Request, res: Response) => {
   const cur = await db.expense.findUnique({ where: { id: req.params.id } });
   if (!cur || cur.deletedAt) return res.status(404).json({ error: 'Expense not found' });
+  const movement = await db.moneyMovement.findUnique({
+    where: { sourceType_sourceId: { sourceType: 'expense', sourceId: cur.id } },
+    include: { moneyAccount: { select: { name: true } } },
+  });
   await db.$transaction(async t => {
     await t.expense.update({ where: { id: cur.id }, data: { deletedAt: new Date() } });
-    // Trashed expenses stop counting against the method balance.
+    // Deactivate the original cash/bank movement atomically with the soft delete.
     await setMovementActive(t, 'expense', cur.id, false);
   });
-  res.json({ id: cur.id });
+  res.json({
+    id: cur.id, amount: cur.amount, category: cur.category,
+    customName: cur.customName ?? undefined, date: cur.date, note: cur.note ?? undefined,
+    voucherNo: cur.voucherNo ?? undefined, transactionNo: movement?.transactionNo,
+    accountName: movement?.moneyAccount?.name, accountingImpact: 'expenseDelete',
+  });
 });
