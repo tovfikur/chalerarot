@@ -1,6 +1,7 @@
 import React, { useState, useMemo, useEffect, useRef } from 'react';
 import { View, Text, TextInput, TouchableOpacity, ScrollView, StyleSheet, Modal, Platform, Alert } from 'react-native';
 import { useApp, Product } from '../store';
+import { api, StockAdjustmentHistoryRow } from '../api';
 import { toBnDigits, useNum, RequiredLabel } from '../ui';
 import { toEnDigits, normalizeInput, parseNum } from '../bn';
 import { AppIcon, icons } from '../icons';
@@ -31,7 +32,7 @@ export function StockDashboard() {
 
   // Pagination
   const [page, setPage] = useState(1);
-  const pageSize = 10;
+  const pageSize = 100;
 
   // Add Product Modal
   const [modalOpen, setModalOpen] = useState(false);
@@ -57,6 +58,25 @@ export function StockDashboard() {
   const [auditConfirmModalOpen, setAuditConfirmModalOpen] = useState(false);
   const [auditNote, setAuditNote] = useState('ম্যানুয়াল স্টক অডিট সমন্বয়');
   const [isAdjusting, setIsAdjusting] = useState(false);
+  const [adjustmentHistoryOpen, setAdjustmentHistoryOpen] = useState(false);
+  const [adjustmentHistoryBusy, setAdjustmentHistoryBusy] = useState(false);
+  const [adjustmentHistoryError, setAdjustmentHistoryError] = useState('');
+  const [adjustmentHistory, setAdjustmentHistory] = useState<StockAdjustmentHistoryRow[]>([]);
+  const [selectedAdjustment, setSelectedAdjustment] = useState<StockAdjustmentHistoryRow | null>(null);
+
+  const openAdjustmentHistory = async () => {
+    setAdjustmentHistoryOpen(true);
+    setSelectedAdjustment(null);
+    setAdjustmentHistoryBusy(true);
+    setAdjustmentHistoryError('');
+    try {
+      setAdjustmentHistory(await api.stockAdjustmentHistory());
+    } catch (error) {
+      setAdjustmentHistoryError(error instanceof Error ? error.message : label('স্টক সমন্বয়ের ইতিহাস লোড করা যায়নি।', 'Could not load stock adjustment history.'));
+    } finally {
+      setAdjustmentHistoryBusy(false);
+    }
+  };
 
   const openNewProduct = () => {
     setEditingProduct(null);
@@ -232,16 +252,21 @@ export function StockDashboard() {
   // Pagination for current view
   const currentTotalRows = activeTab === 'audit' ? filteredAuditRows.length : filteredRows.length;
   const totalPages = Math.max(1, Math.ceil(currentTotalRows / pageSize));
+  const visiblePages = Array.from(new Set([1, page - 1, page, page + 1, totalPages]
+    .filter(p => p >= 1 && p <= totalPages))).sort((a, b) => a - b);
+  useEffect(() => {
+    if (page > totalPages) setPage(totalPages);
+  }, [page, totalPages]);
 
   const pagedRows = useMemo(() => {
     const start = (page - 1) * pageSize;
     return filteredRows.slice(start, start + pageSize);
-  }, [filteredRows, page, pageSize]);
+  }, [filteredRows, page]);
 
   const pagedAuditRows = useMemo(() => {
     const start = (page - 1) * pageSize;
     return filteredAuditRows.slice(start, start + pageSize);
-  }, [filteredAuditRows, page, pageSize]);
+  }, [filteredAuditRows, page]);
 
   // Auto-prefill audit counts with current system stock on entering audit tab if not initialized
   const auditInitializedRef = useRef(false);
@@ -346,7 +371,7 @@ export function StockDashboard() {
         productId: it.id,
         physicalQtyKg: it.physicalKg!,
         deltaKg: it.deltaKg,
-        reason: it.reason || auditNote,
+        reason: it.reason || undefined,
       }));
       await adjustStock({
         items: payloadItems,
@@ -598,6 +623,16 @@ export function StockDashboard() {
         <View style={styles.rightActionGroup}>
           {activeTab === 'audit' ? (
             <>
+              <TouchableOpacity
+                onPress={openAdjustmentHistory}
+                style={[styles.outlineActionBtn, { borderColor: '#7C3AED' }]}
+                testID="stock-adjustment-history"
+                accessibilityLabel={label('স্টক সমন্বয়ের ইতিহাস দেখুন', 'View stock adjustment history')}
+              >
+                <AppIcon name={icons.history} size={17} iconColor="#7C3AED" />
+                <Text style={[styles.outlineActionBtnText, { color: '#7C3AED', fontWeight: '700' }]}>{label('সমন্বয়ের ইতিহাস', 'Adjustment history')}</Text>
+              </TouchableOpacity>
+
               <TouchableOpacity
                 onPress={handlePreFillWithSystem}
                 style={[styles.outlineActionBtn, { borderColor: '#1c70b9', backgroundColor: '#F0F7FF' }]}
@@ -973,14 +1008,14 @@ export function StockDashboard() {
         {/* Pagination Footer */}
         <View style={styles.paginationFooter}>
           <Text style={styles.footerCountText}>
-            {label(`মোট ${toBnDigits(String(currentTotalRows))} টি পণ্য দেখানো হচ্ছে`, `Showing ${currentTotalRows} products`)}
+            {label(
+              `${currentTotalRows ? toBnDigits(String((page - 1) * pageSize + 1)) : '০'}–${toBnDigits(String(Math.min(page * pageSize, currentTotalRows)))} / ${toBnDigits(String(currentTotalRows))} টি পণ্য`,
+              `Showing ${currentTotalRows ? (page - 1) * pageSize + 1 : 0}–${Math.min(page * pageSize, currentTotalRows)} of ${currentTotalRows} products`,
+            )}
           </Text>
 
           <View style={styles.paginationControls}>
-            <View style={styles.pageSizeSelector}>
-              <Text style={styles.pageSizeText}>{label('প্রতি পেজে ১০', '10 per page')}</Text>
-              <AppIcon name={icons.chevR} size={16} iconColor="#64748B" />
-            </View>
+            <Text style={styles.pageSizeText}>{label('প্রতি পৃষ্ঠায় ১০০টি', '100 per page')}</Text>
 
             <View style={styles.pageButtonsRow}>
               <TouchableOpacity
@@ -991,9 +1026,9 @@ export function StockDashboard() {
                 <Text style={styles.pageNavText}>‹</Text>
               </TouchableOpacity>
 
-              {Array.from({ length: totalPages }, (_, i) => i + 1).map(pNum => (
+              {visiblePages.map((pNum, idx) => <React.Fragment key={pNum}>
+                {idx > 0 && pNum - visiblePages[idx - 1] > 1 ? <Text style={styles.pageNumberText}>…</Text> : null}
                 <TouchableOpacity
-                  key={pNum}
                   onPress={() => setPage(pNum)}
                   style={[styles.pageNumberBtn, page === pNum && styles.pageNumberBtnActive]}
                 >
@@ -1001,7 +1036,7 @@ export function StockDashboard() {
                     {digits(pNum)}
                   </Text>
                 </TouchableOpacity>
-              ))}
+              </React.Fragment>)}
 
               <TouchableOpacity
                 disabled={page >= totalPages}
@@ -1270,6 +1305,72 @@ export function StockDashboard() {
       {bulkOpen && (
         <BulkUploadModal kind="product" onClose={() => setBulkOpen(false)} />
       )}
+
+      <Modal
+        visible={adjustmentHistoryOpen}
+        transparent
+        animationType="fade"
+        onRequestClose={() => { setAdjustmentHistoryOpen(false); setSelectedAdjustment(null); }}
+      >
+        <View style={styles.modalBackdrop}>
+          <View style={[styles.modalBox, { maxWidth: 820 }]}>
+            <View style={styles.modalHeader}>
+              <View style={styles.modalTitleRow}>
+                {selectedAdjustment ? (
+                  <TouchableOpacity onPress={() => setSelectedAdjustment(null)} accessibilityLabel={label('ইতিহাসে ফিরুন', 'Back to history')}>
+                    <AppIcon name={icons.back} size={20} iconColor="#1c70b9" />
+                  </TouchableOpacity>
+                ) : <AppIcon name={icons.history} size={21} iconColor="#7C3AED" />}
+                <Text style={styles.modalTitle}>{selectedAdjustment ? label('সমন্বয়ের বিস্তারিত', 'Adjustment details') : label('স্টক সমন্বয়ের ইতিহাস', 'Stock adjustment history')}</Text>
+              </View>
+              <TouchableOpacity onPress={() => { setAdjustmentHistoryOpen(false); setSelectedAdjustment(null); }} style={styles.modalCloseBtn} accessibilityLabel={label('বন্ধ করুন', 'Close')}>
+                <AppIcon name={icons.cancel} size={20} iconColor="#64748B" />
+              </TouchableOpacity>
+            </View>
+
+            {selectedAdjustment ? (
+              <ScrollView style={[styles.modalBody, { maxHeight: 560 }]} contentContainerStyle={{ gap: 12 }}>
+                <Text style={styles.adjustmentDetailName}>{selectedAdjustment.productName}</Text>
+                {selectedAdjustment.productCode ? <Text style={styles.adjustmentDetailText}>{label('পণ্য কোড', 'Product code')}: {selectedAdjustment.productCode}</Text> : null}
+                <Text style={styles.adjustmentDetailText}>{label('তারিখ', 'Date')}: {digits(selectedAdjustment.date.split('-').reverse().join('-'))}</Text>
+                <Text style={styles.adjustmentDetailText}>{label('সমন্বয়ের পরিমাণ', 'Adjustment quantity')}: <Text style={{ color: selectedAdjustment.quantityKg < 0 ? '#DC2626' : '#059669', fontWeight: '800' }}>{selectedAdjustment.quantityKg > 0 ? '+' : ''}{n(selectedAdjustment.quantityKg)} {label('কেজি', 'kg')}</Text></Text>
+                <Text style={styles.adjustmentDetailText}>{label('প্রতি কেজির মূল্য', 'Unit cost')}: ৳{n(selectedAdjustment.unitCost)}</Text>
+                <Text style={styles.adjustmentDetailText}>{label('মজুদের মূল্যের প্রভাব', 'Inventory value impact')}: <Text style={{ fontWeight: '800' }}>৳{n(selectedAdjustment.value)}</Text></Text>
+                {selectedAdjustment.reason ? <Text style={styles.adjustmentDetailText}>{label('বিবরণ / কারণ', 'Description / reason')}: {selectedAdjustment.reason}</Text> : null}
+                <Text style={styles.adjustmentDetailMuted}>{label('রেকর্ডের সময়', 'Recorded at')}: {new Intl.DateTimeFormat(lang === 'bn' ? 'bn-BD' : 'en-GB', { dateStyle: 'medium', timeStyle: 'short' }).format(new Date(selectedAdjustment.createdAt))}</Text>
+              </ScrollView>
+            ) : adjustmentHistoryBusy ? (
+              <View style={styles.adjustmentHistoryMessage}><Text style={styles.adjustmentDetailText}>{label('ইতিহাস লোড হচ্ছে…', 'Loading history…')}</Text></View>
+            ) : adjustmentHistoryError ? (
+              <View style={styles.adjustmentHistoryMessage}><Text style={{ color: '#DC2626' }}>{adjustmentHistoryError}</Text></View>
+            ) : adjustmentHistory.length === 0 ? (
+              <View style={styles.adjustmentHistoryMessage}><Text style={styles.adjustmentDetailText}>{label('এখনও কোনো স্টক সমন্বয়ের রেকর্ড নেই।', 'No stock adjustment records yet.')}</Text></View>
+            ) : (
+              <View style={{ padding: 14 }}>
+                <View style={styles.adjustmentHistoryHeader}>
+                  <Text style={[styles.adjustmentHistoryHeadCell, { flex: 1 }]}>{label('তারিখ', 'Date')}</Text>
+                  <Text style={[styles.adjustmentHistoryHeadCell, { flex: 2 }]}>{label('পণ্য', 'Product')}</Text>
+                  <Text style={[styles.adjustmentHistoryHeadCell, { flex: 1, textAlign: 'right' }]}>{label('পরিমাণ', 'Quantity')}</Text>
+                  <Text style={[styles.adjustmentHistoryHeadCell, { flex: 1, textAlign: 'right' }]}>{label('মূল্য প্রভাব', 'Value impact')}</Text>
+                </View>
+                <ScrollView style={{ maxHeight: 520 }}>
+                  {adjustmentHistory.map(row => (
+                    <TouchableOpacity key={row.id} onPress={() => setSelectedAdjustment(row)} style={styles.adjustmentHistoryRow} accessibilityRole="button">
+                      <Text style={[styles.adjustmentHistoryCell, { flex: 1 }]}>{digits(row.date.split('-').reverse().join('-'))}</Text>
+                      <View style={{ flex: 2, minWidth: 0 }}>
+                        <Text style={styles.adjustmentHistoryProduct} numberOfLines={1}>{row.productName}</Text>
+                        {row.productCode ? <Text style={styles.adjustmentDetailMuted} numberOfLines={1}>{row.productCode}</Text> : null}
+                      </View>
+                      <Text style={[styles.adjustmentHistoryCell, { flex: 1, textAlign: 'right', color: row.quantityKg < 0 ? '#DC2626' : '#059669' }]}>{row.quantityKg > 0 ? '+' : ''}{n(row.quantityKg)} {label('কেজি', 'kg')}</Text>
+                      <Text style={[styles.adjustmentHistoryCell, { flex: 1, textAlign: 'right' }]}>৳{n(row.value)}</Text>
+                    </TouchableOpacity>
+                  ))}
+                </ScrollView>
+              </View>
+            )}
+          </View>
+        </View>
+      </Modal>
 
       {/* Stock Adjustment Confirmation Modal */}
       <Modal
@@ -1824,16 +1925,6 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     gap: 16,
   },
-  pageSizeSelector: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 6,
-    borderWidth: 1,
-    borderColor: '#CBD5E1',
-    borderRadius: 6,
-    paddingHorizontal: 8,
-    paddingVertical: 4,
-  },
   pageSizeText: {
     fontSize: 12,
     color: '#334155',
@@ -1916,6 +2007,60 @@ const styles = StyleSheet.create({
   modalBody: {
     padding: 18,
     maxHeight: 460,
+  },
+  adjustmentHistoryMessage: {
+    minHeight: 120,
+    alignItems: 'center',
+    justifyContent: 'center',
+    padding: 20,
+  },
+  adjustmentHistoryHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+    paddingVertical: 10,
+    paddingHorizontal: 8,
+    backgroundColor: '#EAF2FC',
+    borderRadius: 8,
+    marginBottom: 4,
+  },
+  adjustmentHistoryHeadCell: {
+    fontSize: 12,
+    fontWeight: '800',
+    color: '#334155',
+  },
+  adjustmentHistoryRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+    minHeight: 54,
+    paddingVertical: 8,
+    paddingHorizontal: 8,
+    borderBottomWidth: 1,
+    borderBottomColor: '#E2E8F0',
+  },
+  adjustmentHistoryCell: {
+    fontSize: 13,
+    color: '#334155',
+  },
+  adjustmentHistoryProduct: {
+    fontSize: 13,
+    fontWeight: '700',
+    color: '#0F172A',
+  },
+  adjustmentDetailName: {
+    fontSize: 18,
+    fontWeight: '800',
+    color: '#0F172A',
+  },
+  adjustmentDetailText: {
+    fontSize: 14,
+    lineHeight: 21,
+    color: '#334155',
+  },
+  adjustmentDetailMuted: {
+    fontSize: 12,
+    color: '#64748B',
   },
   modalTwoCol: {
     flexDirection: 'row',

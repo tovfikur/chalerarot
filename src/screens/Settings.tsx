@@ -32,7 +32,7 @@ export function Settings() {
   const back = <Btn kind="ghost" label={label('সেটিংসে ফিরুন', 'Back to Settings')} icon={icons.back} onPress={() => open(null)} testID="settings-back" />;
   const menus: { id: NonNullable<typeof section>; title: string; icon: IconName; admin?: boolean }[] = [
     { id: 'business', title: label('ব্যবসার তথ্য', 'Business settings'), icon: icons.office, admin: true },
-    { id: 'inventory', title: label('Inventory settings', 'মজুদ ব্যবস্থাপনা'), icon: icons.stock, admin: true },
+    { id: 'inventory', title: label('ইনভেন্টরি সেটিংস', 'Inventory settings'), icon: icons.stock, admin: true },
     { id: 'language', title: label('ভাষা', 'Language'), icon: icons.language, admin: true },
     { id: 'profile', title: label('আমার প্রোফাইল', 'My profile'), icon: icons.customers },
     { id: 'users', title: label('ব্যবহারকারী', 'Users'), icon: icons.customers, admin: true },
@@ -53,19 +53,19 @@ export function Settings() {
     {section === 'log' ? <ActivityLog /> : null}
     {user.role === 'admin' && section === 'inventory' ? <>
       <Card>
-        <Title>{label('Inventory settings', 'মজুদ ব্যবস্থাপনা')}</Title>
+        <Title>{label('ইনভেন্টরি সেটিংস', 'Inventory settings')}</Title>
         <Text style={{ color: '#475569', fontSize: 14, lineHeight: 20, marginBottom: 12 }}>{label(
-          'When enabled, sales can make stock negative. The next purchase will match those sold units at its actual landed average cost and update COGS.',
-          'এটি চালু থাকলে মজুদ না থাকলেও বিক্রি করা যাবে এবং মজুদ ঋণাত্মক হতে পারে। পরবর্তী ক্রয়ে সেই বিক্রিত পরিমাণের প্রকৃত গড় ক্রয়মূল্য সমন্বয় করে বিক্রীত পণ্যের খরচ হালনাগাদ হবে।'
+          'চালু থাকলে, মজুদ ঋণাত্মক হলেও বিক্রি করা যাবে। পরবর্তী ক্রয়ে বিক্রি হওয়া পণ্যের প্রকৃত গড় ক্রয়মূল্য সমন্বয় করে বিক্রীত পণ্যের খরচ হালনাগাদ করা হবে।',
+          'When enabled, sales can make stock negative. The next purchase will match those sold units at its actual landed average cost and update COGS.'
         )}</Text>
         <TouchableOpacity onPress={() => { setDraft({ ...draft, allowNegativeStock: !draft.allowNegativeStock }); setMessage(''); }} accessibilityRole="switch" accessibilityState={{ checked: draft.allowNegativeStock }}
           style={{ minHeight: 56, paddingHorizontal: 14, borderRadius: 12, borderWidth: 1.5, borderColor: draft.allowNegativeStock ? '#059669' : '#CBD5E1', backgroundColor: draft.allowNegativeStock ? '#ECFDF5' : '#F8FAFC', flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }}>
-          <Text style={{ color: draft.allowNegativeStock ? '#047857' : '#334155', fontSize: 15, fontWeight: '800' }}>{label('Allow negative stock sales', 'ঋণাত্মক মজুদ থাকা অবস্থায় বিক্রির অনুমতি')}</Text>
-          <View style={{ minWidth: 88, minHeight: 36, borderRadius: 18, alignItems: 'center', justifyContent: 'center', backgroundColor: draft.allowNegativeStock ? '#059669' : '#64748B' }}><Text style={{ color: '#FFFFFF', fontWeight: '900' }}>{draft.allowNegativeStock ? label('ON', 'চালু') : label('OFF', 'বন্ধ')}</Text></View>
+          <Text style={{ color: draft.allowNegativeStock ? '#047857' : '#334155', fontSize: 15, fontWeight: '800' }}>{label('ঋণাত্মক মজুদে বিক্রির অনুমতি', 'Allow negative stock sales')}</Text>
+          <View style={{ minWidth: 88, minHeight: 36, borderRadius: 18, alignItems: 'center', justifyContent: 'center', backgroundColor: draft.allowNegativeStock ? '#059669' : '#64748B' }}><Text style={{ color: '#FFFFFF', fontWeight: '900' }}>{draft.allowNegativeStock ? label('চালু', 'ON') : label('বন্ধ', 'OFF')}</Text></View>
         </TouchableOpacity>
       </Card>
       {message ? <Text accessibilityRole="alert" style={{ color: failed ? '#DC2626' : '#15803D' }}>{message}</Text> : null}
-      <Btn label={busy ? label('Saving…', 'সংরক্ষণ হচ্ছে…') : label('Save inventory settings', 'মজুদ সেটিংস সংরক্ষণ করুন')} onPress={save} testID="save-settings" />
+      <Btn label={busy ? label('সংরক্ষণ হচ্ছে…', 'Saving…') : label('ইনভেন্টরি সেটিংস সংরক্ষণ করুন', 'Save inventory settings')} onPress={save} testID="save-settings" />
     </> : null}
     {user.role === 'admin' && (section === 'business' || section === 'language') ? <>
     {section === 'business' ?

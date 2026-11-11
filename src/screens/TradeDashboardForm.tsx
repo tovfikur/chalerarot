@@ -1814,8 +1814,12 @@ export function TradeDashboardForm({ mode, onDone, onOpenHistory, editId }: Trad
           <View style={styles.tableHeaderRow3D}>
             <Text style={[styles.th, { width: 44, textAlign: 'center' }]}>{tx('ক্রম', '#')}</Text>
             <Text style={[styles.th, { width: 120 }]}>{tx('পণ্য কোড', 'Product code')}</Text>
-            <RequiredLabel text={tx('পণ্যের নাম', 'Product name')} required style={[styles.th, { flex: 1, minWidth: 200 }]} />
-            <RequiredLabel text={tx('পরিমাণ (বস্তা)', 'Quantity (bags)')} required style={[styles.th, { width: 120, textAlign: 'center' }]} />
+            <Text style={[styles.th, { flex: 1, minWidth: 0 }]}>
+              {tx('পণ্যের নাম', 'Product name')}<Text style={{ color: '#DC2626', fontWeight: '900' }}> *</Text>
+            </Text>
+            <Text style={[styles.th, { width: 120, minWidth: 0, textAlign: 'center' }]}>
+              {tx('পরিমাণ (বস্তা)', 'Quantity (bags)')}<Text style={{ color: '#DC2626', fontWeight: '900' }}> *</Text>
+            </Text>
             <Text style={[styles.th, { width: 110, textAlign: 'center' }]}>{tx('মোট কেজি', 'Total kg')}</Text>
             {isSale && (
               <Text style={[styles.th, { width: 120, textAlign: 'center' }]}>{tx('গড় ক্রয়দর (৳)', 'Average cost (৳)')}</Text>
@@ -1948,7 +1952,7 @@ export function TradeDashboardForm({ mode, onDone, onOpenHistory, editId }: Trad
                 </View>
 
                 {/* Product Name: AUTO-SELECTED DISPLAY */}
-                <View style={[styles.td, { flex: 1, minWidth: 200 }]}>
+                <View style={[styles.td, { flex: 1, minWidth: 0 }]}>
                   <View style={{
                     backgroundColor: row.name ? '#F8FAFC' : '#F1F5F9',
                     borderRadius: 8,
@@ -3363,6 +3367,8 @@ const styles = StyleSheet.create({
     fontWeight: '800',
     color: '#0F3B63',
     paddingHorizontal: 4,
+    flexShrink: 1,
+    minWidth: 0,
   },
   tableDataRow: {
     flexDirection: 'row',
@@ -3376,6 +3382,8 @@ const styles = StyleSheet.create({
   },
   td: {
     paddingHorizontal: 4,
+    flexShrink: 1,
+    minWidth: 0,
   },
   serialBadge: {
     width: 28,

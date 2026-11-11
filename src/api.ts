@@ -64,6 +64,10 @@ export type ProductRes = { id: string; product: {
   openingUnitCost: number; openingValue: number;
   smallBagKg: number; mediumBagKg: number; largeBagKg: number;
 } };
+export type StockAdjustmentHistoryRow = {
+  id: string; date: string; createdAt: string; productId: string; productCode: string;
+  productName: string; quantityKg: number; unitCost: number; value: number; reason: string;
+};
 
 export type TxnResult = { id: string; invoiceNo?: string; total: number };
 
@@ -213,6 +217,7 @@ export const api = {
   bulkCreateProducts: (items: any[]) => req<BulkImportRes>('/products/bulk', { method: 'POST', body: JSON.stringify({ items }) }),
   adjustStock: (b: { items: any[]; date?: string; note?: string }) =>
     req<{ success: boolean; count: number; adjusted: any[] }>('/products/adjust', { method: 'POST', body: JSON.stringify(b) }),
+  stockAdjustmentHistory: (limit = 1000) => req<StockAdjustmentHistoryRow[]>(`/products/adjustments?limit=${limit}`),
   updateProduct: (id: string, b: object) => req<ProductRes>(`/products/${id}`, { method: 'PUT', body: JSON.stringify(b) }),
   deleteProduct: (id: string) => req<IdRes>(`/products/${id}`, { method: 'DELETE' }),
 

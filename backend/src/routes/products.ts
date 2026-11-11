@@ -43,6 +43,29 @@ products.get('/', async (_req: Request, res: Response) => {
   res.json(list.map(productJson));
 });
 
+// GET /api/products/adjustments — permanent stock audit/adjustment history.
+products.get('/adjustments', async (req: Request, res: Response) => {
+  const limit = Math.min(5000, Math.max(1, parseInt(String(req.query.limit ?? '1000'), 10) || 1000));
+  const rows = await db.stockMovement.findMany({
+    where: { type: 'ADJUSTMENT' },
+    orderBy: [{ date: 'desc' }, { createdAt: 'desc' }],
+    take: limit,
+    include: { product: { select: { id: true, code: true, name: true } } },
+  });
+  res.json(rows.map(row => ({
+    id: row.id,
+    date: row.date,
+    createdAt: row.createdAt,
+    productId: row.productId,
+    productCode: row.product.code ?? '',
+    productName: row.product.name,
+    quantityKg: row.qtyKg,
+    unitCost: row.unitCost,
+    value: row.value,
+    reason: row.refId ?? row.note ?? '',
+  })));
+});
+
 // POST /api/products/bulk
 products.post('/bulk', async (req: Request, res: Response) => {
   try {
