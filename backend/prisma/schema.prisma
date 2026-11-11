@@ -315,6 +315,64 @@ model ExpenseCategory {
   @@index([kind])
 }
 
+model Labourer {
+  id        String         @id @default(cuid())
+  name      String
+  nameKey   String         @unique
+  costs     LabourCost[]
+  payments  LabourPayment[]
+  advances  LabourAdvance[]
+  createdAt DateTime       @default(now())
+}
+
+model LabourCost {
+  id        String   @id @default(cuid())
+  labourerId String
+  labourer  Labourer @relation(fields: [labourerId], references: [id], onDelete: Restrict)
+  pricePerBag Float
+  quantity  Float
+  direction String // stockIn | stockOut
+  amount    Float
+  advanceApplied Float @default(0)
+  date      String
+  note      String?
+  createdAt DateTime @default(now())
+
+  @@index([labourerId, date])
+  @@index([date])
+}
+
+model LabourAdvance {
+  id          String   @id @default(cuid())
+  labourerId  String
+  labourer    Labourer @relation(fields: [labourerId], references: [id], onDelete: Restrict)
+  amount      Float
+  appliedAmount Float @default(0)
+  date        String
+  accountId   String
+  moneyAccount MoneyAccount @relation(fields: [accountId], references: [id], onDelete: Restrict)
+  note        String?
+  createdAt   DateTime @default(now())
+
+  @@index([labourerId, date])
+  @@index([accountId, date])
+}
+
+model LabourPayment {
+  id          String   @id @default(cuid())
+  labourerId  String
+  labourer    Labourer @relation(fields: [labourerId], references: [id], onDelete: Restrict)
+  amount      Float
+  date        String
+  accountId   String
+  moneyAccount MoneyAccount @relation(fields: [accountId], references: [id], onDelete: Restrict)
+  note        String?
+  createdAt   DateTime @default(now())
+
+  @@index([labourerId, date])
+  @@index([accountId, date])
+}
+
 // One row per payment method holding the manually entered starting balance.
 // Opening balances are pure baseline: they never touch sales, due, profit or
 // expense reporting.
@@ -340,6 +398,8 @@ model MoneyAccount {
   updatedAt      DateTime @updatedAt
 
   movements    MoneyMovement[]
+  labourPayments LabourPayment[]
+  labourAdvances LabourAdvance[]
   ledgerAccount ChartAccount?
   outTransfers MoneyTransfer[] @relation("TransferFromAccount")
   inTransfers  MoneyTransfer[] @relation("TransferToAccount")

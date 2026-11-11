@@ -1206,28 +1206,6 @@ export function AccountsDashboard({ go, focus, onFocusDone }: AccountsDashboardP
             <Text style={styles.headerActionBtnTranslucentText}>{lang === 'bn' ? 'উত্তোলন' : 'Withdraw'}</Text>
           </TouchableOpacity>
           <TouchableOpacity
-            style={styles.headerActionBtnWhite}
-            onPress={() => go?.('collect')}
-            activeOpacity={0.85}
-          >
-            <AppIcon name={icons.collect} size={16} iconColor="#1c70b9" />
-            <Text style={styles.headerActionBtnWhiteText}>
-              {lang === 'bn' ? 'কালেকশন' : 'Collect'}
-            </Text>
-          </TouchableOpacity>
-
-          <TouchableOpacity
-            style={styles.headerActionBtnTranslucent}
-            onPress={() => go?.('pay')}
-            activeOpacity={0.85}
-          >
-            <AppIcon name={icons.pay} size={16} iconColor="#FFFFFF" />
-            <Text style={styles.headerActionBtnTranslucentText}>
-              {lang === 'bn' ? 'মহাজন পরিশোধ' : 'Pay Vendor'}
-            </Text>
-          </TouchableOpacity>
-
-          <TouchableOpacity
             style={styles.headerActionBtnTranslucent}
             onPress={() => setTransferModalOpen(true)}
             activeOpacity={0.85}
@@ -1474,8 +1452,8 @@ export function AccountsDashboard({ go, focus, onFocusDone }: AccountsDashboardP
         {[
           { key: 'overview', labelBn: 'সারসংক্ষেপ', labelEn: 'Overview', icon: icons.profit },
           { key: 'reports', labelBn: 'রিপোর্ট', labelEn: 'Reports', icon: icons.report },
-          { key: 'due', labelBn: `👥 কাস্টমার বাকি (${n(totalDueCount)})`, labelEn: `Receivables (${totalDueCount})`, icon: icons.customers },
-          { key: 'pay', labelBn: `🏢 মহাজন দেনা (${n(totalPayableCount)})`, labelEn: `Payables (${totalPayableCount})`, icon: icons.vendors },
+          { key: 'collection', labelBn: 'গ্রাহক কালেকশন', labelEn: 'Customer Collection', icon: icons.collect },
+          { key: 'supplierPayment', labelBn: 'সরবরাহকারী পেমেন্ট', labelEn: 'Supplier Payment', icon: icons.pay },
           { key: 'expense', labelBn: '📉 খরচের রেজিস্টার', labelEn: 'Expense Register', icon: icons.expense },
           { key: 'houseExpense', labelBn: '🏠 বাসার খরচ', labelEn: 'House Expenses', icon: icons.moneyOut },
         ].map(tTab => {
@@ -1484,7 +1462,11 @@ export function AccountsDashboard({ go, focus, onFocusDone }: AccountsDashboardP
             <TouchableOpacity
               key={tTab.key}
               style={[styles.tabNavButton, active && styles.tabNavButtonActive]}
-              onPress={() => setActiveTab(tTab.key as any)}
+              onPress={() => {
+                if (tTab.key === 'collection') go?.('collect');
+                else if (tTab.key === 'supplierPayment') go?.('pay');
+                else setActiveTab(tTab.key as any);
+              }}
             >
               <Text style={[styles.tabNavText, active && styles.tabNavTextActive]}>
                 {lang === 'bn' ? tTab.labelBn : tTab.labelEn}
@@ -1899,18 +1881,8 @@ export function AccountsDashboard({ go, focus, onFocusDone }: AccountsDashboardP
                 </View>
               </View>
 
-              {/* Visual Liquidity Comparison Bars */}
+              {/* Liquidity figures */}
               <View style={styles.liquidityBarsBox}>
-                <View style={styles.liqItem}>
-                  <View style={styles.liqLabelRow}>
-                    <Text style={styles.liqName}>{lang === 'bn' ? 'বাজারে কাস্টমার পাওনা' : 'Customer Receivables'}</Text>
-                    <Text style={[styles.liqVal, { color: '#BE185D' }]}>{m(totalDueAmount)}</Text>
-                  </View>
-                  <View style={styles.liqTrack}>
-                    <View style={[styles.liqFill, { width: '85%', backgroundColor: '#EC4899' }]} />
-                  </View>
-                </View>
-
                 <View style={styles.liqItem}>
                   <View style={styles.liqLabelRow}>
                     <Text style={styles.liqName}>{lang === 'bn' ? 'হাতে ক্যাশ ও ব্যাংক তহবিল' : 'Liquid Cash Reserves'}</Text>
@@ -1918,16 +1890,6 @@ export function AccountsDashboard({ go, focus, onFocusDone }: AccountsDashboardP
                   </View>
                   <View style={styles.liqTrack}>
                     <View style={[styles.liqFill, { width: '60%', backgroundColor: '#10B981' }]} />
-                  </View>
-                </View>
-
-                <View style={styles.liqItem}>
-                  <View style={styles.liqLabelRow}>
-                    <Text style={styles.liqName}>{lang === 'bn' ? 'মহাজনদের মোট দেনা' : 'Vendor Payables'}</Text>
-                    <Text style={[styles.liqVal, { color: '#DC2626' }]}>{m(totalPayableAmount)}</Text>
-                  </View>
-                  <View style={styles.liqTrack}>
-                    <View style={[styles.liqFill, { width: '45%', backgroundColor: '#EF4444' }]} />
                   </View>
                 </View>
 

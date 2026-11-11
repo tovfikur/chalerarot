@@ -37,7 +37,7 @@ export interface Service {
   purchase(a: { vendorId: string; lines: PurchaseLineIn[]; paid: number; accountId?: string; payments?: { accountId: string; amount: number }[]; next?: string; date?: string; memoNo?: string }): Promise<{ id: string; invoiceNo?: string; total: number }>;
   money(kind: 'c' | 'v', a: { partyId: string; amount: number; accountId: string; date: string; note?: string; next?: string }): Promise<void>;
   partyPaymentSplit(a: { kind: 'c' | 'v'; partyId: string; payments: { accountId: string; amount: number }[]; date: string; note?: string }): Promise<{ payments: { id: string; paymentNo: string; amount: number; accountId: string }[] }>;
-  saveExpense(e: { id?: string; category: string; customName?: string; amount: number; accountId: string; date: string; note?: string; capitalized?: boolean }): Promise<void>;
+  saveExpense(e: { id?: string; category: string; customName?: string; amount: number; accountId?: string; date: string; note?: string; capitalized?: boolean }): Promise<void>;
   deleteExpense(id: string): Promise<void>;
   saveReturn(a: { kind: 'sale' | 'purchase'; saleId?: string; purchaseId?: string; lines: object[]; settlement: 'credit' | 'refund'; accountId?: string; date?: string; note?: string }): Promise<{ id: string; returnNo?: string; totalAmount: number }>;
   saveAccount(a: Partial<MoneyAccountRow> & { id?: string }): Promise<void>;

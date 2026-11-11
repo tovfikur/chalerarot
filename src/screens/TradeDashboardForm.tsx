@@ -800,7 +800,7 @@ export function TradeDashboardForm({ mode, onDone, onOpenHistory, editId }: Trad
           payments: (d.payments ?? []).map((payment: any) => ({
             transactionId: payment.transactionNo ?? payment.paymentNo ?? payment.id,
             date: payment.date ? (lang === 'bn' ? localeDigits(payment.date, lang) : payment.date) : undefined,
-            description: invoicePaymentDescription(payment, lang),
+            description: invoicePaymentDescription({ ...payment, contraCustomerName: payment.contraCustomerName ?? (isSaleKind ? party?.name : undefined) }, lang),
             accountName: payment.accountName,
             amount: m(payment.amount),
           })),
@@ -914,7 +914,6 @@ export function TradeDashboardForm({ mode, onDone, onOpenHistory, editId }: Trad
     const effectivePartyId = selectedPartyId;
     if (paymentLines.some(payment => !payment.active)) { showFormError(tx('পেমেন্টের জন্য সক্রিয় ক্যাশ বা ব্যাংক অ্যাকাউন্ট বাছুন।', 'Choose an active cash or bank account for the payment.')); return; }
     const chosenAccountId = paymentLines[0]?.accountId ?? paymentAccounts[0]?.id ?? expenseAccountId;
-    if (!isSale && validLines.some(l => parseNum(l.otherCost) > 0) && !expenseAccountId) { showFormError(tx('ক্রয় খরচের জন্য একটি সক্রিয় অ্যাকাউন্ট নির্বাচন করুন।', 'Select an active account for purchase costs.')); return; }
 
     setSubmitting(true);
     try {
@@ -1046,7 +1045,7 @@ export function TradeDashboardForm({ mode, onDone, onOpenHistory, editId }: Trad
           }, 0)
         : 0;
 
-      if (totalLinesOtherCost > 0 && expAccountId && !isSale) {
+      if (totalLinesOtherCost > 0 && !isSale) {
         const lineDetails = validLines
           .filter(l => parseNum(l.otherCost) > 0)
           .map(l => {
@@ -1067,7 +1066,6 @@ export function TradeDashboardForm({ mode, onDone, onOpenHistory, editId }: Trad
             category: 'loading',
             customName: 'ক্রয় খরচ (প্রতি বস্তা)',
             amount: totalLinesOtherCost,
-            accountId: expAccountId,
             date: todayISO,
             capitalized: true,
             note: `[ধরন: ল্যান্ডিং] ক্রয় #${invoiceRef} বস্তা প্রতি খরচ (${lineDetails})`,

@@ -54,9 +54,9 @@ function validate(body: Record<string, unknown>, opts?: { allowPastDate?: boolea
   if (capitalized && (category !== 'loading' || !note.startsWith('[ধরন: ল্যান্ডিং] ক্রয় #'))) {
     return { error: 'Capitalized landed costs must be linked to a purchase' };
   }
-  // An expense always spends real money, so an account is mandatory. Older
-  // clients may still send a payment method; it is resolved to that account.
-  if (!body.accountId && !body.method) return { error: 'Payment account is required' };
+  // Capitalized landed costs increase inventory and accrue to a liability;
+  // they are not cash or bank payments at the time they are entered.
+  if (!capitalized && !body.accountId && !body.method) return { error: 'Payment account is required' };
   return { clean: { category, customName: customName || null, amount, date, note: note || null, capitalized } };
 }
 
@@ -95,13 +95,13 @@ expenses.post('/', async (req: Request, res: Response) => {
   if (!clean) return res.status(400).json({ error: v.error, code: v.code ?? 'EXPENSE_INVALID' });
   const body = (req.body ?? {}) as Record<string, unknown>;
   const e = await db.$transaction(async t => {
-    const acc = await resolveAccount(t, { accountId: body.accountId ? String(body.accountId) : null, method: body.method ? String(body.method) : null });
+    const acc = clean.capitalized ? null : await resolveAccount(t, { accountId: body.accountId ? String(body.accountId) : null, method: body.method ? String(body.method) : null });
     const created = await t.expense.create({ data: clean });
     const saved = await t.expense.update({
       where: { id: created.id },
       data: { voucherNo: `EXP-${created.id.slice(-8).toUpperCase()}` },
     });
-    await recordMovement(t, {
+    if (acc) await recordMovement(t, {
       accountId: acc.id, method: acc.type, direction: 'out', amount: clean.amount, date: clean.date,
       sourceType: 'expense', sourceId: created.id, note: clean.note,
     });
@@ -134,9 +134,9 @@ expenses.put('/:id', async (req: Request, res: Response) => {
   const clean = v.clean;
   if (!clean) return res.status(400).json({ error: v.error, code: v.code ?? 'EXPENSE_INVALID' });
   await db.$transaction(async t => {
-    const acc = await resolveAccount(t, { accountId: merged.accountId ? String(merged.accountId) : null, method: merged.method ? String(merged.method) : null });
+    const acc = clean.capitalized && !curMv ? null : await resolveAccount(t, { accountId: merged.accountId ? String(merged.accountId) : null, method: merged.method ? String(merged.method) : null });
     await t.expense.update({ where: { id: cur.id }, data: clean });
-    await updateMovement(t, 'expense', cur.id, { accountId: acc.id, method: acc.type, direction: 'out', amount: clean.amount, date: clean.date });
+    if (acc) await updateMovement(t, 'expense', cur.id, { accountId: acc.id, method: acc.type, direction: 'out', amount: clean.amount, date: clean.date });
   });
   res.json({ id: cur.id });
 });

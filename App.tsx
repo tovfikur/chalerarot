@@ -7,6 +7,7 @@ import { Key, tp } from './src/i18n';
 import { color, useMoney, useDateStr } from './src/ui';
 import { Home, Trade, Products, Parties, Money, Stock, Accounts, More, Trash, DetailShell, InvoiceModal, ReturnHome, ReturnModal, BankCash, StockDashboard, ExpenseDashboard } from './src/screens';
 import { api, Reminder, GSearchRes } from './src/api';
+import { LabourAccounts } from './src/screens/LabourAccounts';
 
 import { AppIcon, icons, TAB_ICON_SIZE, IconName } from './src/icons';
 import { useBreakpoint, useFs } from './src/responsive';
@@ -17,6 +18,7 @@ const tabs: { r: string; k: Key; icon: IconName }[] = [
   { r: 'sale', k: 'sale', icon: icons.sale },
   { r: 'purchase', k: 'purchase', icon: icons.purchase },
   { r: 'accounts', k: 'accounts', icon: icons.accounts },
+  { r: 'labour', k: 'labourAccounts', icon: icons.vendors },
   { r: 'settings', k: 'settings', icon: icons.settings },
 ];
 
@@ -33,6 +35,7 @@ const sidebar: { r: string; k: Key; icon: IconName; color: string; bg: string }[
   { r: 'stock', k: 'stockDashboard', icon: icons.stock, color: '#D97706', bg: '#FFFBEB' },
   { r: 'expense', k: 'expenseDashboard', icon: icons.expense, color: '#C026D3', bg: '#FDF4FF' },
   { r: 'accounts', k: 'accountsLabel', icon: icons.accounts, color: '#3B82F6', bg: '#EFF6FF' },
+  { r: 'labour', k: 'labourAccounts', icon: icons.vendors, color: '#EA580C', bg: '#FFF7ED' },
   { r: 'bank', k: 'bankCash', icon: icons.bankCash, color: '#16A34A', bg: '#F0FDF4' },
   { r: 'settings', k: 'settings', icon: icons.settings, color: '#6366F1', bg: '#EEF2FF' },
 ];
@@ -51,10 +54,11 @@ const titleKey: Record<string, Key> = {
   collect: 'collect', pay: 'pay', customers: 'customers', vendors: 'vendors',
   stock: 'stockDashboard', expense: 'expenseDashboard', trash: 'trash',
   bank: 'bankCash', settings: 'settings', more: 'settings',
+  labour: 'labourAccounts',
 };
 
 // Hash routes for web so refresh + Back/Forward restore the page.
-const ROUTES = ['home', 'sale', 'purchase', 'accounts', 'more', 'settings', 'customers', 'vendors', 'stock', 'expense', 'collect', 'pay', 'trash', 'bank'] as const;
+const ROUTES = ['home', 'sale', 'purchase', 'accounts', 'labour', 'more', 'settings', 'customers', 'vendors', 'stock', 'expense', 'collect', 'pay', 'trash', 'bank'] as const;
 const isWeb = typeof window !== 'undefined' && typeof window.location !== 'undefined';
 const routeFromHash = (): string => {
   if (!isWeb) return 'home';
@@ -156,7 +160,7 @@ function Shell() {
   const body = {
     home: <Home go={setRoute} />, sale: <Trade key="s" mode="sale" editId={transactionEdit?.kind === 'sale' ? transactionEdit.id : null} onEditDone={finishPartyTransactionEdit} />, purchase: <Trade key="p" mode="purchase" editId={transactionEdit?.kind === 'purchase' ? transactionEdit.id : null} onEditDone={finishPartyTransactionEdit} />, accounts: <Accounts go={setRoute} focus={focus} onFocusDone={() => setFocus(null)} />, more: <Settings />, settings: <Settings />,
     customers: <Parties kind="c" focus={partyFocus?.kind === 'c' ? partyFocus.id : null} onFocusDone={() => setPartyFocus(null)} onReturn={() => setRoute('home')} onEditTransaction={editPartyTransaction} />, vendors: <Parties kind="v" focus={partyFocus?.kind === 'v' ? partyFocus.id : null} onFocusDone={() => setPartyFocus(null)} onReturn={() => setRoute('home')} onEditTransaction={editPartyTransaction} />, stock: <StockDashboard />, expense: <ExpenseDashboard go={setRoute} />, collect: <Money key="c" kind="c" done={() => setRoute('accounts')} />, pay: <Money key="v" kind="v" done={() => setRoute('accounts')} />, trash: <Trash />,
-    bank: <BankCash />,
+    bank: <BankCash />, labour: <LabourAccounts />,
   }[route];
   const openInv = (kind: 'sale' | 'purchase', id: string) => { closeSearch(); setInv({ kind, id }); };
   const openParty = (kind: 'c' | 'v', id: string) => { closeSearch(); setPartyFocus({ kind, id }); setRoute(kind === 'c' ? 'customers' : 'vendors'); };

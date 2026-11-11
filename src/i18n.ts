@@ -69,7 +69,7 @@ const d = {
     insufMax:'সর্বোচ্চ {balance} ট্রান্সফার করতে পারবেন।',
     noTransferYet:'এখনো কোনো ট্রান্সফার নেই', wait:'অপেক্ষা করুন...',
     // Bank & Cash
-    bankCash:'ব্যাংক ও ক্যাশ', totalMoneyLabel:'মোট টাকা', accountBalanceLabel:'বর্তমান ব্যালেন্স',
+    bankCash:'ব্যাংক ও ক্যাশ', labourAccounts:'শ্রমিকের হিসাব', totalMoneyLabel:'মোট টাকা', accountBalanceLabel:'বর্তমান ব্যালেন্স',
     addAccount:'নতুন অ্যাকাউন্ট', accountName:'অ্যাকাউন্টের নাম', accountType:'অ্যাকাউন্টের ধরন', openingBalanceLabel:'শুরুর ব্যালেন্স',
     bankName:'ব্যাংকের নাম', accountNumber:'অ্যাকাউন্ট নম্বর', branch:'ব্রাঞ্চ', mobileNumber:'মোবাইল নম্বর',
     noMoneyAccountYet:'কোনো অ্যাকাউন্ট নেই', accountHistory:'অ্যাকাউন্টের লেনদেন', editAccount:'অ্যাকাউন্ট সম্পাদনা', saleReturnLabel2:'বিক্রয় ফেরত',
@@ -181,7 +181,7 @@ const d = {
     insufMax:'Maximum transferable amount is {balance}.',
     noTransferYet:'No transfer yet', wait:'Please wait...',
     // Bank & Cash
-    bankCash:'Bank & Cash', totalMoneyLabel:'Total Money', accountBalanceLabel:'Current Balance',
+    bankCash:'Bank & Cash', labourAccounts:'Labour Accounts', totalMoneyLabel:'Total Money', accountBalanceLabel:'Current Balance',
     addAccount:'Add Account', accountName:'Account Name', accountType:'Account Type', openingBalanceLabel:'Opening Balance',
     bankName:'Bank Name', accountNumber:'Account Number', branch:'Branch', mobileNumber:'Mobile Number',
     noMoneyAccountYet:'No money account yet', accountHistory:'Account Transactions', editAccount:'Edit Account', saleReturnLabel2:'Sales Return',

@@ -43,7 +43,7 @@ export function fmtTime(iso: string, bn: boolean): string {
 
 const esc = (s: string) => s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
 
-export function invoicePaymentDescription(payment: { description?: string; descriptionCode?: 'transport' | 'advance' | 'invoice'; contraPurchaseInvoiceNo?: string; contraSaleInvoiceNo?: string }, lang: 'bn' | 'en'): string {
+export function invoicePaymentDescription(payment: { description?: string; descriptionCode?: 'transport' | 'advance' | 'invoice'; contraPurchaseInvoiceNo?: string; contraSaleInvoiceNo?: string; contraCustomerName?: string }, lang: 'bn' | 'en'): string {
   const isBn = lang === 'bn';
   const defaultTransport = 'Transport payment (paid directly by customer)';
   let raw = payment.description?.trim();
@@ -66,6 +66,9 @@ export function invoicePaymentDescription(payment: { description?: string; descr
       : payment.descriptionCode === 'advance' ? (isBn ? 'অগ্রিম পেমেন্ট সমন্বয়' : 'Advance payment applied')
         : (isBn ? 'ইনভয়েস পেমেন্ট' : 'Invoice payment'),
   ];
+  if (payment.descriptionCode === 'transport' && payment.contraCustomerName) {
+    parts.push(`${isBn ? 'গ্রাহক' : 'Customer'}: ${payment.contraCustomerName}`);
+  }
   if (payment.contraPurchaseInvoiceNo) parts.push(`${isBn ? 'ক্রয় ইনভয়েস' : 'Purchase invoice'} ${payment.contraPurchaseInvoiceNo}`);
   if (payment.contraSaleInvoiceNo) parts.push(`${isBn ? 'বিক্রয় ইনভয়েস' : 'Sales invoice'} ${payment.contraSaleInvoiceNo}`);
   return parts.join(' · ');

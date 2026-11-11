@@ -7,8 +7,8 @@ export const accounting = Router();
 const types = ['asset', 'liability', 'equity', 'income', 'expense'] as const;
 const defaults = [
   ['1010', 'Cash', 'asset'], ['1020', 'Bank', 'asset'], ['1030', 'bKash', 'asset'], ['1040', 'Nagad', 'asset'], ['1050', 'Rocket', 'asset'],
-  ['1100', 'Accounts receivable', 'asset'], ['1110', 'Supplier advances', 'asset'], ['1200', 'Inventory', 'asset'],
-  ['2000', 'Accounts payable', 'liability'], ['2010', 'Customer credits', 'liability'],
+  ['1100', 'Accounts receivable', 'asset'], ['1110', 'Supplier advances', 'asset'], ['1120', 'Labour Advances', 'asset'], ['1200', 'Inventory', 'asset'],
+  ['2000', 'Accounts payable', 'liability'], ['2010', 'Customer credits', 'liability'], ['2020', 'Landing Cost Payable', 'liability'],
   ['3000', 'Owner equity', 'equity'], ['3200', 'Owner drawings / other expense', 'expense'], ['3300', 'House Expenses', 'equity'], ['4000', 'Sales revenue', 'income'],
   ['4100', 'Sales returns', 'income'], ['5000', 'Cost of goods sold', 'expense'], ['6000', 'Operating expenses', 'expense'],
   ['6100', 'Inventory adjustments', 'expense'], ['9000', 'Other income/expenses', 'expense'],

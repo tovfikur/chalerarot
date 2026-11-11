@@ -149,9 +149,9 @@ const invoicePaymentDetails = async (
   const contraPurchaseNoById = new Map(contraPurchases.map(purchase => [purchase.id, purchase.invoiceNo ?? undefined]));
   const contraSaleIds = [...new Set(paymentRows.map(row => contraSaleIdFromNote(row.note)).filter((id): id is string => Boolean(id)))];
   const contraSales = contraSaleIds.length
-    ? await db.sale.findMany({ where: { id: { in: contraSaleIds } }, select: { id: true, invoiceNo: true } })
+    ? await db.sale.findMany({ where: { id: { in: contraSaleIds } }, select: { id: true, invoiceNo: true, customer: { select: { name: true } } } })
     : [];
-  const contraSaleNoById = new Map(contraSales.map(sale => [sale.id, sale.invoiceNo ?? undefined]));
+  const contraSaleById = new Map(contraSales.map(sale => [sale.id, { invoiceNo: sale.invoiceNo ?? undefined, customerName: sale.customer?.name ?? undefined }]));
   return allocations.map(allocation => {
     const payment = paymentById.get(allocation.paymentId);
     const movement = movementById.get(allocation.paymentId) ?? directMovementByPaymentId.get(allocation.paymentId);
@@ -172,7 +172,8 @@ const invoicePaymentDetails = async (
       advance: !((payment as any)?.saleId ?? (payment as any)?.purchaseId),
       transportPayment: payment?.note?.startsWith('[[TRANSPORT_PAYMENT]]') ?? false,
       contraPurchaseInvoiceNo: contraPurchaseId ? contraPurchaseNoById.get(contraPurchaseId) : undefined,
-      contraSaleInvoiceNo: contraSaleId ? contraSaleNoById.get(contraSaleId) : undefined,
+      contraSaleInvoiceNo: contraSaleId ? contraSaleById.get(contraSaleId)?.invoiceNo : undefined,
+      contraCustomerName: contraSaleId ? contraSaleById.get(contraSaleId)?.customerName : undefined,
       transportContra: isTransportContra,
     };
   });

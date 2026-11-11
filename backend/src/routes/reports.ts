@@ -28,8 +28,10 @@ const ledgerAccountCode = (name: string) => {
   if (name.startsWith('Rocket:')) return '1050';
   if (name === 'Accounts receivable') return '1100';
   if (name === 'Supplier advances') return '1110';
+  if (name === 'Labour Advances') return '1120';
   if (name === 'Inventory') return '1200';
   if (name === 'Accounts payable') return '2000';
+  if (name === 'Landing Cost Payable') return '2020';
   if (name === 'Customer credits') return '2010';
   if (name.startsWith('Owner equity')) return '3000';
   if (name === 'Sales revenue') return '4000';
@@ -48,7 +50,7 @@ export const reports = Router();
 reports.get('/balance-sheet', async (req: Request, res: Response) => {
   await reconcileAutomaticJournalEntries();
   const asOf = typeof req.query.asOf === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(req.query.asOf) ? req.query.asOf : todayStr();
-  const [accounts, movements, stock, customers, sales, cPays, sReturns, vendors, purchases, vPays, pReturns] = await Promise.all([
+  const [accounts, movements, stock, customers, sales, cPays, sReturns, vendors, purchases, vPays, pReturns, landedExpenses, labourCosts, labourPayments, labourAdvances] = await Promise.all([
     db.moneyAccount.findMany({ select: { id: true, openingBalance: true, openingDate: true, type: true } }),
     db.moneyMovement.findMany({ where: { active: true, date: { lte: asOf } }, select: { moneyAccountId: true, method: true, direction: true, amount: true } }),
     db.stockMovement.findMany({ where: { date: { lte: asOf }, bucket: 'sellable' } }),
@@ -58,7 +60,19 @@ reports.get('/balance-sheet', async (req: Request, res: Response) => {
     db.vendor.findMany({ where: { deletedAt: null } }), db.purchase.findMany({ where: { date: { lte: asOf } } }),
     db.vendorPayment.findMany({ where: { active: true, date: { lte: asOf } } }),
     db.productReturn.findMany({ where: { kind: 'purchase', date: { lte: asOf } } }),
+    db.expense.findMany({ where: { capitalized: true, deletedAt: null, date: { lte: asOf } }, select: { id: true, amount: true } }),
+    db.labourCost.findMany({ where: { date: { lte: asOf } }, select: { amount: true, advanceApplied: true } }),
+    db.labourPayment.findMany({ where: { date: { lte: asOf } }, select: { amount: true } }),
+    db.labourAdvance.findMany({ where: { date: { lte: asOf } }, select: { amount: true, appliedAmount: true } }),
   ]);
+  const landedMovements = landedExpenses.length ? await db.moneyMovement.findMany({ where: { sourceType: 'expense', sourceId: { in: landedExpenses.map(e => e.id) }, active: true, date: { lte: asOf } }, select: { sourceId: true } }) : [];
+  const paidLandedIds = new Set(landedMovements.map(m => m.sourceId));
+  const landingCostPayable = +(
+    landedExpenses.filter(e => !paidLandedIds.has(e.id)).reduce((total, e) => total + e.amount, 0)
+    + labourCosts.reduce((total, e) => total + e.amount - e.advanceApplied, 0)
+    - labourPayments.reduce((total, p) => total + p.amount, 0)
+  ).toFixed(2);
+  const labourAdvanceBalance = +(labourAdvances.reduce((total, a) => total + a.amount, 0) - labourCosts.reduce((total, c) => total + c.advanceApplied, 0)).toFixed(2);
   const accountBalance = (type: string) => {
     const typedAccounts = accounts.filter(a => a.type === type);
     const legacyMovements = movements.filter(m => !m.moneyAccountId && m.method === type);
@@ -97,8 +111,8 @@ reports.get('/balance-sheet', async (req: Request, res: Response) => {
   const payables = vendorPayableBase + Math.max(0, -payableAdjustment);
   const inventory = stock.reduce((t, x) => t + x.value, 0) + delta(code => code === '1200');
   const payablesFinal = payables;
-  const otherAssets = delta((code, _name, type, moneyType) => type === 'asset' && !moneyType && !['1010', '1020', '1030', '1040', '1050', '1100', '1110', '1200'].includes(code));
-  const otherLiabilities = -delta((code, _name, type) => type === 'liability' && code !== '2000');
+  const otherAssets = delta((code, _name, type, moneyType) => type === 'asset' && !moneyType && !['1010', '1020', '1030', '1040', '1050', '1100', '1110', '1120', '1200'].includes(code)) + labourAdvanceBalance;
+  const otherLiabilities = -delta((code, _name, type) => type === 'liability' && code !== '2000') + landingCostPayable;
   const assets = (cash ?? 0) + (bank ?? 0) + (wallets ?? 0) + receivables + supplierAdvances + inventory + otherAssets;
   const totalLiabilities = payablesFinal + customerCredits + otherLiabilities;
   const equity = assets - totalLiabilities;
@@ -124,7 +138,7 @@ reports.get('/balance-sheet', async (req: Request, res: Response) => {
   const dynamicBalance = (code: string, name: string, type: string, balance: number) => ({ code, name: byCode.get(code)?.name ?? name, type, balance: +balance.toFixed(2) });
   const accountBreakdown = {
     assets: [
-      ...rowsOfType('asset').filter(row => !['1010', '1020', '1030', '1040', '1050', '1100', '1110', '1200'].includes(row.code) && !managedMoneyCodes.has(row.code)),
+      ...rowsOfType('asset').filter(row => !['1010', '1020', '1030', '1040', '1050', '1100', '1110', '1120', '1200'].includes(row.code) && !managedMoneyCodes.has(row.code)),
       ...(cash !== null ? [dynamicBalance('1010', 'Cash', 'asset', cash)] : []),
       ...(bank !== null ? [dynamicBalance('1020', 'Bank', 'asset', bank)] : []),
       ...(walletBalances[0] ? [dynamicBalance('1030', 'bKash', 'asset', walletBalances[0])] : []),
@@ -132,10 +146,12 @@ reports.get('/balance-sheet', async (req: Request, res: Response) => {
       ...(walletBalances[2] ? [dynamicBalance('1050', 'Rocket', 'asset', walletBalances[2])] : []),
       ...(receivables ? [dynamicBalance('1100', 'Accounts receivable', 'asset', receivables)] : []),
       ...(supplierAdvances ? [dynamicBalance('1110', 'Supplier advances', 'asset', supplierAdvances)] : []),
+      ...(labourAdvanceBalance ? [dynamicBalance('1120', 'Labour Advances', 'asset', labourAdvanceBalance)] : []),
       ...(inventory ? [dynamicBalance('1200', 'Inventory', 'asset', inventory)] : []),
     ].sort((a, b) => a.code.localeCompare(b.code)),
     liabilities: [
-      ...rowsOfType('liability').filter(row => !['2000', '2010'].includes(row.code)),
+      ...rowsOfType('liability').filter(row => !['2000', '2010', '2020'].includes(row.code)),
+      ...((landingCostPayable + (accountTotals.get(byCode.get('2020')?.id ?? '')?.balance ?? 0)) ? [dynamicBalance('2020', 'Landing Cost Payable', 'liability', landingCostPayable + (accountTotals.get(byCode.get('2020')?.id ?? '')?.balance ?? 0))] : []),
       ...(payablesFinal ? [dynamicBalance('2000', 'Accounts payable', 'liability', payablesFinal)] : []),
       ...(customerCredits ? [dynamicBalance('2010', 'Customer credits', 'liability', customerCredits)] : []),
     ].sort((a, b) => a.code.localeCompare(b.code)),
@@ -281,7 +297,7 @@ async function computeAdvancePostings(to: string): Promise<AdvancePostings> {
 }
 
 async function deriveJournalRows(from: string, to: string) {
-  const [sales, purchases, expenses, returns, payments, accounts, customers, vendors, stockAdjustments, savedEntries, linkedCashAccounts] = await Promise.all([
+  const [sales, purchases, expenses, returns, payments, accounts, customers, vendors, stockAdjustments, savedEntries, linkedCashAccounts, labourCosts, labourPayments, labourAdvances] = await Promise.all([
     db.sale.findMany({ where: { date: { gte: from, lte: to } }, include: { items: true } }),
     db.purchase.findMany({ where: { date: { gte: from, lte: to } }, include: { items: true } }),
     db.expense.findMany({ where: { date: { gte: from, lte: to }, deletedAt: null } }),
@@ -293,6 +309,9 @@ async function deriveJournalRows(from: string, to: string) {
     db.stockMovement.findMany({ where: { date: { gte: from, lte: to }, type: { in: ['OPENING', 'ADJUSTMENT', 'REVALUE'] }, bucket: 'sellable' } }),
     db.journalEntry.findMany({ where: { active: true, status: 'posted', sourceType: { in: ['manual', 'houseExpense'] }, date: { gte: from, lte: to } }, include: { lines: { include: { account: true } } } }),
     db.chartAccount.findMany({ where: { moneyAccountId: { not: null } }, select: { moneyAccountId: true, name: true } }),
+    db.labourCost.findMany({ where: { date: { gte: from, lte: to } }, include: { labourer: { select: { name: true } } } }),
+    db.labourPayment.findMany({ where: { date: { gte: from, lte: to } }, include: { labourer: { select: { name: true } }, moneyAccount: { select: { id: true, name: true, type: true } } } }),
+    db.labourAdvance.findMany({ where: { date: { gte: from, lte: to } }, include: { labourer: { select: { name: true } }, moneyAccount: { select: { id: true, name: true, type: true } } } }),
   ]);
   const linkedName = new Map(linkedCashAccounts.map(a => [a.moneyAccountId!, a.name]));
   const cashLedgerName = (a?: { id?: string; name: string; type: string } | null) => a?.id ? linkedName.get(a.id) ?? moneyAccountLedgerName(a) : moneyAccountLedgerName(a);
@@ -364,7 +383,24 @@ async function deriveJournalRows(from: string, to: string) {
   for (const e of expenses) {
     const movement = payments.find(m => m.sourceType === 'expense' && m.sourceId === e.id);
     add(e.date, e.voucherNo ?? e.id, e.capitalized ? 'Inventory' : 'Operating expenses', e.capitalized ? 'Capitalized landed cost' : `Expense · ${e.category}`, e.amount, 0);
-    add(e.date, e.voucherNo ?? e.id, cashLedgerName(movement?.moneyAccount ?? (movement ? { name: movement.method, type: movement.method } : null)), 'Expense paid', 0, e.amount);
+    if (e.capitalized && !movement) add(e.date, e.voucherNo ?? e.id, 'Landing Cost Payable', 'Landed cost payable', 0, e.amount);
+    else add(e.date, e.voucherNo ?? e.id, cashLedgerName(movement?.moneyAccount ?? (movement ? { name: movement.method, type: movement.method } : null)), 'Expense paid', 0, e.amount);
+  }
+  for (const c of labourCosts) {
+    const reference = `LAB-${c.id.slice(-8).toUpperCase()}`;
+    add(c.date, reference, 'Operating expenses', c.direction === 'stockIn' ? `Labour cost · stock in · ${c.labourer.name}` : `Labour cost · stock out · ${c.labourer.name}`, c.amount, 0);
+    if (c.advanceApplied > 0) add(c.date, reference, 'Labour Advances', `Apply labour advance · ${c.labourer.name}`, 0, c.advanceApplied);
+    if (c.amount - c.advanceApplied > 0) add(c.date, reference, 'Landing Cost Payable', `Labour payable · ${c.labourer.name}`, 0, c.amount - c.advanceApplied);
+  }
+  for (const p of labourPayments) {
+    const reference = `LAB-PAY-${p.id.slice(-8).toUpperCase()}`;
+    add(p.date, reference, 'Landing Cost Payable', `Labour payment · ${p.labourer.name}`, p.amount, 0);
+    add(p.date, reference, cashLedgerName(p.moneyAccount), `Labour payment · ${p.labourer.name}`, 0, p.amount);
+  }
+  for (const a of labourAdvances) {
+    const reference = `LAB-ADV-${a.id.slice(-8).toUpperCase()}`;
+    add(a.date, reference, 'Labour Advances', `Labour advance · ${a.labourer.name}`, a.amount, 0);
+    add(a.date, reference, cashLedgerName(a.moneyAccount), `Labour advance · ${a.labourer.name}`, 0, a.amount);
   }
   for (const r of returns) {
     const ref = r.returnNo ?? r.id;

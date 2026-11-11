@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import { View, Text, TextInput, Alert, TouchableOpacity, Pressable, Modal, ActivityIndicator, ScrollView, Share, Platform } from 'react-native';
-import { useApp, today, Party, Product, type PeriodFinance } from './store';
+import { useApp, today, Party, Product, Tx, type PeriodFinance } from './store';
 import { BagUnit, CartLine, kgPerUnit, toKg, lineTotal } from './bags';
 import { Card, Title, Muted, Btn, Field, RequiredLabel, Chips, Row, Empty, Screen, SectionHead, PageHeader, ListPageHeader, ListTable, type TableColumn, type TableSort, AccountPicker, ACCOUNT_TYPES, methodIcon, methodName, useMoney, useNum, useDateStr, color } from './ui';
 import { AppIcon, icons } from './icons';
@@ -1592,6 +1592,14 @@ export function Parties({ kind, focus, onFocusDone, onReturn, onEditTransaction 
 }
 
 // Shared date-locked, keyboard-first Cash/Bank collection and supplier payment.
+type CollectionReceiptData = {
+  partyName: string;
+  partyCode?: string;
+  date: string;
+  note?: string;
+  payments: { paymentNo: string; transactionNo?: string; amount: number; accountName: string }[];
+};
+
 export function Money({ kind, done }: { kind: 'c' | 'v'; done: () => void }) {
   const { t, lang, business, moneyBalances, bal, customers, vendors, cTx, vTx, moneyAccounts, partyPaymentSplit } = useApp();
   const isC = kind === 'c';
@@ -1616,6 +1624,7 @@ export function Money({ kind, done }: { kind: 'c' | 'v'; done: () => void }) {
   const [note, setNote] = useState('');
   const [message, setMessage] = useState('');
   const [busy, setBusy] = useState(false);
+  const [selectedCollection, setSelectedCollection] = useState<Tx | null>(null);
   const codeRef = useRef<TextInput>(null), cashRef = useRef<TextInput>(null), bankRef = useRef<TextInput>(null), noteRef = useRef<TextInput>(null);
   const party = parties.find(p => p.id === partyId);
   const reportPayments = (isC ? cTx : vTx).filter(x => x.kind === 'payment'
@@ -1651,6 +1660,34 @@ export function Money({ kind, done }: { kind: 'c' | 'v'; done: () => void }) {
   };
   const exportPaymentReportExcel = () => {
     downloadReportCSV(paymentReportDoc, `${isC ? 'collection' : 'payment'}_report_${today()}.csv`);
+  };
+  const printPartyPaymentReceipt = (receipt: CollectionReceiptData) => {
+    const rows: ReportRow[] = receipt.payments.map(payment => ({
+      label: lang === 'bn' ? (isC ? 'আদায়ের পরিমাণ' : 'পরিশোধের পরিমাণ') : (isC ? 'Collection amount' : 'Payment amount'),
+      sub: [payment.paymentNo ? `${lang === 'bn' ? 'রসিদ নং' : 'Receipt no.'}: ${payment.paymentNo}` : '', payment.transactionNo ? `${lang === 'bn' ? 'লেনদেন আইডি' : 'Transaction ID'}: ${payment.transactionNo}` : '', payment.accountName].filter(Boolean).join(' · '),
+      right: m(payment.amount),
+    }));
+    const doc: ReportDoc = {
+      language: lang,
+      shop: business.name,
+      title: lang === 'bn' ? (isC ? 'গ্রাহক আদায় রসিদ' : 'সরবরাহকারী পেমেন্ট রসিদ') : (isC ? 'Customer Collection Receipt' : 'Supplier Payment Receipt'),
+      period: `${lang === 'bn' ? 'তারিখ' : 'Date'}: ${fd(receipt.date)}`,
+      meta: [
+        { label: lang === 'bn' ? (isC ? 'গ্রাহকের নাম' : 'সরবরাহকারীর নাম') : (isC ? 'Customer name' : 'Supplier name'), value: receipt.partyName },
+        ...(receipt.partyCode ? [{ label: lang === 'bn' ? (isC ? 'গ্রাহক কোড' : 'সরবরাহকারী কোড') : (isC ? 'Customer code' : 'Supplier code'), value: receipt.partyCode }] : []),
+      ],
+      sections: [{ title: lang === 'bn' ? 'পেমেন্টের বিবরণ' : 'Payment details', rows }],
+      total: { label: lang === 'bn' ? (isC ? 'মোট আদায়' : 'মোট পরিশোধ') : (isC ? 'Total collected' : 'Total paid'), value: m(receipt.payments.reduce((sum, payment) => sum + payment.amount, 0)) },
+      note: receipt.note ? `${lang === 'bn' ? 'বিবরণ' : 'Description'}: ${receipt.note}` : undefined,
+      printedAt: printedAtStamp(lang),
+      printLabel: lang === 'bn' ? 'রসিদ প্রিন্ট করুন' : 'Print receipt',
+    };
+    if (!printReport(doc)) showEntryError(lang, lang === 'bn' ? 'রসিদ প্রিন্ট করা যায়নি।' : 'Could not print receipt.');
+  };
+  const receiptForPayment = (payment: Tx): CollectionReceiptData | null => {
+    const txParty = parties.find(p => p.id === payment.partyId);
+    if (!txParty) return null;
+    return { partyName: txParty.name, partyCode: txParty.code, date: payment.date, note: payment.note, payments: [{ paymentNo: payment.ref ?? '', transactionNo: payment.transactionNo, amount: payment.amount, accountName: payment.account ?? '' }] };
   };
   const matches = codeQuery.trim() ? parties.filter(p => {
     const q = codeQuery.trim().toLocaleLowerCase();
@@ -1745,6 +1782,35 @@ export function Money({ kind, done }: { kind: 'c' | 'v'; done: () => void }) {
         </View>
       </View>
     </Modal>
+    {selectedCollection ? (
+      <Modal visible transparent animationType="fade" onRequestClose={() => setSelectedCollection(null)}>
+        <View style={{ flex: 1, backgroundColor: 'rgba(15,23,42,0.5)', justifyContent: 'center', padding: 16 }}>
+          <View style={{ width: '100%', maxWidth: 520, alignSelf: 'center', backgroundColor: '#FFFFFF', borderRadius: 16, overflow: 'hidden' }}>
+            <View style={{ padding: 16, borderBottomWidth: 1, borderBottomColor: color.line, flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
+              <Text style={{ fontSize: 18, fontWeight: '800', color: color.text }}>{lang === 'bn' ? (isC ? 'কালেকশনের বিবরণ' : 'পেমেন্টের বিবরণ') : (isC ? 'Collection details' : 'Payment details')}</Text>
+              <TouchableOpacity onPress={() => setSelectedCollection(null)} accessibilityLabel={lang === 'bn' ? 'বন্ধ করুন' : 'Close'}><AppIcon name={icons.cancel} size={21} iconColor={color.muted} /></TouchableOpacity>
+            </View>
+            <View style={{ padding: 18, gap: 10 }}>
+              {(() => {
+                const txParty = parties.find(p => p.id === selectedCollection.partyId);
+                const receiptNo = selectedCollection.ref || selectedCollection.id;
+                return <>
+                  <Text style={{ color: color.text, fontSize: 16, fontWeight: '800' }}>{txParty?.name ?? ''}</Text>
+                  {txParty?.code ? <Text style={{ color: color.muted }}>{lang === 'bn' ? (isC ? 'কাস্টমার কোড' : 'সরবরাহকারী কোড') : (isC ? 'Customer code' : 'Supplier code')}: {txParty.code}</Text> : null}
+                  <Text style={{ color: color.muted }}>{lang === 'bn' ? (isC ? 'রসিদ নম্বর' : 'পেমেন্ট নম্বর') : (isC ? 'Receipt no.' : 'Payment no.')}: {receiptNo}</Text>
+                  {selectedCollection.transactionNo ? <Text style={{ color: color.muted }}>{lang === 'bn' ? 'লেনদেন আইডি' : 'Transaction ID'}: {selectedCollection.transactionNo}</Text> : null}
+                  <Text style={{ color: color.muted }}>{lang === 'bn' ? 'তারিখ' : 'Date'}: {fd(selectedCollection.date)}</Text>
+                  <Text style={{ color: color.muted }}>{lang === 'bn' ? 'অ্যাকাউন্ট' : 'Account'}: {selectedCollection.account || '—'}</Text>
+                  <Text style={{ color: color.text, fontSize: 20, fontWeight: '900' }}>{m(selectedCollection.amount)}</Text>
+                  {selectedCollection.note ? <Text style={{ color: color.muted }}>{lang === 'bn' ? 'বিবরণ' : 'Description'}: {selectedCollection.note}</Text> : null}
+                  <Btn icon={icons.print} label={lang === 'bn' ? (isC ? 'আদায়ের রসিদ প্রিন্ট করুন' : 'পেমেন্ট রসিদ প্রিন্ট করুন') : (isC ? 'Print collection receipt' : 'Print payment receipt')} onPress={() => { const receipt = receiptForPayment(selectedCollection); if (receipt) printPartyPaymentReceipt(receipt); }} />
+                </>;
+              })()}
+            </View>
+          </View>
+        </View>
+      </Modal>
+    ) : null}
     <MoneyBalanceCard balances={moneyBalances.filter(b => b.method === 'cash' || b.method === 'bank')} />
     <Card>
       <SectionHead icon={isC ? icons.collect : icons.pay}>{t(isC ? 'receivePayment' : 'payPayment')}</SectionHead>
@@ -1785,14 +1851,16 @@ export function Money({ kind, done }: { kind: 'c' | 'v'; done: () => void }) {
       <Muted>{lang === 'bn' ? `${reportPayments.length}টি ফিল্টার মিলে গেছে` : `${reportPayments.length} matching transactions`}</Muted>
       {reportPayments.length ? reportPayments.map(tx => {
         const txParty = parties.find(p => p.id === tx.partyId);
-        return <View key={tx.id} style={{ paddingVertical: 10, borderBottomWidth: 1, borderBottomColor: color.line }}>
+        const content = <>
           <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 12 }}>
             <Text style={{ flex: 1, color: color.text, fontWeight: '800' }}>{tx.transactionNo ? `${tx.transactionNo} · ` : ''}{tx.ref || (isC ? t('collect') : t('pay'))} · {txParty?.name ?? ''}</Text>
             <Text style={{ color: isC ? '#047857' : '#B45309', fontWeight: '800' }}>{m(tx.amount)}</Text>
           </View>
           <Text style={{ color: color.muted, fontSize: 12, marginTop: 3 }}>{fd(tx.date)}{tx.account ? ` · ${tx.account}` : ''}</Text>
           {tx.note ? <Text style={{ color: color.muted, fontSize: 12, marginTop: 2 }}>{tx.note}</Text> : null}
-        </View>;
+          <Text style={{ color: '#087E8B', fontSize: 12, fontWeight: '700', marginTop: 4 }}>{lang === 'bn' ? 'বিস্তারিত ও প্রিন্ট অপশন দেখতে চাপ দিন' : 'Tap to view details and print option'}</Text>
+        </>;
+        return <TouchableOpacity key={tx.id} accessibilityRole="button" onPress={() => setSelectedCollection(tx)} style={{ paddingVertical: 10, borderBottomWidth: 1, borderBottomColor: color.line }}>{content}</TouchableOpacity>;
       }) : <Empty />}
     </Card>
   </Screen>;
@@ -2998,7 +3066,7 @@ function useInvoice() {
       payments: (d.payments ?? []).map(payment => ({
         transactionId: payment.transactionNo ?? payment.paymentNo ?? payment.id,
         date: payment.date ? fd(payment.date) : undefined,
-        description: invoicePaymentDescription(payment, lang),
+        description: invoicePaymentDescription({ ...payment, contraCustomerName: payment.contraCustomerName ?? (isSale ? party?.name : undefined) }, lang),
         accountName: payment.accountName,
         amount: m(payment.amount),
       })),
@@ -3194,7 +3262,7 @@ export function InvoiceModal({ kind, id, onClose, onReturn, onBack, onEdit }: {
             {doc.next ? <Row left={doc.labels.payDate} right={doc.next} /> : null}
             {extra.payments?.map(p => (
               <Row key={p.id} left={p.advance ? (lang === 'bn' ? 'পার্টি পেমেন্ট সমন্বয়' : 'Party payment applied') : t('payment')}
-                sub={[p.transactionNo ?? p.paymentNo ?? '', p.date ? fd(p.date) : '', p.accountName ?? '', invoicePaymentDescription(p, lang)].filter(Boolean).join(' · ')} right={m(p.amount)} />
+                sub={[p.transactionNo ?? p.paymentNo ?? '', p.date ? fd(p.date) : '', p.accountName ?? '', invoicePaymentDescription({ ...p, contraCustomerName: p.contraCustomerName ?? (kind === 'sale' ? doc.partyName : undefined) }, lang)].filter(Boolean).join(' · ')} right={m(p.amount)} />
             ))}
           </Card>
           <Btn icon={icons.print} label={t('printInvoice')} onPress={() => printTxn(kind, id)} />

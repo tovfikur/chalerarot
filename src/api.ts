@@ -77,7 +77,7 @@ export type SettlementStatus = 'paid' | 'partial' | 'due';
 export type TxnItem = {
   productId?: string; productName: string; unit: string; enteredQty: number; qtyKg: number; rate: number; otherCost?: number; unitCost?: number;
 };
-export type InvoicePayment = { id: string; paymentNo?: string; transactionNo?: string; description?: string; descriptionCode?: 'transport' | 'advance' | 'invoice'; accountId?: string | null; accountName?: string; amount: number; date?: string; note?: string; advance?: boolean; transportPayment?: boolean; transportContra?: boolean; contraPurchaseInvoiceNo?: string; contraSaleInvoiceNo?: string };
+export type InvoicePayment = { id: string; paymentNo?: string; transactionNo?: string; description?: string; descriptionCode?: 'transport' | 'advance' | 'invoice'; accountId?: string | null; accountName?: string; amount: number; date?: string; note?: string; advance?: boolean; transportPayment?: boolean; transportContra?: boolean; contraPurchaseInvoiceNo?: string; contraSaleInvoiceNo?: string; contraCustomerName?: string };
 /** Payment account recorded on the ledger row when the document was saved. */
 export type TxnPayment = { accountName: string | null; method: string; amount: number; date: string } | null;
 export type SaleDetail = {
@@ -107,6 +107,14 @@ export type ExpenseCategoryKind = 'operating' | 'landing' | 'transport' | 'other
 export type ExpenseCategoryRow = {
   id: string; name: string; kind: ExpenseCategoryKind; createdAt?: string;
 };
+
+export type LabourAccountRow = {
+  id: string; name: string; totalWages: number; totalPaid: number; unpaid: number; advanceBalance: number;
+  ledger: { id: string; date: string; kind: 'wage' | 'payment' | 'advance'; amount: number; dueBalance: number; advanceBalance: number; advanceApplied?: number; appliedAmount?: number; direction?: 'stockIn' | 'stockOut'; quantity?: number; pricePerBag?: number; accountId?: string; note?: string }[];
+  advances: { id: string; date: string; amount: number; appliedAmount: number; accountId: string }[];
+  costs: { id: string; date: string; pricePerBag: number; quantity: number; direction: 'stockIn' | 'stockOut'; amount: number; advanceApplied: number; note?: string }[];
+};
+export type LabourAccountsData = { summary: { total: number; paid: number; unpaid: number; advanceBalance: number }; labourers: LabourAccountRow[] };
 
 export const MONEY_METHODS: MoneyMethod[] = ['cash', 'bkash', 'nagad', 'bank'];
 
@@ -243,6 +251,13 @@ export const api = {
   vendorPayment: (b: object) => req<IdRes>('/vendor-payments', { method: 'POST', body: JSON.stringify(b) }),
 
   expenses: () => req<Expense[]>('/expenses'),
+  labourAccounts: () => req<LabourAccountsData>('/labour-accounts'),
+  createLabourCost: (b: { name: string; pricePerBag: number; quantity: number; direction: 'stockIn' | 'stockOut'; date: string }) =>
+    req<{ id: string; labourerId: string; amount: number }>('/labour-accounts/costs', { method: 'POST', body: JSON.stringify(b) }),
+  payLabourer: (id: string, b: { amount: number; accountId: string; date: string; note?: string }) =>
+    req<{ id: string; amount: number }>(`/labour-accounts/${id}/payments`, { method: 'POST', body: JSON.stringify(b) }),
+  addLabourAdvance: (id: string, b: { amount: number; accountId: string; date: string; note?: string }) =>
+    req<{ id: string; amount: number }>(`/labour-accounts/${id}/advances`, { method: 'POST', body: JSON.stringify(b) }),
   createExpense: (b: object) => req<IdRes>('/expenses', { method: 'POST', body: JSON.stringify(b) }),
   updateExpense: (id: string, b: object) => req<IdRes>(`/expenses/${id}`, { method: 'PUT', body: JSON.stringify(b) }),
   deleteExpense: (id: string) => req<IdRes>(`/expenses/${id}`, { method: 'DELETE' }),

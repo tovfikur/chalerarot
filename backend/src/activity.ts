@@ -28,6 +28,9 @@ function classify(method: string, path: string): Classification | null {
   if (path === '/api/expenses') return method === 'POST' ? { entity: 'expense', action: 'create' } : null;
   if (/^\/api\/expenses\/[^/]+$/.test(path)) return { entity: 'expense', action: method === 'DELETE' ? 'delete' : 'update' };
   if (path === '/api/expense-categories' && method === 'POST') return { entity: 'expenseCategory', action: 'create' };
+  if (path === '/api/labour-accounts/costs' && method === 'POST') return { entity: 'labourCost', action: 'create' };
+  if (/^\/api\/labour-accounts\/[^/]+\/payments$/.test(path) && method === 'POST') return { entity: 'labourPayment', action: 'create' };
+  if (/^\/api\/labour-accounts\/[^/]+\/advances$/.test(path) && method === 'POST') return { entity: 'labourAdvance', action: 'create' };
 
   if (path === '/api/products' && method === 'POST') return { entity: 'product', action: 'create' };
   if (path === '/api/products/bulk' && method === 'POST') return { entity: 'product', action: 'bulk' };
@@ -185,6 +188,20 @@ async function build(req: Request, responseBody: any, actor: any) {
   } else if (entity === 'vendorPayment') {
     put('partyName', await vendorName(body.vendorId));
     put('partyKind', 'vendor');
+  } else if (entity === 'labourCost' || entity === 'labourPayment' || entity === 'labourAdvance') {
+    const labourerId = entity === 'labourCost' ? text(b.labourerId) : path.split('/')[3];
+    const worker = labourerId ? await db.labourer.findUnique({ where: { id: labourerId }, select: { name: true } }).catch(() => null) : null;
+    put('labourerName', body.name ?? worker?.name);
+    if (entity === 'labourCost') {
+      put('quantity', body.quantity);
+      put('pricePerBag', body.pricePerBag);
+      put('direction', body.direction);
+    } else if (entity === 'labourPayment') {
+      put('accountName', await accountName(body.accountId));
+    } else {
+      put('accountName', await accountName(body.accountId));
+      put('note', body.note);
+    }
   } else if (entity === 'return') {
     put('kind', body.kind);
     const party = await returnParty(body.kind, body.kind === 'sale' ? body.saleId : body.purchaseId);
@@ -298,7 +315,7 @@ export function activityLogger(req: Request, res: Response, next: NextFunction) 
   res.on('finish', () => {
     if (res.statusCode < 200 || res.statusCode >= 300) return;
     const path = req.originalUrl.split('?')[0].replace(/\/+$/, '') || '/';
-    const postingSource = /^\/api\/(sales(?:\/[^/]+)?|purchases(?:\/[^/]+)?|customer-payments|vendor-payments|returns|expenses(?:\/[^/]+)?|products(?:\/(?:bulk|adjust|[^/]+))?|customers(?:\/(?:bulk|[^/]+))?|vendors(?:\/(?:bulk|[^/]+))?|money\/(?:entries(?:\/[^/]+)?|accounts(?:\/[^/]+(?:\/opening)?)?|transfers)|trash\/[^/]+\/[^/]+\/(?:restore|purge)|trash\/purge-expired|chart-of-accounts(?:\/[^/]+)?)$/;
+    const postingSource = /^\/api\/(sales(?:\/[^/]+)?|purchases(?:\/[^/]+)?|customer-payments|vendor-payments|returns|expenses(?:\/[^/]+)?|labour-accounts\/(?:costs|[^/]+\/(?:payments|advances))|products(?:\/(?:bulk|adjust|[^/]+))?|customers(?:\/(?:bulk|[^/]+))?|vendors(?:\/(?:bulk|[^/]+))?|money\/(?:entries(?:\/[^/]+)?|accounts(?:\/[^/]+(?:\/opening)?)?|transfers)|trash\/[^/]+\/[^/]+\/(?:restore|purge)|trash\/purge-expired|chart-of-accounts(?:\/[^/]+)?)$/;
     if (res.locals.user && postingSource.test(path)) {
       void reconcileAutomaticJournalEntries().catch(error => console.error('Automatic journal reconciliation failed:', error));
     }

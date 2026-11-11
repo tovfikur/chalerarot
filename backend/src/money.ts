@@ -36,6 +36,8 @@ export type MoneySourceType =
   | 'customerPayment'
   | 'vendorPayment'
   | 'expense'
+  | 'labourPayment'
+  | 'labourAdvance'
   | 'saleReturn'
   | 'purchaseReturn'
   | 'transferOut'
