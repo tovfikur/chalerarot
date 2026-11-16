@@ -95,7 +95,7 @@ export async function writeMovement(
   t: TxClient,
   productId: string,
   m: { type: string; bucket: Bucket; qtyKg: number; unitCost: number; date: string; refId?: string | null; forceUnitCost?: boolean; note?: string | null },
-): Promise<{ unitCost: number; value: number; qtyAfter: number; valueAfter: number; avgAfter: number }> {
+): Promise<{ movementId: string; unitCost: number; value: number; qtyAfter: number; valueAfter: number; avgAfter: number }> {
   const p = await t.product.findUnique({ where: { id: productId } });
   if (!p) throw Object.assign(new Error('Product not found'), { status: 400 });
   const { movement, next } = applyMovement(
@@ -112,7 +112,7 @@ export async function writeMovement(
       cost: next.cost,
     },
   });
-  await t.stockMovement.create({
+  const savedMovement = await t.stockMovement.create({
     data: {
       productId: p.id,
       type: movement.type,
@@ -202,6 +202,7 @@ export async function writeMovement(
     }
   }
   return {
+    movementId: savedMovement.id,
     unitCost: round2(movement.unitCost),
     value: movement.value,
     qtyAfter: next.qtyKg,

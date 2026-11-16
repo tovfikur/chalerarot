@@ -7,12 +7,13 @@ import { todayStr } from './units';
  *
  *   Net Sales     = Sales - Sales Return
  *   Net Purchase  = Purchase - Purchase Return
- *   COGS          = Opening Stock Value + Net Purchase - Closing Stock Value
+ *   COGS          = Cost recorded on sales - cost reversed on sales returns
  *   Gross Profit  = Net Sales - COGS
  *   Net Profit    = Gross Profit - Expenses
  *
- * Opening/closing stock values come from the dated StockMovement trail (never
- * from the Product's current cost), so any Day/Month/Year period is correct.
+ * Sale costs and returned costs come from their dated inventory transactions,
+ * including any negative-stock cost corrections. StockMovement remains the
+ * source for dated inventory values and stock adjustment expenses.
  */
 
 export type PeriodMode = 'day' | 'month' | 'year' | 'all' | 'range';
@@ -88,22 +89,21 @@ export async function periodFinance(mode: PeriodMode, ref?: string, end?: string
   const bounds = periodBounds(mode, ref, end);
   const { start, end: endDate } = bounds;
   const inRange = { gte: start, lte: endDate };
-  const before = { lt: start };
-
-  const [sales, rets, purchases, expenses, purchaseItems, openV, closeV, openingAdded, journalLines, stockAdjustments] = await Promise.all([
+  const [sales, saleItems, rets, purchases, expenses, labourCosts, purchaseItems, openV, closeV, openingAdded, journalLines, stockAdjustments, openingStockCostAdjustments] = await Promise.all([
     db.sale.findMany({ where: { date: inRange }, select: { total: true } }),
-    db.productReturn.findMany({ where: { date: inRange }, select: { kind: true, totalAmount: true } }),
+    db.saleItem.findMany({ where: { sale: { date: inRange } }, select: { cogs: true } }),
+    db.productReturn.findMany({ where: { date: inRange }, select: { kind: true, totalAmount: true, items: { select: { cogs: true } } } }),
     db.purchase.findMany({ where: { date: inRange }, select: { total: true } }),
     db.expense.findMany({ where: { date: inRange, deletedAt: null }, select: { amount: true, capitalized: true } }),
+    db.labourCost.findMany({ where: { date: inRange }, select: { amount: true } }),
     db.purchaseItem.findMany({ where: { otherCost: { gt: 0 } }, select: { id: true, otherCost: true, qtyKg: true, purchase: { select: { date: true } }, product: { select: { mediumBagKg: true } } } }),
     inventoryValueAt(start, false),
     inventoryValueAt(endDate, true),
-    // Opening stock set up inside the period is an inflow of inventory value. It
-    // is not a Purchase, so without this a period that begins before the shop
-    // existed would show a negative COGS.
+    // Keep opening-stock setup visible in the period's inventory value fields.
     db.stockMovement.findMany({ where: { type: 'OPENING', bucket: 'sellable', date: inRange }, select: { value: true } }),
     db.journalLine.findMany({ where: { entry: { active: true, status: 'posted', sourceType: 'manual', date: inRange } }, select: { debit: true, credit: true, account: { select: { type: true } } } }),
     db.stockMovement.findMany({ where: { type: { in: ['ADJUSTMENT', 'REVALUE'] }, bucket: 'sellable', date: inRange }, select: { value: true } }),
+    db.stockMovement.findMany({ where: { type: 'NEGATIVE_STOCK_COGS_ADJUSTMENT', bucket: 'sellable', date: inRange, note: { startsWith: 'Imported opening stock cost adjusted' } }, select: { value: true } }),
   ]);
 
   const salesTotal = sum(sales.map(s => s.total));
@@ -112,12 +112,10 @@ export async function periodFinance(mode: PeriodMode, ref?: string, end?: string
   const purchaseReturn = sum(rets.filter(r => r.kind === 'purchase').map(r => r.totalAmount));
   // Stock audits and cost revaluations do not move cash, but their signed
   // inventory value change is an expense (or expense credit) in account 6100.
-  const expense = round2(sum(expenses.filter(e => !e.capitalized).map(e => e.amount)) - sum(stockAdjustments.map(m => m.value)));
+  const expense = round2(sum(expenses.filter(e => !e.capitalized).map(e => e.amount)) + sum(labourCosts.map(cost => cost.amount)) - sum(stockAdjustments.map(m => m.value)));
 
-  // Other cost per bag is capitalized into PurchaseItem.unitCost and already
-  // lives in the stock movement value. Include it with purchases in the
-  // inventory/COGS bridge. Purchase returns credit the supplier at the invoice
-  // rate, so any non-refundable landed cost stays allocated to remaining stock.
+  // Other cost per bag is capitalized into purchase inventory and retained as
+  // a separate report metric; sale item COGS already includes its unit cost.
   const landedPurchase = sum(purchaseItems
     .filter(i => i.purchase.date >= start && i.purchase.date <= endDate)
     .map(i => i.otherCost * i.qtyKg / (i.product.mediumBagKg || 50)));
@@ -129,11 +127,15 @@ export async function periodFinance(mode: PeriodMode, ref?: string, end?: string
   const openingStockAdded = round2(openingAdded.reduce((acc, x) => acc + x.value, 0));
   const openingStockValue = round2(openingStockCarryIn + openingStockAdded);
   const closingStockValue = closeV.sellable;
-  const stockAdjustmentValue = sum(stockAdjustments.map(m => m.value));
-  // Inventory adjustment movements change the stock asset directly. Add their
-  // signed value back here so shrinkage/revaluation is reported in expenses,
-  // not also inside COGS.
-  const cogs = round2(openingStockValue + netPurchase + capitalizedLandedCost - closingStockValue + stockAdjustmentValue);
+  // Stock adjustments are shown in operating expenses above and do not alter
+  // the sale and return cost amounts below.
+  const saleCost = sum(saleItems.map(item => item.cogs));
+  const returnedCost = sum(rets.filter(r => r.kind === 'sale').flatMap(r => r.items.map(item => item.cogs)));
+  // Imported negative opening stock has no sale line to carry its eventual
+  // cost correction, so book that correction on the receipt date. Corrections
+  // tied to real sale lines are already reflected in the updated sale item COGS.
+  const importedOpeningCostCorrection = sum(openingStockCostAdjustments.map(m => -m.value));
+  const cogs = round2(saleCost - returnedCost + importedOpeningCostCorrection);
   const grossProfit = round2(netSales - cogs);
   // Signed presentation convention: income is negative (subtracted below to
   // increase profit); expense is positive (subtracted below to reduce profit).

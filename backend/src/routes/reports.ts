@@ -342,8 +342,10 @@ async function deriveJournalRows(from: string, to: string) {
   for (const s of stockAdjustments) {
     const isDebit = s.value >= 0; const amount = Math.abs(s.value); const counterpart = s.type === 'OPENING' ? 'Owner equity' : 'Inventory adjustments';
     const description = s.type === 'ADJUSTMENT' ? `Stock audit adjustment · ${s.refId ?? s.id}` : `${s.type.toLowerCase()} stock valuation`;
-    add(s.date, s.refId ?? s.id, isDebit ? 'Inventory' : counterpart, description, isDebit ? amount : 0, isDebit ? 0 : amount);
-    add(s.date, s.refId ?? s.id, isDebit ? counterpart : 'Inventory', description, isDebit ? 0 : amount, isDebit ? amount : 0);
+    // A negative value reduces inventory: debit the counterpart and credit
+    // inventory. Keep the first line as the debit and the second as the credit.
+    add(s.date, s.refId ?? s.id, isDebit ? 'Inventory' : counterpart, description, amount, 0);
+    add(s.date, s.refId ?? s.id, isDebit ? counterpart : 'Inventory', description, 0, amount);
   }
   for (const s of sales) {
     const ref = s.invoiceNo ?? s.id; const cogs = s.items.reduce((n, i) => n + i.cogs, 0);

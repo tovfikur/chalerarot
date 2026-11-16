@@ -9,13 +9,13 @@ const defaults = [
   ['1010', 'Cash', 'asset'], ['1020', 'Bank', 'asset'], ['1030', 'bKash', 'asset'], ['1040', 'Nagad', 'asset'], ['1050', 'Rocket', 'asset'],
   ['1100', 'Accounts receivable', 'asset'], ['1110', 'Supplier advances', 'asset'], ['1120', 'Labour Advances', 'asset'], ['1200', 'Inventory', 'asset'],
   ['2000', 'Accounts payable', 'liability'], ['2010', 'Customer credits', 'liability'], ['2020', 'Landing Cost Payable', 'liability'],
-  ['3000', 'Owner equity', 'equity'], ['3200', 'Owner drawings / other expense', 'expense'], ['3300', 'House Expenses', 'equity'], ['4000', 'Sales revenue', 'income'],
+  ['3000', 'Owner equity', 'equity'], ['3200', 'Owner drawings', 'equity'], ['3300', 'House Expenses', 'equity'], ['4000', 'Sales revenue', 'income'],
   ['4100', 'Sales returns', 'income'], ['5000', 'Cost of goods sold', 'expense'], ['6000', 'Operating expenses', 'expense'],
   ['6100', 'Inventory adjustments', 'expense'], ['9000', 'Other income/expenses', 'expense'],
 ] as const;
 const moneyLedgerName = (type: string, name: string) => `${({ cash: 'Cash', bank: 'Bank', bkash: 'bKash', nagad: 'Nagad', rocket: 'Rocket' } as Record<string, string>)[type] ?? 'Cash'}: ${name}`;
 export const seedChart = async () => {
-  for (const [code, name, type] of defaults) await db.chartAccount.upsert({ where: { code }, update: {}, create: { code, name, type, system: true } });
+  for (const [code, name, type] of defaults) await db.chartAccount.upsert({ where: { code }, update: code === '3200' ? { name, type } : {}, create: { code, name, type, system: true } });
   const moneyAccounts = await db.moneyAccount.findMany({ select: { id: true, name: true, type: true } });
   for (const a of moneyAccounts) {
     const name = moneyLedgerName(a.type, a.name);

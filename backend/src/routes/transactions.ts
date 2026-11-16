@@ -649,6 +649,8 @@ tx.post('/sales', async (req: Request, res: Response) => {
       let sub = 0, cogs = 0;
       let returnTotalAmount = 0, returnCogsReversed = 0;
       const items: { productId: string; unit: string; enteredQty: number; qtyKg: number; rate: number; unitCost: number; cogs: number; negativeStockQtyKg: number }[] = [];
+      const saleMovementIds: string[] = [];
+      const returnMovementIds: string[] = [];
       const returnItems: {
         productId: string; unit: string; enteredQty: number; qtyKg: number; goodKg: number; damagedKg: number;
         condition: string; damageReason: string | null; note: string | null; rate: number; amount: number;
@@ -688,11 +690,12 @@ tx.post('/sales', async (req: Request, res: Response) => {
           // Selling leaves quantity AND inventory value (AVCO out).
           const customCostNote = Math.abs(unitCost - currentAvg) >= 0.01;
           const nextAverage = p.qtyKg - qtyKg > 0 ? round2((p.stockValue - qtyKg * unitCost) / (p.qtyKg - qtyKg)) : unitCost;
-          await writeMovement(t, p.id, {
+          const movement = await writeMovement(t, p.id, {
             type: 'SALE', bucket: 'sellable', qtyKg: -qtyKg, unitCost, date: day,
             forceUnitCost: true,
             note: customCostNote ? `Invoice purchase cost override: ${currentAvg.toFixed(2)} -> ${nextAverage.toFixed(2)} per kg.` : null,
           });
+          saleMovementIds.push(movement.movementId);
         } else {
           // Negative quantity => SALES RETURN line
           const absEntered = Math.abs(entered);
@@ -710,9 +713,10 @@ tx.post('/sales', async (req: Request, res: Response) => {
           });
 
           // Stock goes back in as sales return
-          await writeMovement(t, p.id, {
+          const movement = await writeMovement(t, p.id, {
             type: 'SRETURN', bucket: 'sellable', qtyKg: returnKg, unitCost, date: day,
           });
+          returnMovementIds.push(movement.movementId);
         }
       }
 
@@ -764,6 +768,7 @@ tx.post('/sales', async (req: Request, res: Response) => {
           items: { create: items },
         },
       });
+      if (saleMovementIds.length) await t.stockMovement.updateMany({ where: { id: { in: saleMovementIds } }, data: { refId: sale.id } });
 
       // If there were return lines, create linked ProductReturn & credit customer
       let createdReturn: any = null;
@@ -785,6 +790,7 @@ tx.post('/sales', async (req: Request, res: Response) => {
             items: { create: returnItems },
           },
         });
+        if (returnMovementIds.length) await t.stockMovement.updateMany({ where: { id: { in: returnMovementIds } }, data: { refId: createdReturn.id } });
 
         if (validCustomerId) {
           await t.customerPayment.create({
