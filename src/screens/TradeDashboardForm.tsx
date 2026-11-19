@@ -31,6 +31,7 @@ export interface FormItemLine {
   purchaseRate: string;
   rate: string;
   otherCost?: string;
+  transportCost?: string;
 }
 
 interface TradeDashboardFormProps {
@@ -107,6 +108,53 @@ const fromCalendarDate = (value: string): string => {
   return parts ? `${parts[3]}/${parts[2]}/${parts[1]}` : '';
 };
 const roundToMoney = (value: number) => Math.round(value * 100) / 100;
+
+const evaluateArithmetic = (source: string): number | null => {
+  let input = toEnDigits(source.trim()).replace(/^=/, '').replace(/,/g, '').replace(/\s+/g, '');
+  if (!input) return null;
+  let cursor = 0;
+  const parsePrimary = (): number | null => {
+    if (input[cursor] === '+') { cursor++; return parsePrimary(); }
+    if (input[cursor] === '-') { cursor++; const value = parsePrimary(); return value === null ? null : -value; }
+    if (input[cursor] === '(') {
+      cursor++;
+      const value = parseExpression();
+      if (value === null || input[cursor] !== ')') return null;
+      cursor++;
+      return value;
+    }
+    const match = input.slice(cursor).match(/^(?:\d+(?:\.\d*)?|\.\d+)/);
+    if (!match) return null;
+    cursor += match[0].length;
+    const value = Number(match[0]);
+    return Number.isFinite(value) ? value : null;
+  };
+  const parseTerm = (): number | null => {
+    let value = parsePrimary();
+    if (value === null) return null;
+    while (input[cursor] === '*' || input[cursor] === '/') {
+      const operator = input[cursor++];
+      const next = parsePrimary();
+      if (next === null || (operator === '/' && next === 0)) return null;
+      value = operator === '*' ? value * next : value / next;
+    }
+    return value;
+  };
+  const parseExpression = (): number | null => {
+    let value = parseTerm();
+    if (value === null) return null;
+    while (input[cursor] === '+' || input[cursor] === '-') {
+      const operator = input[cursor++];
+      const next = parseTerm();
+      if (next === null) return null;
+      value = operator === '+' ? value + next : value - next;
+    }
+    return value;
+  };
+  const value = parseExpression();
+  if (value === null || cursor !== input.length || !Number.isFinite(value)) return null;
+  return Math.round(value * 1_000_000) / 1_000_000;
+};
 
 export function TradeDashboardForm({ mode, onDone, onOpenHistory, editId }: TradeDashboardFormProps) {
   const isSale = mode === 'sale';
@@ -283,8 +331,45 @@ export function TradeDashboardForm({ mode, onDone, onOpenHistory, editId }: Trad
 
   // Products table items (empty, no default pre-selected product)
   const [items, setItems] = useState<FormItemLine[]>([
-    { id: 'item_1', code: '', productId: '', name: '', unit: 'medium', qty: '', purchaseRate: '', rate: '', otherCost: '' },
+    { id: 'item_1', code: '', productId: '', name: '', unit: 'medium', qty: '', purchaseRate: '', rate: '', otherCost: '', transportCost: '' },
   ]);
+  type CalculatedLineField = 'purchaseRate' | 'rate' | 'otherCost' | 'transportCost';
+  const calculationExpressions = useRef<Record<string, string>>({});
+  const calculationKey = (rowIdx: number, field: CalculatedLineField) => `${items[rowIdx]?.id ?? rowIdx}:${field}`;
+  const setCalculatedField = (rowIdx: number, field: CalculatedLineField, value: string) => {
+    const key = calculationKey(rowIdx, field);
+    if (value.trimStart().startsWith('=')) calculationExpressions.current[key] = value;
+    else delete calculationExpressions.current[key];
+    setItems(prev => {
+      const copy = [...prev];
+      copy[rowIdx] = { ...copy[rowIdx], [field]: value };
+      return copy;
+    });
+  };
+  const evaluateLineCalculation = (rowIdx: number, field: CalculatedLineField) => {
+    const expression = items[rowIdx]?.[field] ?? '';
+    if (!expression.trimStart().startsWith('=')) return false;
+    const result = evaluateArithmetic(expression);
+    if (result === null) {
+      showFormError(tx('হিসাবটি সঠিক নয়। যেমন: =১০০+২০*২', 'Invalid calculation. Example: =100+20*2'));
+      return true;
+    }
+    calculationExpressions.current[calculationKey(rowIdx, field)] = expression;
+    setItems(prev => {
+      const copy = [...prev];
+      copy[rowIdx] = { ...copy[rowIdx], [field]: String(roundToMoney(result)) };
+      return copy;
+    });
+    return true;
+  };
+  const restoreLineCalculation = (rowIdx: number, field: CalculatedLineField) => {
+    const expression = calculationExpressions.current[calculationKey(rowIdx, field)];
+    if (expression) setCalculatedField(rowIdx, field, expression);
+  };
+  const hasUncalculatedLineExpression = () => items.some(item => {
+    const values = isSale ? [item.purchaseRate, item.rate] : [item.rate, item.otherCost, item.transportCost];
+    return values.some(value => String(value ?? '').trimStart().startsWith('='));
+  });
   const [activeItemDropdownIdx, setActiveItemDropdownIdx] = useState<number | null>(null);
   const [itemHighlightIdx, setItemHighlightIdx] = useState(0);
 
@@ -293,7 +378,9 @@ export function TradeDashboardForm({ mode, onDone, onOpenHistory, editId }: Trad
   const [transportPurchaseInvoiceNo, setTransportPurchaseInvoiceNo] = useState('');
   const [transportPurchaseFocused, setTransportPurchaseFocused] = useState(false);
   const [transportExpenseId, setTransportExpenseId] = useState<string>();
-  const [landingExpenseId, setLandingExpenseId] = useState<string>();
+  const [stockInLabourExpenseId, setStockInLabourExpenseId] = useState<string>();
+  const [stockOutLabourExpenseId, setStockOutLabourExpenseId] = useState<string>();
+  const [transportLandingExpenseId, setTransportLandingExpenseId] = useState<string>();
 
   // Payments (Cash, Bank) & Discount (no default '0' strings)
   const [paymentAmounts, setPaymentAmounts] = useState<Record<string, string>>({});
@@ -345,7 +432,8 @@ export function TradeDashboardForm({ mode, onDone, onOpenHistory, editId }: Trad
         return { id: `edit_${index}`, code: product?.code ?? '', productId: line.productId!, name: line.productName, unit,
           qty: String(line.enteredQty), rate: String(roundToMoney(line.rate * per)),
           purchaseRate: mode === 'sale' ? String(roundToMoney((line.unitCost ?? product?.cost ?? 0) * per)) : '',
-          otherCost: mode === 'purchase' ? String(line.otherCost ?? 0) : '' };
+          otherCost: mode === 'purchase' ? String(line.otherCost ?? 0) : '',
+          transportCost: mode === 'purchase' ? String(line.transportCost ?? 0) : '' };
       }));
       const paymentLines = doc.payments ?? [];
       const transportPayments = paymentLines.filter(p => p.transportPayment);
@@ -367,11 +455,15 @@ export function TradeDashboardForm({ mode, onDone, onOpenHistory, editId }: Trad
       if (unsupportedPaymentLines.length) setFormError(tx('এই ইনভয়েসে ক্যাশ/ব্যাংক ছাড়া অন্য অ্যাকাউন্টের পেমেন্ট আছে। সম্পাদনার আগে হিসাবরক্ষকের সাহায্য নিন।', 'This invoice has a payment account the editor cannot preserve. Ask an administrator before editing it.'));
       const invoiceRef = doc.invoiceNo ?? editId;
       const linkedTransport = expenses.find(e => e.category === 'transport' && (e.note ?? '').includes(`#${invoiceRef}`));
-      const linkedLanding = expenses.find(e => e.capitalized && (e.note ?? '').includes(`#${invoiceRef}`));
-      setTransportExpenseId(linkedTransport?.id); setLandingExpenseId(linkedLanding?.id);
+      const linkedTransportLanding = expenses.find(e => e.capitalized && (e.note ?? '').includes(`#${invoiceRef}`) && /transport|পরিবহন/i.test(e.note ?? ''));
+      const linkedLandingExpenses = expenses.filter(e => e.capitalized && (e.note ?? '').includes(`#${invoiceRef}`) && !/transport|পরিবহন/i.test(e.note ?? ''));
+      const linkedStockInLabour = linkedLandingExpenses.find(e => e.landingType === 'stockInLabour' || e.landingType === 'splitLabour')
+        ?? linkedLandingExpenses.find(e => !e.landingType);
+      const linkedStockOutLabour = linkedLandingExpenses.find(e => e.landingType === 'stockOutLabour');
+      setTransportExpenseId(linkedTransport?.id); setStockInLabourExpenseId(linkedStockInLabour?.id); setStockOutLabourExpenseId(linkedStockOutLabour?.id);
+      setTransportLandingExpenseId(linkedTransportLanding?.id);
       if (!transportPayments.length) setTransportCost(linkedTransport ? String(linkedTransport.amount) : '');
       if (linkedTransport?.accountId) setExpenseAccountId(linkedTransport.accountId);
-      if (linkedLanding?.accountId) setExpenseAccountId(linkedLanding.accountId);
       setEditLoading(false);
     };
     load().catch(error => { if (active) { setFormError(error instanceof Error ? error.message : tx('ইনভয়েস লোড করা যায়নি।', 'Could not load invoice.')); setEditLoading(false); } });
@@ -423,11 +515,23 @@ export function TradeDashboardForm({ mode, onDone, onOpenHistory, editId }: Trad
   const totalOtherCost = useMemo(() => {
     if (isSale) return 0;
     return items.reduce((sum, item) => {
-      const q = Math.abs(parseNum(item.qty));
+      const product = products.find(p => p.id === item.productId || p.name === item.name);
+      const bagKg = product?.mediumBagKg || 50;
+      const bags = Math.abs(parseNum(item.qty)) * kgPerUnit(product, item.unit || 'medium') / bagKg;
       const oc = parseNum(item.otherCost);
-      return sum + (q * oc);
+      return sum + (bags * oc);
     }, 0);
-  }, [items, isSale]);
+  }, [items, isSale, products]);
+
+  const totalTransportLandingCost = useMemo(() => {
+    if (isSale) return 0;
+    return items.reduce((sum, item) => {
+      const product = products.find(p => p.id === item.productId || p.name === item.name);
+      const bagKg = product?.mediumBagKg || 50;
+      const bags = Math.abs(parseNum(item.qty)) * kgPerUnit(product, item.unit || 'medium') / bagKg;
+      return sum + bags * parseNum(item.transportCost);
+    }, 0);
+  }, [items, isSale, products]);
 
   const estimatedProfit = useMemo(() => {
     return isSale ? (totalProductValue - parseNum(discount) - totalEstimatedCost) : 0;
@@ -583,7 +687,7 @@ export function TradeDashboardForm({ mode, onDone, onOpenHistory, editId }: Trad
     const newId = `item_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`;
     setItems(prev => [
       ...prev,
-      { id: newId, code: '', productId: '', name: '', unit: 'medium', qty: '', purchaseRate: '', rate: '', otherCost: '' },
+      { id: newId, code: '', productId: '', name: '', unit: 'medium', qty: '', purchaseRate: '', rate: '', otherCost: '', transportCost: '' },
     ]);
     if (autoFocus) {
       setTimeout(() => {
@@ -596,7 +700,7 @@ export function TradeDashboardForm({ mode, onDone, onOpenHistory, editId }: Trad
   // Remove product row
   const removeRow = useCallback((idx: number) => {
     if (items.length <= 1) {
-      setItems([{ id: 'item_1', code: '', productId: '', name: '', unit: 'medium', qty: '', purchaseRate: '', rate: '', otherCost: '' }]);
+      setItems([{ id: 'item_1', code: '', productId: '', name: '', unit: 'medium', qty: '', purchaseRate: '', rate: '', otherCost: '', transportCost: '' }]);
       return;
     }
     setItems(prev => prev.filter((_, i) => i !== idx));
@@ -620,6 +724,7 @@ export function TradeDashboardForm({ mode, onDone, onOpenHistory, editId }: Trad
       seq.push(`rate_${idx}`);
       if (!isSale) {
         seq.push(`otherCost_${idx}`);
+        seq.push(`transportCost_${idx}`);
       }
     });
 
@@ -638,8 +743,8 @@ export function TradeDashboardForm({ mode, onDone, onOpenHistory, editId }: Trad
       const nextKey = seq[currentIdx + 1];
       inputRefs.current[nextKey]?.focus();
       setFocusedField(nextKey);
-    } else if (isSale ? currentKey.startsWith('rate_') : currentKey.startsWith('otherCost_')) {
-      // If pressing Enter on the last rate/otherCost field, automatically add a new product row and focus it!
+    } else if (isSale ? currentKey.startsWith('rate_') : currentKey.startsWith('transportCost_')) {
+      // Add a product row after the last purchase cost field.
       addNewRow(true);
     }
   }, [getNavSequence, addNewRow, isSale]);
@@ -749,7 +854,7 @@ export function TradeDashboardForm({ mode, onDone, onOpenHistory, editId }: Trad
     setPartyMobile(defMobile);
     setPartyAddress(defAddress);
 
-    setItems([{ id: 'item_1', code: '', productId: '', name: '', unit: 'medium', qty: '', purchaseRate: '', rate: '', otherCost: '' }]);
+    setItems([{ id: 'item_1', code: '', productId: '', name: '', unit: 'medium', qty: '', purchaseRate: '', rate: '', otherCost: '', transportCost: '' }]);
     setPaymentAmounts({});
     setAdvanceToApply(0);
     setPaymentNote('');
@@ -840,6 +945,10 @@ export function TradeDashboardForm({ mode, onDone, onOpenHistory, editId }: Trad
       return;
     }
     setFormError('');
+    if (hasUncalculatedLineExpression()) {
+      showFormError(tx('সংরক্ষণের আগে প্রতিটি হিসাবের সূত্রে Enter চাপুন।', 'Press Enter in each calculation field before saving.'));
+      return;
+    }
     const validLines = items.filter(it => it.name.trim() && parseNum(it.qty) !== 0);
     if (!validLines.length) {
       showFormError(lang === 'bn' ? 'অনুগ্রহ করে অন্তত একটি পণ্য ও তার পরিমাণ (ধনাত্মক বা ফেরত) দিন।' : 'Add at least one selected product with a non-zero quantity.');
@@ -875,7 +984,7 @@ export function TradeDashboardForm({ mode, onDone, onOpenHistory, editId }: Trad
     }
 
     setReviewSplitOpen(true);
-  }, [items, isSale, selectedPartyId, parties, t, lang, products, totalProductValue, numTransport, numDiscount, editId, editPaymentUnsupported, tx, paymentAccounts, paymentAmounts, showFormError]);
+  }, [items, isSale, selectedPartyId, parties, t, lang, products, totalProductValue, numTransport, numDiscount, editId, editPaymentUnsupported, tx, paymentAccounts, paymentAmounts, showFormError, hasUncalculatedLineExpression]);
 
   // Final submission handler that creates the invoice
   const executeTransaction = useCallback(async (printWin?: any) => {
@@ -887,6 +996,10 @@ export function TradeDashboardForm({ mode, onDone, onOpenHistory, editId }: Trad
       return;
     }
     setFormError('');
+    if (hasUncalculatedLineExpression()) {
+      showFormError(tx('সংরক্ষণের আগে প্রতিটি হিসাবের সূত্রে Enter চাপুন।', 'Press Enter in each calculation field before saving.'));
+      return;
+    }
     const validLines = items.filter(it => it.name.trim() && parseNum(it.qty) !== 0);
     if (!validLines.length) {
       if (win && !win.closed) win.close();
@@ -959,6 +1072,7 @@ export function TradeDashboardForm({ mode, onDone, onOpenHistory, editId }: Trad
         // Purchase cost per KG for backend (if admin modified purchase price)
         const unitCostPerKg = effectivePurchaseRate > 0 ? (effectivePurchaseRate / per) : (prod?.cost || 0);
         const otherCostPerBag = !isSale ? parseNum(l.otherCost) : 0;
+        const transportCostPerBag = !isSale ? parseNum(l.transportCost) : 0;
 
         return {
           productId: pId,
@@ -968,6 +1082,7 @@ export function TradeDashboardForm({ mode, onDone, onOpenHistory, editId }: Trad
           unitCost: isSale ? Math.round(unitCostPerKg * 100) / 100 : undefined,
           otherCost: !isSale && otherCostPerBag > 0 ? otherCostPerBag : undefined,
           otherCostPerBag: !isSale && otherCostPerBag > 0 ? otherCostPerBag : undefined,
+          transportCost: !isSale && transportCostPerBag > 0 ? transportCostPerBag : undefined,
         };
       });
 
@@ -1060,23 +1175,75 @@ export function TradeDashboardForm({ mode, onDone, onOpenHistory, editId }: Trad
           })
           .join(', ');
 
+        const stockInLabour = Math.round(totalLinesOtherCost / 2 * 100) / 100;
+        const stockOutLabour = Math.round((totalLinesOtherCost - stockInLabour) * 100) / 100;
         try {
-          await saveExpense({
-            id: editId ? landingExpenseId : undefined,
-            category: 'loading',
-            customName: 'ক্রয় খরচ (প্রতি বস্তা)',
-            amount: totalLinesOtherCost,
-            date: todayISO,
-            capitalized: true,
-            note: `[ধরন: ল্যান্ডিং] ক্রয় #${invoiceRef} বস্তা প্রতি খরচ (${lineDetails})`,
+          if (stockInLabour > 0) await saveExpense({
+            id: editId ? stockInLabourExpenseId : undefined,
+            category: 'loading', customName: 'স্টক ইন শ্রমিক খরচ (ক্রয় খরচের ৫০%)', amount: stockInLabour,
+            date: todayISO, capitalized: true, landingType: 'stockInLabour',
+            note: `[ধরন: ল্যান্ডিং] ক্রয় #${invoiceRef} স্টক ইন শ্রমিক খরচ (৫০%) (${lineDetails})`,
           });
+          else if (stockInLabourExpenseId) await deleteExpense(stockInLabourExpenseId);
+          if (stockOutLabour > 0) await saveExpense({
+            id: editId ? stockOutLabourExpenseId : undefined,
+            category: 'loading', customName: 'স্টক আউট শ্রমিক খরচ (ক্রয় খরচের ৫০%)', amount: stockOutLabour,
+            date: todayISO, capitalized: true, landingType: 'stockOutLabour',
+            note: `[ধরন: ল্যান্ডিং] ক্রয় #${invoiceRef} স্টক আউট শ্রমিক খরচ (৫০%) (${lineDetails})`,
+          });
+          else if (stockOutLabourExpenseId) await deleteExpense(stockOutLabourExpenseId);
         } catch (e) {
-          console.error('Failed to save per-bag other expense:', e);
-          expenseSaveFailures.push('per-bag landing cost');
+          console.error('Failed to save split purchase labour cost:', e);
+          expenseSaveFailures.push('split stock-in/stock-out labour cost');
         }
       }
-      if (editId && totalLinesOtherCost <= 0 && landingExpenseId) {
-        await deleteExpense(landingExpenseId);
+      if (editId && totalLinesOtherCost <= 0) {
+        if (stockInLabourExpenseId) await deleteExpense(stockInLabourExpenseId);
+        if (stockOutLabourExpenseId) await deleteExpense(stockOutLabourExpenseId);
+      }
+
+      const totalLinesTransportCost = !isSale
+        ? validLines.reduce((sum, l) => {
+            const product = products.find(p => p.id === l.productId)
+              || products.find(p => p.name.toLowerCase() === l.name.toLowerCase());
+            const bagKg = product?.mediumBagKg || 50;
+            const bagEquivalent = bagKg > 0
+              ? Math.abs(parseNum(l.qty)) * kgPerUnit(product, (l.unit || 'medium') as BagUnit) / bagKg
+              : 0;
+            return sum + bagEquivalent * parseNum(l.transportCost);
+          }, 0)
+        : 0;
+      if (totalLinesTransportCost > 0 && !isSale) {
+        const lineDetails = validLines
+          .filter(l => parseNum(l.transportCost) > 0)
+          .map(l => {
+            const product = products.find(p => p.id === l.productId)
+              || products.find(p => p.name.toLowerCase() === l.name.toLowerCase());
+            const bagKg = product?.mediumBagKg || 50;
+            const bags = bagKg > 0
+              ? Math.abs(parseNum(l.qty)) * kgPerUnit(product, (l.unit || 'medium') as BagUnit) / bagKg
+              : 0;
+            return `${l.name || 'পণ্য'}: ${bags.toFixed(2)} bags x ৳${parseNum(l.transportCost)}`;
+          })
+          .join(', ');
+        try {
+          await saveExpense({
+            id: editId ? transportLandingExpenseId : undefined,
+            category: 'loading',
+            customName: 'পরিবহন খরচ',
+            amount: totalLinesTransportCost,
+            date: todayISO,
+            capitalized: true,
+            landingType: 'transport',
+            note: `[ধরন: ল্যান্ডিং] ক্রয় #${invoiceRef} পরিবহন খরচ (${lineDetails})`,
+          });
+        } catch (e) {
+          console.error('Failed to save purchase transport cost:', e);
+          expenseSaveFailures.push('transport landing cost');
+        }
+      }
+      if (editId && totalLinesTransportCost <= 0 && transportLandingExpenseId) {
+        await deleteExpense(transportLandingExpenseId);
       }
 
       if (Platform.OS === 'web' && typeof localStorage !== 'undefined') {
@@ -1133,7 +1300,7 @@ export function TradeDashboardForm({ mode, onDone, onOpenHistory, editId }: Trad
   }, [
     submitting, items, selectedPartyId, isSale, products, moneyAccounts, paymentLines, paymentAccounts, numBank, billDate, editPaymentUnsupported,
     lang, sale, numDiscount, totalPaid, memoNo, purchase, numTransport, paymentNote, saveExpense, deleteExpense, mode,
-    printDoc, resetForm, sales, purchases, focusCustomerInput, editId, refresh, onDone, showFormError
+    printDoc, resetForm, sales, purchases, focusCustomerInput, editId, refresh, onDone, showFormError, hasUncalculatedLineExpression
   ]);
 
   // Global Keyboard Shortcuts Listener
@@ -1826,7 +1993,10 @@ export function TradeDashboardForm({ mode, onDone, onOpenHistory, editId }: Trad
               {isSale ? tx('বিক্রয় দর (৳)', 'Sale rate (৳)') : tx('ক্রয় দর (৳)', 'Purchase rate (৳)')}<Text style={{ color: '#DC2626', fontWeight: '900' }}> *</Text>
             </Text>
             {!isSale && (
-              <Text style={[styles.th, { width: 130, textAlign: 'center' }]}>{tx('অন্যান্য খরচ/বস্তা (৳)', 'Other cost/bag (৳)')}</Text>
+              <>
+                <Text style={[styles.th, { width: 130, textAlign: 'center' }]}>{tx('অন্যান্য খরচ/বস্তা (৳)', 'Other cost/bag (৳)')}</Text>
+                <Text style={[styles.th, { width: 130, textAlign: 'center' }]}>{tx('পরিবহন খরচ/বস্তা (৳)', 'Transport cost/bag (৳)')}</Text>
+              </>
             )}
             <Text style={[styles.th, { width: 125, textAlign: 'center' }]}>{tx('মোট (৳)', 'Total (৳)')}</Text>
             <Text style={[styles.th, { width: 48, textAlign: 'center' }]}>{tx('অ্যাকশন', 'Action')}</Text>
@@ -2060,15 +2230,10 @@ export function TradeDashboardForm({ mode, onDone, onOpenHistory, editId }: Trad
                       ref={el => (inputRefs.current[`purchaseRate_${rowIdx}`] = el)}
                       accessibilityLabel={`Purchase cost ${rowIdx + 1}`}
                       value={row.purchaseRate}
-                      onChangeText={txt => {
-                        setItems(prev => {
-                          const copy = [...prev];
-                          copy[rowIdx].purchaseRate = txt;
-                          return copy;
-                        });
-                      }}
+                      onChangeText={txt => setCalculatedField(rowIdx, 'purchaseRate', txt)}
                       onFocus={() => setFocusedField(`purchaseRate_${rowIdx}`)}
                       onSubmitEditing={() => {
+                        if (evaluateLineCalculation(rowIdx, 'purchaseRate')) return;
                         if (Platform.OS !== 'web') {
                           inputRefs.current[`rate_${rowIdx}`]?.focus();
                           setFocusedField(`rate_${rowIdx}`);
@@ -2078,8 +2243,10 @@ export function TradeDashboardForm({ mode, onDone, onOpenHistory, editId }: Trad
                         if (Platform.OS !== 'web' || e.nativeEvent?.key !== 'Enter') return;
                         e.preventDefault?.();
                         e.stopPropagation?.();
+                        if (evaluateLineCalculation(rowIdx, 'purchaseRate')) return;
                         focusInputAfterKey(`rate_${rowIdx}`);
                       }}
+                      {...(Platform.OS === 'web' ? { onDoubleClick: () => restoreLineCalculation(rowIdx, 'purchaseRate') } as any : {})}
                       selectTextOnFocus={true}
                       style={[
                         styles.tableTextInput,
@@ -2088,7 +2255,7 @@ export function TradeDashboardForm({ mode, onDone, onOpenHistory, editId }: Trad
                       ]}
                       placeholder={basePurchaseRate > 0 ? String(basePurchaseRate) : 'গড় ক্রয়'}
                       placeholderTextColor="#94A3B8"
-                      keyboardType="numeric"
+                      keyboardType="default"
                       returnKeyType="next"
                     />
                   </View>
@@ -2101,21 +2268,17 @@ export function TradeDashboardForm({ mode, onDone, onOpenHistory, editId }: Trad
                     editable={true}
                     accessibilityLabel={`${isSale ? 'Sale rate' : 'Purchase rate'} ${rowIdx + 1}`}
                     value={row.rate}
-                    onChangeText={txt => {
-                      setItems(prev => {
-                        const copy = [...prev];
-                        copy[rowIdx].rate = txt;
-                        return copy;
-                      });
-                    }}
+                    onChangeText={txt => setCalculatedField(rowIdx, 'rate', txt)}
                     onFocus={() => setFocusedField(`rate_${rowIdx}`)}
                     onSubmitEditing={() => {
+                      if (evaluateLineCalculation(rowIdx, 'rate')) return;
                       if (Platform.OS !== 'web') focusNextField(`rate_${rowIdx}`);
                     }}
                     onKeyPress={(e: any) => {
                       if (Platform.OS === 'web' && e.nativeEvent?.key === 'Enter') {
                         e.preventDefault?.();
                         e.stopPropagation?.();
+                        if (evaluateLineCalculation(rowIdx, 'rate')) return;
                         setTimeout(() => focusNextField(`rate_${rowIdx}`), 0);
                         return;
                       }
@@ -2133,6 +2296,7 @@ export function TradeDashboardForm({ mode, onDone, onOpenHistory, editId }: Trad
                         }
                       }
                     }}
+                    {...(Platform.OS === 'web' ? { onDoubleClick: () => restoreLineCalculation(rowIdx, 'rate') } as any : {})}
                     selectTextOnFocus={true}
                     style={[
                       styles.tableTextInput,
@@ -2141,7 +2305,7 @@ export function TradeDashboardForm({ mode, onDone, onOpenHistory, editId }: Trad
                     ]}
                     placeholder={isSale ? 'বিক্রয় দর লিখুন' : 'ক্রয় দর লিখুন'}
                     placeholderTextColor="#94A3B8"
-                    keyboardType="numeric"
+                    keyboardType="default"
                     returnKeyType="next"
                   />
                 </View>
@@ -2153,30 +2317,58 @@ export function TradeDashboardForm({ mode, onDone, onOpenHistory, editId }: Trad
                       ref={el => (inputRefs.current[`otherCost_${rowIdx}`] = el)}
                       accessibilityLabel={`Other cost per bag ${rowIdx + 1}`}
                       value={row.otherCost ?? ''}
-                      onChangeText={txt => {
-                        setItems(prev => {
-                          const copy = [...prev];
-                          copy[rowIdx] = { ...copy[rowIdx], otherCost: txt };
-                          return copy;
-                        });
-                      }}
+                      onChangeText={txt => setCalculatedField(rowIdx, 'otherCost', txt)}
                       onFocus={() => setFocusedField(`otherCost_${rowIdx}`)}
-                      onSubmitEditing={() => focusNextField(`otherCost_${rowIdx}`)}
+                      onSubmitEditing={() => { if (!evaluateLineCalculation(rowIdx, 'otherCost')) focusNextField(`otherCost_${rowIdx}`); }}
                       {...(Platform.OS === 'web' ? {
                         onKeyDown: (e: any) => {
                           if (e.key === 'Tab' && !e.shiftKey) {
                             e.preventDefault?.();
-                            if (rowIdx < items.length - 1) {
-                              inputRefs.current[`code_${rowIdx + 1}`]?.focus();
-                              setFocusedField(`code_${rowIdx + 1}`);
-                            } else {
-                              confirmBtnRef.current?.focus();
-                              setFocusedField('completeButton');
-                            }
+                            inputRefs.current[`transportCost_${rowIdx}`]?.focus();
+                            setFocusedField(`transportCost_${rowIdx}`);
                           }
                         }
                       } as any : {})}
                       onKeyPress={(e: any) => {
+                        if (e.nativeEvent?.key === 'Enter') {
+                          if (evaluateLineCalculation(rowIdx, 'otherCost')) { e.preventDefault?.(); e.stopPropagation?.(); }
+                          return;
+                        }
+                        if (e.nativeEvent?.key === 'Tab' && !e.nativeEvent?.shiftKey) {
+                          e.preventDefault?.();
+                          inputRefs.current[`transportCost_${rowIdx}`]?.focus();
+                          setFocusedField(`transportCost_${rowIdx}`);
+                        }
+                      }}
+                      {...(Platform.OS === 'web' ? { onDoubleClick: () => restoreLineCalculation(rowIdx, 'otherCost') } as any : {})}
+                      selectTextOnFocus={true}
+                      style={[
+                        styles.tableTextInput,
+                        { height: 40, width: '100%', textAlign: 'center', borderColor: '#CBD5E1', backgroundColor: '#FFFFFF' },
+                        isInputFocused(`otherCost_${rowIdx}`) && styles.inputFocusedGlow,
+                      ]}
+                      placeholder="০"
+                      placeholderTextColor="#94A3B8"
+                      keyboardType="default"
+                      returnKeyType="next"
+                    />
+                  </View>
+                )}
+
+                {!isSale && (
+                  <View style={[styles.td, { width: 130, alignItems: 'center' }]}>
+                    <TextInput
+                      ref={el => (inputRefs.current[`transportCost_${rowIdx}`] = el)}
+                      accessibilityLabel={`Transport cost per bag ${rowIdx + 1}`}
+                      value={row.transportCost ?? ''}
+                      onChangeText={txt => setCalculatedField(rowIdx, 'transportCost', txt)}
+                      onFocus={() => setFocusedField(`transportCost_${rowIdx}`)}
+                      onSubmitEditing={() => { if (!evaluateLineCalculation(rowIdx, 'transportCost')) focusNextField(`transportCost_${rowIdx}`); }}
+                      onKeyPress={(e: any) => {
+                        if (e.nativeEvent?.key === 'Enter') {
+                          if (evaluateLineCalculation(rowIdx, 'transportCost')) { e.preventDefault?.(); e.stopPropagation?.(); }
+                          return;
+                        }
                         if (e.nativeEvent?.key === 'Tab' && !e.nativeEvent?.shiftKey) {
                           e.preventDefault?.();
                           if (rowIdx < items.length - 1) {
@@ -2188,15 +2380,12 @@ export function TradeDashboardForm({ mode, onDone, onOpenHistory, editId }: Trad
                           }
                         }
                       }}
-                      selectTextOnFocus={true}
-                      style={[
-                        styles.tableTextInput,
-                        { height: 40, width: '100%', textAlign: 'center', borderColor: '#CBD5E1', backgroundColor: '#FFFFFF' },
-                        isInputFocused(`otherCost_${rowIdx}`) && styles.inputFocusedGlow,
-                      ]}
+                      {...(Platform.OS === 'web' ? { onDoubleClick: () => restoreLineCalculation(rowIdx, 'transportCost') } as any : {})}
+                      selectTextOnFocus
+                      style={[styles.tableTextInput, { height: 40, width: '100%', textAlign: 'center', borderColor: '#BAE6FD', backgroundColor: '#F0F9FF' }, isInputFocused(`transportCost_${rowIdx}`) && styles.inputFocusedGlow]}
                       placeholder="০"
                       placeholderTextColor="#94A3B8"
-                      keyboardType="numeric"
+                      keyboardType="default"
                       returnKeyType="next"
                     />
                   </View>
@@ -2245,7 +2434,7 @@ export function TradeDashboardForm({ mode, onDone, onOpenHistory, editId }: Trad
             <Text style={{ fontSize: 13, fontWeight: '700', color: '#64748B' }}>
                   {tx('মোট আইটেম:', 'Items:')} {lang === 'bn' ? toBnDigits(String(items.filter(it => it.name.trim()).length || items.length)) : (items.filter(it => it.name.trim()).length || items.length)}
             </Text>
-            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 16 }}>
+            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 16, flexWrap: 'wrap', justifyContent: 'flex-end' }}>
               <Text style={{ fontSize: 14, fontWeight: '700', color: '#0F172A' }}>
                   {tx('মোট পরিমাণ:', 'Total quantity:')}{' '}
                 <Text style={{ color: '#1c70b9', fontWeight: '800' }}>
@@ -2273,6 +2462,14 @@ export function TradeDashboardForm({ mode, onDone, onOpenHistory, editId }: Trad
                   {totalProductValue < 0 ? '-' : ''}৳{toBnDigits(String(Math.abs(Math.round(totalProductValue))))}
                 </Text>
               </Text>
+              {!isSale ? <>
+                <Text style={{ fontSize: 14, fontWeight: '700', color: '#475569' }}>
+                  {tx('মোট ল্যান্ডিং খরচ:', 'Total landing cost:')} <Text style={{ color: '#047857', fontWeight: '900' }}>৳{localeDigits(String(Math.round(totalOtherCost)), lang)}</Text>
+                </Text>
+                <Text style={{ fontSize: 14, fontWeight: '700', color: '#475569' }}>
+                  {tx('মোট পরিবহন খরচ:', 'Total transport cost:')} <Text style={{ color: '#0369A1', fontWeight: '900' }}>৳{localeDigits(String(Math.round(totalTransportLandingCost)), lang)}</Text>
+                </Text>
+              </> : null}
             </View>
           </View>
           {isSale && belowCostLoss > 0 ? (
@@ -2430,6 +2627,11 @@ export function TradeDashboardForm({ mode, onDone, onOpenHistory, editId }: Trad
                               {tx('অন্যান্য খরচ:', 'Other cost:')} <Text style={{ fontWeight: '700' }}>৳{lang === 'bn' ? toBnDigits(String(parseNum(it.otherCost))) : parseNum(it.otherCost)}/{tx('বস্তা', 'bag')}</Text> ({tx('মোট:', 'Total:')} ৳{lang === 'bn' ? toBnDigits(String(Math.abs(q) * parseNum(it.otherCost))) : Math.abs(q) * parseNum(it.otherCost)})
                             </Text>
                           ) : null}
+                          {!isSale && parseNum(it.transportCost) > 0 ? (
+                            <Text style={{ fontSize: 13, color: '#0369A1' }}>
+                              {tx('পরিবহন খরচ:', 'Transport cost:')} <Text style={{ fontWeight: '700' }}>৳{localeDigits(String(parseNum(it.transportCost)), lang)}/{tx('বস্তা', 'bag')}</Text>
+                            </Text>
+                          ) : null}
                           {isSale && pr > 0 ? (
                             <Text style={{ fontSize: 13, color: '#B45309' }}>
                               {tx('ক্রয় খরচ:', 'Cost:')} <Text style={{ fontWeight: '700' }}>৳{lang === 'bn' ? toBnDigits(String(pr)) : pr}</Text>
@@ -2455,6 +2657,13 @@ export function TradeDashboardForm({ mode, onDone, onOpenHistory, editId }: Trad
                       <Text style={{ fontSize: 14, fontWeight: '800', color: '#92400E' }}>
                         ৳{toBnDigits(String(Math.round(totalOtherCost)))}
                       </Text>
+                    </View>
+                  ) : null}
+
+                  {!isSale && totalTransportLandingCost > 0 ? (
+                    <View style={{ marginTop: 4, flexDirection: 'row', justifyContent: 'space-between', backgroundColor: '#E0F2FE', paddingHorizontal: 8, paddingVertical: 4, borderRadius: 6 }}>
+                      <Text style={{ fontSize: 13, color: '#075985', fontWeight: '700' }}>{tx('মোট পরিবহন খরচ (ল্যান্ডিং খরচ):', 'Total transport landing cost:')}</Text>
+                      <Text style={{ fontSize: 14, fontWeight: '800', color: '#075985' }}>৳{localeDigits(String(Math.round(totalTransportLandingCost)), lang)}</Text>
                     </View>
                   ) : null}
 
@@ -2667,6 +2876,13 @@ export function TradeDashboardForm({ mode, onDone, onOpenHistory, editId }: Trad
                         <Text style={{ fontSize: 13, fontWeight: '800', color: '#B45309' }}>
                           {tx('মোট খরচ:', 'Total cost:')} ৳{lang === 'bn' ? toBnDigits(String(Math.round(totalOtherCost))) : Math.round(totalOtherCost)} ({tx('খরচ খাতায় স্বয়ংক্রিয় যুক্ত হবে', 'added to expenses automatically')})
                         </Text>
+                      </View>
+                    )}
+
+                    {!isSale && totalTransportLandingCost > 0 && (
+                      <View style={{ marginBottom: 8, padding: 8, backgroundColor: '#E0F2FE', borderRadius: 8, borderWidth: 1, borderColor: '#BAE6FD' }}>
+                        <Text style={{ fontSize: 12, fontWeight: '700', color: '#075985', marginBottom: 2 }}>{tx('পরিবহন খরচ (প্রতি বস্তা)', 'Transport cost (per bag)')}</Text>
+                        <Text style={{ fontSize: 13, fontWeight: '800', color: '#0369A1' }}>{tx('মোট খরচ:', 'Total cost:')} ৳{localeDigits(String(Math.round(totalTransportLandingCost)), lang)} ({tx('পণ্যের মজুদ খরচে যুক্ত হবে', 'added to product inventory cost and Landing Cost')})</Text>
                       </View>
                     )}
 

@@ -1002,7 +1002,7 @@ export function Products() {
   const { kg } = useUnitLabel();
   const [f, setF] = useState<Product | null>(null);
   const [bulkOpen, setBulkOpen] = useState(false);
-  const [v, setV] = useState({ code: '', name: '', description: '', cost: '', price: '', opening: '', sb: '25', mb: '40', lb: '50' });
+  const [v, setV] = useState({ code: '', name: '', description: '', cost: '', price: '', opening: '', sb: '25', mb: '', lb: '50' });
   const [productCodeQuery, setProductCodeQuery] = useState('');
   const [productNameQuery, setProductNameQuery] = useState('');
   const listed = products.filter(p =>
@@ -1010,13 +1010,14 @@ export function Products() {
     (!productNameQuery.trim() || p.name.toLowerCase().startsWith(productNameQuery.trim().toLowerCase()))
   );
   const open = (p?: Product) => {
-    setF(p ?? { id: '', name: '', cost: 0, price: 0, opening: 0, qty: 0, uom: 'kg', smallBagKg: 25, mediumBagKg: 40, largeBagKg: 50 });
+    setF(p ?? { id: '', name: '', cost: 0, price: 0, opening: 0, qty: 0, uom: 'kg', smallBagKg: 25, mediumBagKg: 0, largeBagKg: 50 });
     setV(p
       ? { code: p.code ?? '', name: p.name, description: p.description ?? '', cost: String(p.cost), price: String(p.price), opening: String(p.opening || ''), sb: String(p.smallBagKg > 0 ? p.smallBagKg : 25), mb: String(p.mediumBagKg > 0 ? p.mediumBagKg : 40), lb: String(p.largeBagKg > 0 ? p.largeBagKg : 50) }
-      : { code: '', name: '', description: '', cost: '', price: '', opening: '', sb: '25', mb: '40', lb: '50' });
+      : { code: '', name: '', description: '', cost: '', price: '', opening: '', sb: '25', mb: '', lb: '50' });
   };
   const save = () => {
     if (!v.name.trim()) return showEntryError(lang, lang === 'bn' ? 'পণ্যের নাম লিখুন।' : 'Enter a product name.');
+    if (!v.code.trim()) return showEntryError(lang, lang === 'bn' ? 'পণ্যের কোড লিখুন।' : 'Enter a product code.');
     if (!(num(v.sb) > 0) || !(num(v.mb) > 0) || !(num(v.lb) > 0)) return showEntryError(lang, t('invalidBag'));
     // New products may be created without a default selling rate. Existing
     // products can still set or clear their sale price here.
@@ -1047,7 +1048,7 @@ export function Products() {
   };
   if (f) return <Screen><Card>
     <FormGrid>
-      <Field label={t('code')} value={v.code} onChange={x => setV({ ...v, code: x })} /><Field label={t('productName')} value={v.name} onChange={x => setV({ ...v, name: x })} required />
+      <Field label={t('code')} value={v.code} onChange={x => setV({ ...v, code: x })} required /><Field label={t('productName')} value={v.name} onChange={x => setV({ ...v, name: x })} required />
       <Field label={t('descNote')} value={v.description} onChange={x => setV({ ...v, description: x })} /><Field label={t('costPerKg')} value={v.cost} onChange={x => setV({ ...v, cost: x })} num />
       {f.id ? <Field label={t('pricePerKg')} value={v.price} onChange={x => setV({ ...v, price: x })} num /> : null}<Field label={`${t('openingStock')} (${kg})`} value={v.opening} onChange={x => setV({ ...v, opening: x })} num />
     </FormGrid>

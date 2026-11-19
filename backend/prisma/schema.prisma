@@ -192,6 +192,7 @@ model PurchaseItem {
   rate       Float // vendor purchase rate per KG
   unitCost   Float    @default(0) // total landed cost per KG (rate + otherCostPerKg)
   otherCost  Float    @default(0) // other landed cost per bag
+  transportCost Float @default(0) // transport landing cost per bag
 
   @@index([purchaseId])
   @@index([productId])
@@ -297,6 +298,7 @@ model Expense {
   date       String // YYYY-MM-DD
   note       String?
   capitalized Boolean @default(false) // purchase landed cost; cash outflow, not operating expense
+  landingType String? // transport | stockInLabour | stockOutLabour | splitLabour (legacy)
   createdAt  DateTime @default(now())
   updatedAt  DateTime @updatedAt
   deletedAt  DateTime?
@@ -352,6 +354,7 @@ model LabourAdvance {
   accountId   String
   moneyAccount MoneyAccount @relation(fields: [accountId], references: [id], onDelete: Restrict)
   note        String?
+  memoOnly    Boolean  @default(false) // labour-account advance allocation; no extra accounting posting
   createdAt   DateTime @default(now())
 
   @@index([labourerId, date])
@@ -367,6 +370,8 @@ model LabourPayment {
   accountId   String
   moneyAccount MoneyAccount @relation(fields: [accountId], references: [id], onDelete: Restrict)
   note        String?
+  direction   String? // null for legacy or worker-wide payments; otherwise stockIn | stockOut
+  memoOnly    Boolean  @default(false) // labour-account allocation only; no extra accounting posting
   createdAt   DateTime @default(now())
 
   @@index([labourerId, date])

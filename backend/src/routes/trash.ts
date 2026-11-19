@@ -1,7 +1,6 @@
 import { Router, Request, Response } from 'express';
 import { db } from '../db';
 import { customerBalance, vendorBalance, purgeCutoff } from '../balance';
-import { setMovementActive } from '../money';
 
 export const trash = Router();
 
@@ -33,8 +32,11 @@ trash.post('/:kind/:id/restore', async (req: Request, res: Response) => {
     else if (kind === 'expense') {
       await db.$transaction(async t => {
         await t.expense.update({ where: { id }, data: { deletedAt: null } });
-        // Restoring an expense puts its money-out back on the balance.
-        await setMovementActive(t, 'expense', id, true);
+        // Restore the original movement and any installments together.
+        await t.moneyMovement.updateMany({
+          where: { sourceType: 'expense', OR: [{ sourceId: id }, { sourceId: { startsWith: `${id}:` } }] },
+          data: { active: true },
+        });
       });
     } else return res.status(400).json({ error: 'Invalid kind' });
     res.json({ id });
@@ -98,7 +100,7 @@ async function purgeOne(kind: string, id: string): Promise<{ ok: boolean; error?
     await db.$transaction(async t => {
       await t.expense.delete({ where: { id } });
       // Purged expense no longer counts toward profit, so its ledger row goes too.
-      await t.moneyMovement.deleteMany({ where: { sourceType: 'expense', sourceId: id } });
+      await t.moneyMovement.deleteMany({ where: { sourceType: 'expense', OR: [{ sourceId: id }, { sourceId: { startsWith: `${id}:` } }] } });
     });
     return { ok: true };
   }

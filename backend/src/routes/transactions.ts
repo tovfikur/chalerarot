@@ -365,9 +365,10 @@ async function editPurchase(req: Request, res: Response) {
         const rate = num(line.rate, product.cost);
         if (!(rate >= 0)) throw Object.assign(new Error('Invalid purchase rate'), { status: 400 });
         const otherCost = Math.max(0, num(line.otherCost ?? line.otherCostPerBag));
-        const unitCost = round2(rate + otherCost / (product.mediumBagKg || 50));
+        const transportCost = Math.max(0, num(line.transportCost));
+        const unitCost = round2(rate + (otherCost + transportCost) / (product.mediumBagKg || 50));
         total = round2(total + qtyKg * rate);
-        savedItems.push({ productId: product.id, unit: line.unit, enteredQty, qtyKg, rate, unitCost, otherCost });
+        savedItems.push({ productId: product.id, unit: line.unit, enteredQty, qtyKg, rate, unitCost, otherCost, transportCost });
         await writeMovement(t, product.id, { type: 'PURCHASE', bucket: 'sellable', qtyKg, unitCost, date: day, refId: old.id });
       }
       const cappedPay = Math.min(pay, total); const due = round2(total - cappedPay);
@@ -394,7 +395,10 @@ async function deleteLinkedInvoiceExpenses(t: TxClient, invoiceNo?: string | nul
   if (!linked.length) return 0;
   const ids = linked.map(row => row.id);
   await t.expense.updateMany({ where: { id: { in: ids } }, data: { deletedAt: new Date() } });
-  await t.moneyMovement.updateMany({ where: { sourceType: 'expense', sourceId: { in: ids } }, data: { active: false } });
+  await t.moneyMovement.updateMany({
+    where: { sourceType: 'expense', OR: ids.flatMap(id => [{ sourceId: id }, { sourceId: { startsWith: `${id}:` } }]) },
+    data: { active: false },
+  });
   return linked.length;
 }
 
@@ -910,6 +914,7 @@ tx.get('/purchases/:id', async (req: Request, res: Response) => {
     rate: it.rate,
     unitCost: it.unitCost || it.rate,
     otherCost: it.otherCost || 0,
+    transportCost: it.transportCost || 0,
   }));
 
   const retItems = p.returns.flatMap(r =>
@@ -989,7 +994,7 @@ tx.post('/purchases', async (req: Request, res: Response) => {
 
       let totalPos = 0;
       let returnTotalAmount = 0;
-      const items: { productId: string; unit: string; enteredQty: number; qtyKg: number; rate: number; unitCost: number; otherCost: number }[] = [];
+      const items: { productId: string; unit: string; enteredQty: number; qtyKg: number; rate: number; unitCost: number; otherCost: number; transportCost: number }[] = [];
       const returnItems: {
         productId: string; unit: string; enteredQty: number; qtyKg: number; goodKg: number; damagedKg: number;
         condition: string; damageReason: string | null; note: string | null; rate: number; amount: number;
@@ -1015,7 +1020,8 @@ tx.post('/purchases', async (req: Request, res: Response) => {
 
           const bagKg = p.mediumBagKg || 50;
           const otherCostPerBag = Math.max(0, num(l?.otherCost ?? l?.otherCostPerBag));
-          const otherCostPerKg = otherCostPerBag / bagKg;
+          const transportCostPerBag = Math.max(0, num(l?.transportCost));
+          const otherCostPerKg = (otherCostPerBag + transportCostPerBag) / bagKg;
           const buyerCostPerKg = round2(rate + otherCostPerKg);
 
           items.push({
@@ -1026,6 +1032,7 @@ tx.post('/purchases', async (req: Request, res: Response) => {
             rate,
             unitCost: buyerCostPerKg,
             otherCost: otherCostPerBag,
+            transportCost: transportCostPerBag,
           });
 
           // Stock in at the buyer's cost (vendor rate + other cost per kg); weighted average re-blends.

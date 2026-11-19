@@ -390,21 +390,26 @@ export function StockDashboard() {
   // Save or update product from modal
   const handleSaveProduct = async () => {
     const trimmedName = newName.trim();
+    const trimmedCode = newCode.trim();
+    if (!trimmedCode) {
+      showEntryError(lang, label('পণ্যের কোড আবশ্যক।', 'Product code is required.'));
+      return;
+    }
     if (!trimmedName) {
       showEntryError(lang, label('পণ্যের নাম আবশ্যক।', 'Product name is required.'));
       return;
     }
 
-    const bagKg = parseNum(newBagKg) || 50;
-    if (bagKg <= 0) {
-      showEntryError(lang, label('প্রতি বস্তায় কেজির পরিমাণ ০ এর বেশি হতে হবে।', 'Bag weight must be greater than zero.'));
+    const bagKg = parseNum(newBagKg);
+    if (!newBagKg.trim() || bagKg <= 0) {
+      showEntryError(lang, label('প্রতি বস্তায় কেজির পরিমাণ আবশ্যক এবং ০ এর বেশি হতে হবে।', 'Quantity per bag is required and must be greater than zero.'));
       return;
     }
     const openingBags = parseNum(newOpeningBags) || 0;
     const cost = parseNum(newCostRate) || 0;
-    const price = parseNum(newSalePrice);
-    if (!Number.isFinite(price) || price <= 0) {
-      showEntryError(lang, label('সঠিক বিক্রয়দর দিন (০ এর বেশি)।', 'Enter a sale price greater than zero.'));
+    const price = parseNum(newSalePrice) || 0;
+    if (price < 0) {
+      showEntryError(lang, label('বিক্রয়দর ০ বা তার বেশি দিন।', 'Enter a sale price of zero or more.'));
       return;
     }
     const openingKg = Math.round(openingBags * bagKg * 100) / 100;
@@ -417,7 +422,7 @@ export function StockDashboard() {
 
       await saveProduct({
         id: targetId,
-        code: newCode.trim(),
+        code: trimmedCode,
         name: trimmedName,
         description: newDescription.trim(),
         cost,
@@ -1113,7 +1118,7 @@ export function StockDashboard() {
             <ScrollView style={styles.modalBody} keyboardShouldPersistTaps="handled">
               <View style={styles.modalTwoCol}>
                 <View style={[styles.modalCol, { flex: 1 }]}>
-                  <Text style={styles.modalLabel}>{label('পণ্য কোড (ঐচ্ছিক)', 'Product code (optional)')}</Text>
+                  <RequiredLabel text={label('পণ্য কোড', 'Product code')} required style={styles.modalLabel} />
                   <TextInput
                     value={newCode}
                     onChangeText={setNewCode}
@@ -1138,7 +1143,7 @@ export function StockDashboard() {
 
               <View style={styles.modalTwoCol}>
                 <View style={styles.modalCol}>
-                  <Text style={styles.modalLabel}>{label('প্রতি বস্তায় পরিমাণ (কেজি)', 'Quantity per bag (kg)')}</Text>
+                  <RequiredLabel text={label('প্রতি বস্তায় পরিমাণ (কেজি)', 'Quantity per bag (kg)')} required style={styles.modalLabel} />
                   <TextInput
                     value={newBagKg}
                     onChangeText={setNewBagKg}
@@ -1182,7 +1187,7 @@ export function StockDashboard() {
                   )}
                 </View>
                 <View style={styles.modalCol}>
-                  <RequiredLabel text={label('বিক্রয়দর (প্রতি কেজি ৳)', 'Sale rate (৳/kg)')} required style={styles.modalLabel} />
+                  <Text style={styles.modalLabel}>{label('বিক্রয়দর (প্রতি কেজি ৳) · ঐচ্ছিক', 'Sale rate (৳/kg) · Optional')}</Text>
                   <TextInput
                     value={newSalePrice}
                     onChangeText={setNewSalePrice}

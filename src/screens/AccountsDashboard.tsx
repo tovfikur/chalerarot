@@ -46,6 +46,7 @@ import { showEntryError } from '../entryDialog';
 import { EntryReportButtons } from '../EntryReportButtons';
 import type { GeneralLedger, JournalEntries, SavedJournalEntry, HouseExpenseRow, MoneyMovementRow, StockMovementReportRow } from '../api';
 import type { Key } from '../i18n';
+import { DailyCashDashboard } from './DailyCashDashboard';
 import {
   FilterModal,
   ExpenseModal,
@@ -59,6 +60,7 @@ import {
   DateField,
   MoneyTransferModal,
   MoneyEntry,
+  Money,
 } from '../screens';
 
 interface AccountsDashboardProps {
@@ -200,7 +202,7 @@ export function AccountsDashboard({ go, focus, onFocusDone }: AccountsDashboardP
 
   // Active navigation tab
   // 'overview' | 'due' | 'pay' | 'expense' | 'houseExpense'
-  const [activeTab, setActiveTab] = useState<'overview' | 'reports' | 'due' | 'pay' | 'expense' | 'houseExpense'>('overview');
+  const [activeTab, setActiveTab] = useState<'overview' | 'reports' | 'due' | 'pay' | 'expense' | 'houseExpense' | 'dailyCash' | 'collection' | 'supplierPayment'>('overview');
 
   // Filter state
   const [fltPreset, setFltPreset] = useState<'today' | 'last7' | 'thisMonth' | 'last3m' | 'thisYear' | 'custom'>('today');
@@ -1518,6 +1520,7 @@ export function AccountsDashboard({ go, focus, onFocusDone }: AccountsDashboardP
         {[
           { key: 'overview', labelBn: 'সারসংক্ষেপ', labelEn: 'Overview', icon: icons.profit },
           { key: 'reports', labelBn: 'রিপোর্ট', labelEn: 'Reports', icon: icons.report },
+          { key: 'dailyCash', labelBn: 'দৈনিক ক্যাশ', labelEn: 'Daily Cash', icon: icons.cash },
           { key: 'collection', labelBn: 'গ্রাহক কালেকশন', labelEn: 'Customer Collection', icon: icons.collect },
           { key: 'supplierPayment', labelBn: 'সরবরাহকারী পেমেন্ট', labelEn: 'Supplier Payment', icon: icons.pay },
           { key: 'expense', labelBn: '📉 খরচের রেজিস্টার', labelEn: 'Expense Register', icon: icons.expense },
@@ -1529,9 +1532,7 @@ export function AccountsDashboard({ go, focus, onFocusDone }: AccountsDashboardP
               key={tTab.key}
               style={[styles.tabNavButton, active && styles.tabNavButtonActive]}
               onPress={() => {
-                if (tTab.key === 'collection') go?.('collect');
-                else if (tTab.key === 'supplierPayment') go?.('pay');
-                else setActiveTab(tTab.key as any);
+                setActiveTab(tTab.key as any);
               }}
             >
               <Text style={[styles.tabNavText, active && styles.tabNavTextActive]}>
@@ -1541,6 +1542,10 @@ export function AccountsDashboard({ go, focus, onFocusDone }: AccountsDashboardP
           );
         })}
       </View>
+
+      {activeTab === 'dailyCash' && <DailyCashDashboard embedded />}
+      {activeTab === 'collection' && <Money kind="c" done={() => { setActiveTab('overview'); void refresh(); }} />}
+      {activeTab === 'supplierPayment' && <Money kind="v" done={() => { setActiveTab('overview'); void refresh(); }} />}
 
       {/* ==================== TAB 1: OVERVIEW & PERFORMANCE CURVES ==================== */}
       {activeTab === 'reports' && (

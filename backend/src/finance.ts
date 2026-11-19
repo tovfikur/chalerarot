@@ -89,14 +89,13 @@ export async function periodFinance(mode: PeriodMode, ref?: string, end?: string
   const bounds = periodBounds(mode, ref, end);
   const { start, end: endDate } = bounds;
   const inRange = { gte: start, lte: endDate };
-  const [sales, saleItems, rets, purchases, expenses, labourCosts, purchaseItems, openV, closeV, openingAdded, journalLines, stockAdjustments, openingStockCostAdjustments] = await Promise.all([
+  const [sales, saleItems, rets, purchases, expenses, purchaseItems, openV, closeV, openingAdded, journalLines, stockAdjustments, openingStockCostAdjustments] = await Promise.all([
     db.sale.findMany({ where: { date: inRange }, select: { total: true } }),
     db.saleItem.findMany({ where: { sale: { date: inRange } }, select: { cogs: true } }),
     db.productReturn.findMany({ where: { date: inRange }, select: { kind: true, totalAmount: true, items: { select: { cogs: true } } } }),
     db.purchase.findMany({ where: { date: inRange }, select: { total: true } }),
     db.expense.findMany({ where: { date: inRange, deletedAt: null }, select: { amount: true, capitalized: true } }),
-    db.labourCost.findMany({ where: { date: inRange }, select: { amount: true } }),
-    db.purchaseItem.findMany({ where: { otherCost: { gt: 0 } }, select: { id: true, otherCost: true, qtyKg: true, purchase: { select: { date: true } }, product: { select: { mediumBagKg: true } } } }),
+    db.purchaseItem.findMany({ where: { OR: [{ otherCost: { gt: 0 } }, { transportCost: { gt: 0 } }] }, select: { id: true, otherCost: true, transportCost: true, qtyKg: true, purchase: { select: { date: true } }, product: { select: { mediumBagKg: true } } } }),
     inventoryValueAt(start, false),
     inventoryValueAt(endDate, true),
     // Keep opening-stock setup visible in the period's inventory value fields.
@@ -112,13 +111,13 @@ export async function periodFinance(mode: PeriodMode, ref?: string, end?: string
   const purchaseReturn = sum(rets.filter(r => r.kind === 'purchase').map(r => r.totalAmount));
   // Stock audits and cost revaluations do not move cash, but their signed
   // inventory value change is an expense (or expense credit) in account 6100.
-  const expense = round2(sum(expenses.filter(e => !e.capitalized).map(e => e.amount)) + sum(labourCosts.map(cost => cost.amount)) - sum(stockAdjustments.map(m => m.value)));
+  const expense = round2(sum(expenses.filter(e => !e.capitalized).map(e => e.amount)) - sum(stockAdjustments.map(m => m.value)));
 
   // Other cost per bag is capitalized into purchase inventory and retained as
   // a separate report metric; sale item COGS already includes its unit cost.
   const landedPurchase = sum(purchaseItems
     .filter(i => i.purchase.date >= start && i.purchase.date <= endDate)
-    .map(i => i.otherCost * i.qtyKg / (i.product.mediumBagKg || 50)));
+    .map(i => (i.otherCost + i.transportCost) * i.qtyKg / (i.product.mediumBagKg || 50)));
   const capitalizedLandedCost = landedPurchase;
 
   const netSales = round2(salesTotal - salesReturn);

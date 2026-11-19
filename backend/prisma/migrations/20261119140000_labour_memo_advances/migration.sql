@@ -1,0 +1,1 @@
+ALTER TABLE "LabourAdvance" ADD COLUMN "memoOnly" BOOLEAN NOT NULL DEFAULT false;

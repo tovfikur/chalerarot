@@ -18,7 +18,7 @@ const tabs: { r: string; k: Key; icon: IconName }[] = [
   { r: 'sale', k: 'sale', icon: icons.sale },
   { r: 'purchase', k: 'purchase', icon: icons.purchase },
   { r: 'accounts', k: 'accounts', icon: icons.accounts },
-  { r: 'labour', k: 'labourAccounts', icon: icons.vendors },
+  { r: 'labour', k: 'landingCosts', icon: icons.vendors },
   { r: 'settings', k: 'settings', icon: icons.settings },
 ];
 
@@ -35,7 +35,7 @@ const sidebar: { r: string; k: Key; icon: IconName; color: string; bg: string }[
   { r: 'stock', k: 'stockDashboard', icon: icons.stock, color: '#D97706', bg: '#FFFBEB' },
   { r: 'expense', k: 'expenseDashboard', icon: icons.expense, color: '#C026D3', bg: '#FDF4FF' },
   { r: 'accounts', k: 'accountsLabel', icon: icons.accounts, color: '#3B82F6', bg: '#EFF6FF' },
-  { r: 'labour', k: 'labourAccounts', icon: icons.vendors, color: '#EA580C', bg: '#FFF7ED' },
+  { r: 'labour', k: 'landingCosts', icon: icons.vendors, color: '#EA580C', bg: '#FFF7ED' },
   { r: 'bank', k: 'bankCash', icon: icons.bankCash, color: '#16A34A', bg: '#F0FDF4' },
   { r: 'settings', k: 'settings', icon: icons.settings, color: '#6366F1', bg: '#EEF2FF' },
 ];
@@ -54,7 +54,7 @@ const titleKey: Record<string, Key> = {
   collect: 'collect', pay: 'pay', customers: 'customers', vendors: 'vendors',
   stock: 'stockDashboard', expense: 'expenseDashboard', trash: 'trash',
   bank: 'bankCash', settings: 'settings', more: 'settings',
-  labour: 'labourAccounts',
+  labour: 'landingCosts',
 };
 
 // Hash routes for web so refresh + Back/Forward restore the page.

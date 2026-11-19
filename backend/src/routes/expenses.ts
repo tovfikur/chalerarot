@@ -1,7 +1,7 @@
 import { Router, Request, Response } from 'express';
 import { db } from '../db';
 import { transactionDay } from '../units';
-import { recordMovement, resolveAccount, setMovementActive, updateMovement } from '../money';
+import { recordMovement, resolveAccount, updateMovement } from '../money';
 
 export const EXPENSE_CATS = [
   'salary', 'rent', 'electricity', 'water', 'gas', 'internet',
@@ -17,16 +17,17 @@ const num = (v: unknown, d = 0) => {
 };
 
 const shape = (
-  e: { id: string; voucherNo: string | null; category: string; customName: string | null; amount: number; date: string; note: string | null; capitalized: boolean; createdAt: Date },
+  e: { id: string; voucherNo: string | null; category: string; customName: string | null; amount: number; date: string; note: string | null; capitalized: boolean; landingType: string | null; createdAt: Date },
   mv?: { method: string; moneyAccountId: string | null },
 ) => ({
   id: e.id, voucherNo: e.voucherNo ?? undefined, category: e.category, customName: e.customName ?? undefined,
   amount: e.amount, date: e.date, createdAt: e.createdAt, note: e.note ?? undefined,
   capitalized: e.capitalized,
+  landingType: e.landingType ?? undefined,
   method: mv?.method, accountId: mv?.moneyAccountId ?? undefined,
 });
 
-type CleanExpense = { category: string; customName: string | null; amount: number; date: string; note: string | null; capitalized: boolean };
+type CleanExpense = { category: string; customName: string | null; amount: number; date: string; note: string | null; capitalized: boolean; landingType: string | null };
 type Valid = { error?: string; code?: string; clean?: CleanExpense };
 
 function validate(body: Record<string, unknown>, opts?: { allowPastDate?: boolean }): Valid {
@@ -51,13 +52,15 @@ function validate(body: Record<string, unknown>, opts?: { allowPastDate?: boolea
   }
   const note = String(body.note ?? '').trim();
   const capitalized = body.capitalized === true;
+  const landingTypeValue = body.landingType == null ? null : String(body.landingType);
+  if (landingTypeValue !== null && !['transport', 'stockInLabour', 'stockOutLabour', 'splitLabour'].includes(landingTypeValue)) return { error: 'Invalid landed cost type' };
   if (capitalized && (category !== 'loading' || !note.startsWith('[ধরন: ল্যান্ডিং] ক্রয় #'))) {
     return { error: 'Capitalized landed costs must be linked to a purchase' };
   }
   // Capitalized landed costs increase inventory and accrue to a liability;
   // they are not cash or bank payments at the time they are entered.
   if (!capitalized && !body.accountId && !body.method) return { error: 'Payment account is required' };
-  return { clean: { category, customName: customName || null, amount, date, note: note || null, capitalized } };
+  return { clean: { category, customName: customName || null, amount, date, note: note || null, capitalized, landingType: landingTypeValue } };
 }
 
 export const expenses = Router();
@@ -122,6 +125,7 @@ expenses.put('/:id', async (req: Request, res: Response) => {
     date: req.body.date ?? cur.date,
     note: req.body.note ?? cur.note ?? '',
     capitalized: req.body.capitalized ?? cur.capitalized,
+    landingType: req.body.landingType ?? cur.landingType,
     // Keep the original account when the caller does not resend it.
     accountId: req.body.accountId ?? curMv?.moneyAccountId ?? '',
     method: req.body.method ?? curMv?.method ?? '',
@@ -133,10 +137,16 @@ expenses.put('/:id', async (req: Request, res: Response) => {
   });
   const clean = v.clean;
   if (!clean) return res.status(400).json({ error: v.error, code: v.code ?? 'EXPENSE_INVALID' });
+  const activeCapitalizedPayments = cur.capitalized ? await db.moneyMovement.findMany({
+    where: { sourceType: 'expense', active: true, OR: [{ sourceId: cur.id }, { sourceId: { startsWith: `${cur.id}:` } }] },
+    select: { amount: true },
+  }) : [];
+  const amountAlreadyPaid = activeCapitalizedPayments.reduce((sum, movement) => sum + movement.amount, 0);
+  if (cur.capitalized && amountAlreadyPaid > clean.amount + 0.01) return res.status(409).json({ error: 'The landed cost amount cannot be lower than payments already recorded.' });
   await db.$transaction(async t => {
     const acc = clean.capitalized && !curMv ? null : await resolveAccount(t, { accountId: merged.accountId ? String(merged.accountId) : null, method: merged.method ? String(merged.method) : null });
     await t.expense.update({ where: { id: cur.id }, data: clean });
-    if (acc) await updateMovement(t, 'expense', cur.id, { accountId: acc.id, method: acc.type, direction: 'out', amount: clean.amount, date: clean.date });
+    if (acc && !cur.capitalized) await updateMovement(t, 'expense', cur.id, { accountId: acc.id, method: acc.type, direction: 'out', amount: clean.amount, date: clean.date });
   });
   res.json({ id: cur.id });
 });
@@ -152,8 +162,11 @@ expenses.delete('/:id', async (req: Request, res: Response) => {
   });
   await db.$transaction(async t => {
     await t.expense.update({ where: { id: cur.id }, data: { deletedAt: new Date() } });
-    // Deactivate the original cash/bank movement atomically with the soft delete.
-    await setMovementActive(t, 'expense', cur.id, false);
+    // Deactivate the original movement and any partial payments atomically with the soft delete.
+    await t.moneyMovement.updateMany({
+      where: { sourceType: 'expense', active: true, OR: [{ sourceId: cur.id }, { sourceId: { startsWith: `${cur.id}:` } }] },
+      data: { active: false },
+    });
   });
   res.json({
     id: cur.id, amount: cur.amount, category: cur.category,
