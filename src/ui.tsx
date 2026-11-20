@@ -11,20 +11,20 @@ import { CONTENT_MAX, contentPadding, useBreakpoint, useFs } from './responsive'
 type IconName = React.ComponentProps<typeof MaterialCommunityIcons>['name'];
 
 export const color = {
-  bg: '#F0F6FC', // Ultra-light luminous icy azure pearl background
+  bg: '#EDF3FF',
   card: '#FFFFFF',
-  primary: '#1c70b9', // Vibrant Royal Azure Blue
-  primaryDark: '#135591',
-  primaryLight: '#E0F0FE', // Light flashy sky tint
-  primaryGlow: 'rgba(28, 112, 185, 0.25)',
-  text: '#0F1E36', // Crisp slate navy
-  muted: '#5B728F', // Refined slate steel
-  red: '#EF4444',
+  primary: '#2563EB',
+  primaryDark: '#1D4ED8',
+  primaryLight: '#EAF2FF',
+  primaryGlow: 'rgba(37, 99, 235, 0.13)',
+  text: '#182B55',
+  muted: '#526583',
+  red: '#DC2626',
   green: '#10B981',
-  amber: '#F59E0B',
-  purple: '#8B5CF6',
-  cyan: '#06B6D4',
-  line: '#D2E3F3', // Soft crisp divider
+  amber: '#F97316',
+  purple: '#7C3AED',
+  cyan: '#0891B2',
+  line: '#D7E2F4',
 };
 
 // Central number localization (display only — state/API stay numeric).
@@ -74,10 +74,10 @@ export function RequiredLabel({ text, required = false, style }: { text: string;
 export const Btn = ({ label, onPress, kind = 'primary', icon, testID }: { label: string; onPress: () => void; kind?: 'primary' | 'ghost' | 'danger'; icon?: IconName; testID?: string }) => {
   const fs = useFs(17, 15);
   return (
-    <TouchableOpacity onPress={onPress} testID={testID} style={[s.btn, kind === 'ghost' && s.ghost, kind === 'danger' && s.dangerBtn]}>
+    <TouchableOpacity onPress={onPress} testID={testID} accessibilityRole="button" style={[s.btn, kind === 'ghost' && s.ghost, kind === 'danger' && s.dangerBtn]}>
       <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
-        {icon ? <MaterialCommunityIcons name={icon} size={20} color={kind === 'ghost' ? '#1c70b9' : '#fff'} /> : null}
-        <Text style={[s.btnT, kind === 'ghost' && { color: '#0F2B48' }, { fontSize: fs }]}>{label}</Text>
+        {icon ? <MaterialCommunityIcons name={icon} size={20} color={kind === 'ghost' ? color.primaryDark : '#fff'} /> : null}
+      <Text style={[s.btnT, kind === 'ghost' && { color: color.primaryDark }, { fontSize: fs }]}>{label}</Text>
       </View>
     </TouchableOpacity>
   );
@@ -229,12 +229,12 @@ export const PageHeader = ({
       <View style={s.pageHeaderLeft}>
         {onBack ? (
           <TouchableOpacity onPress={onBack} style={s.pageHeaderBackBtn} accessibilityLabel="Back">
-            <AppIcon name={icons.back} size={20} iconColor="#FFFFFF" />
+            <AppIcon name={icons.back} size={20} iconColor={color.primary} />
           </TouchableOpacity>
         ) : null}
         {icon ? (
           <View style={s.pageHeaderIconBadge}>
-            <AppIcon name={icon} size={22} iconColor="#FFFFFF" />
+            <AppIcon name={icon} size={22} iconColor={color.primary} />
           </View>
         ) : null}
         <View style={{ flexShrink: 1 }}>
@@ -408,7 +408,7 @@ function RowPressable<T>({ row, selected, onPress, columns }: { row: T; selected
       style={({ pressed }) => ({
         flexDirection: 'row', alignItems: 'center', minHeight: 46, paddingHorizontal: 4,
         borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: color.line,
-        backgroundColor: selected ? '#E8EFE9' : pressed || hover ? '#F1F7F3' : color.card,
+        backgroundColor: selected ? color.primaryLight : pressed || hover ? '#F5F8FF' : color.card,
         ...(onPress ? { cursor: 'pointer' } : null),
       })}
     >
@@ -437,7 +437,7 @@ export const Screen = ({ children, maxWidth, scrollRef, onScrollY }: {
       ref={scrollRef}
       onScroll={onScrollY ? (e: { nativeEvent: { contentOffset: { y: number } } }) => onScrollY(e.nativeEvent.contentOffset.y) : undefined}
       scrollEventThrottle={onScrollY ? 32 : undefined}
-      style={{ flex: 1, backgroundColor: color.bg }}
+      style={{ flex: 1, backgroundColor: Platform.OS === 'web' ? 'transparent' : color.bg }}
       contentContainerStyle={{ padding: pad, paddingBottom: 40 }}
       keyboardShouldPersistTaps="handled">
       <View style={{ width: '100%', ...(maxWidth ? { maxWidth, alignSelf: 'center' } : {}) }}>{children}</View>
@@ -451,77 +451,64 @@ const s = StyleSheet.create({
     borderRadius: 16,
     padding: 16,
     marginBottom: 14,
-    borderWidth: 1.5,
-    borderColor: '#D8E7F5',
+    borderWidth: 1,
+    borderColor: color.line,
     ...(Platform.OS === 'web' ? {
-      boxShadow: '0 8px 24px rgba(28, 112, 185, 0.08), 0 2px 6px rgba(0, 0, 0, 0.03), inset 0 1px 0 #FFFFFF',
+      boxShadow: '0 4px 14px rgba(15, 23, 42, 0.04)',
     } as any : {
-      elevation: 3,
-      shadowColor: '#1c70b9',
-      shadowOffset: { width: 0, height: 4 },
-      shadowOpacity: 0.1,
-      shadowRadius: 8,
+      elevation: 1,
+      shadowColor: '#0F172A',
+      shadowOffset: { width: 0, height: 2 },
+      shadowOpacity: 0.04,
+      shadowRadius: 6,
     }),
   },
   title: { fontSize: 20, fontWeight: '700', color: color.text, marginBottom: 8, lineHeight: 30 },
   muted: { fontSize: 14, color: color.muted, lineHeight: 22 },
   btn: {
     backgroundColor: color.primary,
-    borderRadius: 14,
-    minHeight: 50,
+    borderRadius: 9,
+    minHeight: 46,
     alignItems: 'center',
     justifyContent: 'center',
     paddingHorizontal: 18,
     marginVertical: 4,
-    borderBottomWidth: 3.5,
-    borderBottomColor: '#124e82',
-    borderTopWidth: 1,
-    borderTopColor: '#5faef2',
     ...(Platform.OS === 'web' ? {
-      backgroundImage: 'linear-gradient(180deg, #2b91e8 0%, #1c70b9 52%, #145994 100%)',
-      boxShadow: '0 6px 16px rgba(28, 112, 185, 0.35), inset 0 1px 1px rgba(255, 255, 255, 0.45)',
+      boxShadow: '0 2px 6px rgba(37, 99, 235, 0.16)',
+      transition: 'background-color 180ms ease, box-shadow 180ms ease, transform 180ms ease',
       cursor: 'pointer',
     } as any : {}),
   },
   ghost: {
     backgroundColor: '#FFFFFF',
-    borderWidth: 1.5,
-    borderColor: '#CBD5E1',
-    borderTopWidth: 1,
-    borderTopColor: '#E2E8F0',
-    borderBottomWidth: 3,
-    borderBottomColor: '#1c70b9',
+    borderWidth: 1,
+    borderColor: color.line,
     ...(Platform.OS === 'web' ? {
-      backgroundImage: 'none',
-      boxShadow: '0 3px 10px rgba(28, 112, 185, 0.12), inset 0 1px 0 #FFFFFF',
+      transition: 'background-color 180ms ease, border-color 180ms ease, box-shadow 180ms ease',
       cursor: 'pointer',
     } as any : {}),
   },
   dangerBtn: {
     backgroundColor: color.red,
-    borderBottomWidth: 3.5,
-    borderBottomColor: '#991B1B',
-    borderTopWidth: 1,
-    borderTopColor: '#FCA5A5',
     ...(Platform.OS === 'web' ? {
-      backgroundImage: 'linear-gradient(180deg, #F43F5E 0%, #E11D48 52%, #BE123C 100%)',
-      boxShadow: '0 6px 16px rgba(225, 29, 72, 0.35), inset 0 1px 1px rgba(255, 255, 255, 0.45)',
+      boxShadow: '0 2px 6px rgba(220, 38, 38, 0.15)',
       cursor: 'pointer',
     } as any : {}),
   },
   btnT: { color: '#fff', fontSize: 17, fontWeight: '700' },
   input: {
-    borderWidth: 1.5,
-    borderColor: '#CCE0F2',
-    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: color.line,
+    borderRadius: 9,
     minHeight: 46,
     paddingHorizontal: 12,
     fontSize: 16,
-    backgroundColor: '#F8FAFD',
+    backgroundColor: '#FFFFFF',
     color: color.text,
     ...(Platform.OS === 'web' ? {
-      boxShadow: 'inset 0 2px 4px rgba(28, 112, 185, 0.05)',
+      boxShadow: '0 1px 2px rgba(15, 23, 42, 0.02)',
       outlineStyle: 'none',
+      transition: 'border-color 160ms ease, box-shadow 160ms ease',
     } as any : {}),
   },
   chip: {
@@ -529,27 +516,25 @@ const s = StyleSheet.create({
     minHeight: 42,
     justifyContent: 'center',
     borderRadius: 21,
-    backgroundColor: '#E4F1FD',
+    backgroundColor: '#EEF3FC',
     borderWidth: 1,
-    borderColor: '#CCE2F7',
+    borderColor: '#DBEAFE',
     marginRight: 8,
     ...(Platform.OS === 'web' ? {
-      boxShadow: '0 2px 5px rgba(28, 112, 185, 0.08), inset 0 1px 0 #FFFFFF',
+      transition: 'background-color 180ms ease, border-color 180ms ease, transform 180ms ease',
       cursor: 'pointer',
     } as any : {}),
   },
   row: { flexDirection: 'row', alignItems: 'center', paddingVertical: 10, borderBottomWidth: 1, borderBottomColor: color.line },
   rowT: { fontSize: 16, fontWeight: '600', color: color.text, lineHeight: 24 },
   pageHeaderBar: {
-    backgroundColor: '#1c70b9',
-    borderRadius: 16,
+    backgroundColor: '#FFFFFF',
+    borderRadius: 14,
     paddingHorizontal: 18,
     paddingVertical: 14,
     marginBottom: 16,
-    borderTopWidth: 1.5,
-    borderTopColor: '#60b0f4',
-    borderBottomWidth: 3.5,
-    borderBottomColor: '#124c7e',
+    borderWidth: 1,
+    borderColor: color.line,
     overflow: 'hidden',
     position: 'relative',
     flexDirection: 'row',
@@ -558,8 +543,7 @@ const s = StyleSheet.create({
     flexWrap: 'wrap',
     gap: 12,
     ...(Platform.OS === 'web' ? {
-      backgroundImage: 'linear-gradient(135deg, #2592ed 0%, #1c70b9 52%, #12518e 100%)',
-      boxShadow: '0 8px 22px rgba(28, 112, 185, 0.38), inset 0 1px 0 rgba(255, 255, 255, 0.45)',
+      boxShadow: '0 4px 14px rgba(15, 23, 42, 0.04)',
     } as any : {
       elevation: 4,
     }),
@@ -570,7 +554,7 @@ const s = StyleSheet.create({
     left: 0,
     right: 0,
     height: 18,
-    backgroundColor: 'rgba(255, 255, 255, 0.18)',
+    backgroundColor: 'transparent',
   },
   pageHeaderLeft: {
     flexDirection: 'row',
@@ -584,11 +568,7 @@ const s = StyleSheet.create({
     width: 36,
     height: 36,
     borderRadius: 10,
-    backgroundColor: 'rgba(255, 255, 255, 0.18)',
-    borderTopWidth: 1,
-    borderTopColor: 'rgba(255, 255, 255, 0.4)',
-    borderBottomWidth: 2,
-    borderBottomColor: 'rgba(0, 0, 0, 0.25)',
+    backgroundColor: '#EEF3FC',
     alignItems: 'center',
     justifyContent: 'center',
     ...(Platform.OS === 'web' ? ({ cursor: 'pointer' } as any) : {}),
@@ -597,30 +577,26 @@ const s = StyleSheet.create({
     width: 40,
     height: 40,
     borderRadius: 12,
-    backgroundColor: 'rgba(255, 255, 255, 0.2)',
+    backgroundColor: '#EAF1FF',
     alignItems: 'center',
     justifyContent: 'center',
-    borderTopWidth: 1,
-    borderTopColor: 'rgba(255, 255, 255, 0.45)',
-    borderBottomWidth: 2,
-    borderBottomColor: 'rgba(0, 0, 0, 0.2)',
   },
   pageHeaderTitle: {
-    color: '#FFFFFF',
+    color: color.text,
     fontSize: 20,
-    fontWeight: '800',
+    fontWeight: '700',
     letterSpacing: 0.3,
   },
   pageHeaderLiveTag: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: 5,
-    backgroundColor: 'rgba(255, 255, 255, 0.2)',
+    backgroundColor: '#ECFDF5',
     paddingHorizontal: 8,
     paddingVertical: 2,
     borderRadius: 10,
     borderWidth: 1,
-    borderColor: 'rgba(255, 255, 255, 0.35)',
+    borderColor: '#A7F3D0',
   },
   pageHeaderLiveDot: {
     width: 6,
@@ -629,12 +605,12 @@ const s = StyleSheet.create({
     backgroundColor: '#86EFAC',
   },
   pageHeaderLiveText: {
-    color: '#FFFFFF',
+    color: '#047857',
     fontSize: 11,
     fontWeight: '800',
   },
   pageHeaderSub: {
-    color: '#DCEBFA',
+    color: color.muted,
     fontSize: 12.5,
     fontWeight: '500',
     marginTop: 2,
@@ -650,14 +626,11 @@ const s = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     gap: 6,
-    backgroundColor: 'rgba(255, 255, 255, 0.2)',
+    backgroundColor: color.primary,
     paddingHorizontal: 14,
     paddingVertical: 9,
-    borderRadius: 10,
-    borderTopWidth: 1,
-    borderTopColor: 'rgba(255, 255, 255, 0.45)',
-    borderBottomWidth: 2,
-    borderBottomColor: 'rgba(0, 0, 0, 0.25)',
+    minHeight: 40,
+    borderRadius: 9,
     ...(Platform.OS === 'web' ? ({ cursor: 'pointer' } as any) : {}),
   },
   pageHeaderAddBtnText: {

@@ -51,6 +51,15 @@
       *, *::before, *::after, input, button, textarea, select {
         font-family: 'PurnoPran', -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif !important;
       }
+
+      [role="button"]:focus-visible,
+      button:focus-visible,
+      input:focus-visible,
+      textarea:focus-visible,
+      select:focus-visible {
+        outline: 3px solid rgba(57, 118, 229, 0.45) !important;
+        outline-offset: 2px;
+      }
     </style>
   </head>
 

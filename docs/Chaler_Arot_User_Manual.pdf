@@ -1,0 +1,473 @@
+%PDF-1.4
+%Manual
+1 0 obj
+<< /Type /Catalog /Pages 2 0 R >>
+endobj
+2 0 obj
+<< /Type /Pages /Kids [6 0 R 8 0 R 10 0 R 12 0 R 14 0 R 16 0 R 18 0 R 20 0 R] /Count 8 >>
+endobj
+3 0 obj
+<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica /Encoding /WinAnsiEncoding >>
+endobj
+4 0 obj
+<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica-Bold /Encoding /WinAnsiEncoding >>
+endobj
+5 0 obj
+<< /Length 1357 >>
+stream
+0.055 0.20 0.34 rg 0 0 612 792 re f
+0.08 0.34 0.53 rg 0 640 612 152 re f
+0.91 0.96 0.99 rg 0 0 612 206 re f
+0.20 0.72 0.56 rg 54 620 72 5 re f
+1 1 1 rg BT /F2 24 Tf 1 0 0 1 54.00 580.00 Tm (Chaler Arot User Manual and Workflows) Tj ET
+0.82 0.91 0.97 rg BT /F1 14 Tf 1 0 0 1 54.00 541.00 Tm (Rice wholesale business operations) Tj ET
+0.82 0.91 0.97 rg BT /F1 10 Tf 1 0 0 1 54.00 516.00 Tm (English edition  |  Version 1.0) Tj ET
+0.20 0.72 0.56 rg 54 490 504 1 re f
+0.055 0.20 0.34 rg BT /F1 11 Tf 1 0 0 1 54.00 436.00 Tm (This guide explains the working concepts and the normal operating paths for) Tj ET
+0.055 0.20 0.34 rg BT /F1 11 Tf 1 0 0 1 54.00 418.00 Tm (sales, purchases, stock, party balances, cash and bank, expenses, labour,) Tj ET
+0.055 0.20 0.34 rg BT /F1 11 Tf 1 0 0 1 54.00 400.00 Tm (returns, and reports. Screen labels are shown in English; the application) Tj ET
+0.055 0.20 0.34 rg BT /F1 11 Tf 1 0 0 1 54.00 382.00 Tm (can display Bengali or English.) Tj ET
+0.055 0.20 0.34 rg BT /F2 12 Tf 1 0 0 1 54.00 151.00 Tm (A practical guide to setup, daily work, and business review.) Tj ET
+0.17 0.23 0.29 rg BT /F1 10 Tf 1 0 0 1 54.00 120.00 Tm (Use the workflows in order: configure -> record -> reconcile -> review.) Tj ET
+0.60 0.72 0.80 rg BT /F1 8 Tf 1 0 0 1 54.00 46.00 Tm (Prepared from the current application screens and data model) Tj ET
+endstream
+endobj
+6 0 obj
+<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Resources << /Font << /F1 3 0 R /F2 4 0 R >> >> /Contents 5 0 R >>
+endobj
+7 0 obj
+<< /Length 6433 >>
+stream
+0.055 0.20 0.34 rg 0 754 612 38 re f
+1 1 1 rg BT /F2 9 Tf 1 0 0 1 54.00 768.00 Tm (CHALER AROT  /  USER MANUAL) Tj ET
+0.82 0.91 0.97 rg BT /F1 8 Tf 1 0 0 1 491.44 768.00 Tm (OPERATIONS GUIDE) Tj ET
+0.20 0.72 0.56 rg 54 741 42 3 re f
+0.055 0.34 0.52 rg BT /F2 14 Tf 1 0 0 1 54.00 711.00 Tm (1. What the system records) Tj ET
+0.83 0.90 0.94 rg 54 697.00 504 0.6 re f
+0.17 0.23 0.29 rg BT /F1 9.5 Tf 1 0 0 1 54.00 683.00 Tm (Chaler Arot keeps connected business records. A purchase adds rice to stock and creates or) Tj ET
+0.17 0.23 0.29 rg BT /F1 9.5 Tf 1 0 0 1 54.00 669.40 Tm (reduces an amount payable to a vendor. A sale removes sellable stock and creates or reduces) Tj ET
+0.17 0.23 0.29 rg BT /F1 9.5 Tf 1 0 0 1 54.00 655.80 Tm (an amount receivable from a customer. Payments change the party balance and the selected cash) Tj ET
+0.17 0.23 0.29 rg BT /F1 9.5 Tf 1 0 0 1 54.00 642.20 Tm (or bank account. Returns reverse the relevant sale or purchase and record the condition and) Tj ET
+0.17 0.23 0.29 rg BT /F1 9.5 Tf 1 0 0 1 54.00 628.60 Tm (settlement. Expenses and labour records track costs. Reports summarize these dated records.) Tj ET
+0.17 0.23 0.29 rg BT /F1 9.5 Tf 1 0 0 1 54.00 607.00 Tm (The system uses kilograms \(kg\) as the common stock quantity. Bag and ton quantities are) Tj ET
+0.17 0.23 0.29 rg BT /F1 9.5 Tf 1 0 0 1 54.00 593.40 Tm (converted using the sizes saved on each product. Entered quantities and their converted kg) Tj ET
+0.17 0.23 0.29 rg BT /F1 9.5 Tf 1 0 0 1 54.00 579.80 Tm (are retained on transaction details. Sale cost is based on the cost attached to stock when it) Tj ET
+0.17 0.23 0.29 rg BT /F1 9.5 Tf 1 0 0 1 54.00 566.20 Tm (is sold; purchase landed costs can include purchase, transport, and other per-bag costs.) Tj ET
+0.17 0.23 0.29 rg BT /F1 9.5 Tf 1 0 0 1 54.00 552.60 Tm (Accurate opening data and timely entries are necessary for reliable stock valuation and) Tj ET
+0.17 0.23 0.29 rg BT /F1 9.5 Tf 1 0 0 1 54.00 539.00 Tm (profit figures.) Tj ET
+0.055 0.20 0.34 rg BT /F2 11 Tf 1 0 0 1 54.00 515.40 Tm (Roles) Tj ET
+0.13 0.19 0.25 rg BT /F1 9.1 Tf 1 0 0 1 65.00 496.40 Tm (- Administrator: can manage business and inventory settings, language, users, expense) Tj ET
+0.13 0.19 0.25 rg BT /F1 9.1 Tf 1 0 0 1 65.00 483.90 Tm (  categories, activity log, and operational records.) Tj ET
+0.13 0.19 0.25 rg BT /F1 9.1 Tf 1 0 0 1 65.00 469.40 Tm (- Staff: can use the operating screens and their profile, but cannot manage users or) Tj ET
+0.13 0.19 0.25 rg BT /F1 9.1 Tf 1 0 0 1 65.00 456.90 Tm (  change business settings. Some configuration and sensitive reporting controls are) Tj ET
+0.13 0.19 0.25 rg BT /F1 9.1 Tf 1 0 0 1 65.00 444.40 Tm (  administrator-only.) Tj ET
+0.13 0.19 0.25 rg BT /F1 9.1 Tf 1 0 0 1 65.00 429.90 Tm (- Each user signs in with an email address and password. Sessions expire after 12) Tj ET
+0.13 0.19 0.25 rg BT /F1 9.1 Tf 1 0 0 1 65.00 417.40 Tm (  hours. Changing a password, editing a user, or deactivating a user revokes existing) Tj ET
+0.13 0.19 0.25 rg BT /F1 9.1 Tf 1 0 0 1 65.00 404.90 Tm (  sessions.) Tj ET
+0.055 0.34 0.52 rg BT /F2 14 Tf 1 0 0 1 54.00 383.40 Tm (2. First login and initial setup) Tj ET
+0.83 0.90 0.94 rg 54 369.40 504 0.6 re f
+0.17 0.23 0.29 rg BT /F1 9.5 Tf 1 0 0 1 54.00 355.40 Tm (There is no pre-created default user. On a new installation, create the first administrator) Tj ET
+0.17 0.23 0.29 rg BT /F1 9.5 Tf 1 0 0 1 54.00 341.80 Tm (through the sign-in screen's first-account setup, or use the server's documented POST) Tj ET
+0.17 0.23 0.29 rg BT /F1 9.5 Tf 1 0 0 1 54.00 328.20 Tm (/api/auth/setup endpoint. Enter a name, phone, email, and password with at least 10) Tj ET
+0.17 0.23 0.29 rg BT /F1 9.5 Tf 1 0 0 1 54.00 314.60 Tm (characters. Setup closes after the first account is created. Later accounts are created by an) Tj ET
+0.17 0.23 0.29 rg BT /F1 9.5 Tf 1 0 0 1 54.00 301.00 Tm (administrator from Settings > Users.) Tj ET
+0.17 0.23 0.29 rg BT /F1 9.5 Tf 1 0 0 1 54.00 279.40 Tm (Complete this setup order before recording live transactions:) Tj ET
+0.13 0.19 0.25 rg BT /F1 9.1 Tf 1 0 0 1 65.00 257.80 Tm (1. Business settings: enter the business name, address, phone, currency, fiscal-year) Tj ET
+0.13 0.19 0.25 rg BT /F1 9.1 Tf 1 0 0 1 65.00 245.30 Tm (  starting month, and preferred language. Save changes.) Tj ET
+0.13 0.19 0.25 rg BT /F1 9.1 Tf 1 0 0 1 65.00 230.80 Tm (2. Cash and bank accounts: open Bank & Cash, add the real cash box and bank accounts,) Tj ET
+0.13 0.19 0.25 rg BT /F1 9.1 Tf 1 0 0 1 65.00 218.30 Tm (  and enter each opening balance with its effective opening date. Do not create) Tj ET
+0.13 0.19 0.25 rg BT /F1 9.1 Tf 1 0 0 1 65.00 205.80 Tm (  duplicate accounts for the same real balance.) Tj ET
+0.13 0.19 0.25 rg BT /F1 9.1 Tf 1 0 0 1 65.00 191.30 Tm (3. Products: open Stock, add each rice/product name and optional code, set the small,) Tj ET
+0.13 0.19 0.25 rg BT /F1 9.1 Tf 1 0 0 1 65.00 178.80 Tm (  medium, and large bag weights used by the business, and enter opening quantity and) Tj ET
+0.13 0.19 0.25 rg BT /F1 9.1 Tf 1 0 0 1 65.00 166.30 Tm (  opening unit cost. Check the sale price per kg. Opening quantity is the starting) Tj ET
+0.13 0.19 0.25 rg BT /F1 9.1 Tf 1 0 0 1 65.00 153.80 Tm (  stock count, not a later purchase.) Tj ET
+0.13 0.19 0.25 rg BT /F1 9.1 Tf 1 0 0 1 65.00 139.30 Tm (4. Customers and vendors: create party records with names, contact details, and) Tj ET
+0.13 0.19 0.25 rg BT /F1 9.1 Tf 1 0 0 1 65.00 126.80 Tm (  optional codes. Enter opening due/payable only for balances already outstanding at) Tj ET
+0.13 0.19 0.25 rg BT /F1 9.1 Tf 1 0 0 1 65.00 114.30 Tm (  the start date. Record a next follow-up date when useful.) Tj ET
+0.13 0.19 0.25 rg BT /F1 9.1 Tf 1 0 0 1 65.00 99.80 Tm (5. Inventory policy: in Settings > Inventory settings, decide whether negative-stock) Tj ET
+0.13 0.19 0.25 rg BT /F1 9.1 Tf 1 0 0 1 65.00 87.30 Tm (  sales should be permitted. It is off by default. Keep it off when stock must be) Tj ET
+0.13 0.19 0.25 rg BT /F1 9.1 Tf 1 0 0 1 65.00 74.80 Tm (  verified before sale. When enabled, later purchases reconcile earlier negative units) Tj ET
+0.13 0.19 0.25 rg BT /F1 9.1 Tf 1 0 0 1 65.00 62.30 Tm (  using actual landed cost.) Tj ET
+0.83 0.88 0.91 RG 54 42 m 558 42 l S
+0.38 0.47 0.54 rg BT /F1 8 Tf 1 0 0 1 54.00 27.00 Tm (CHALER AROT  |  USER MANUAL) Tj ET
+0.38 0.47 0.54 rg BT /F1 8 Tf 1 0 0 1 537.20 27.00 Tm (2 / 8) Tj ET
+endstream
+endobj
+8 0 obj
+<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Resources << /Font << /F1 3 0 R /F2 4 0 R >> >> /Contents 7 0 R >>
+endobj
+9 0 obj
+<< /Length 6076 >>
+stream
+0.055 0.20 0.34 rg 0 754 612 38 re f
+1 1 1 rg BT /F2 9 Tf 1 0 0 1 54.00 768.00 Tm (CHALER AROT  /  USER MANUAL) Tj ET
+0.82 0.91 0.97 rg BT /F1 8 Tf 1 0 0 1 491.44 768.00 Tm (OPERATIONS GUIDE) Tj ET
+0.20 0.72 0.56 rg 54 741 42 3 re f
+0.13 0.19 0.25 rg BT /F1 9.1 Tf 1 0 0 1 65.00 718.00 Tm (6. Staff and categories: the administrator may add user accounts and create custom) Tj ET
+0.13 0.19 0.25 rg BT /F1 9.1 Tf 1 0 0 1 65.00 705.50 Tm (  expense categories before staff begin daily work.) Tj ET
+0.17 0.23 0.29 rg BT /F1 9.5 Tf 1 0 0 1 54.00 687.00 Tm (Use one consistent cutover date for opening stock, party balances, and money-account) Tj ET
+0.17 0.23 0.29 rg BT /F1 9.5 Tf 1 0 0 1 54.00 673.40 Tm (balances. Do not enter an opening balance again as a normal sale, purchase, payment, or) Tj ET
+0.17 0.23 0.29 rg BT /F1 9.5 Tf 1 0 0 1 54.00 659.80 Tm (deposit.) Tj ET
+0.055 0.34 0.52 rg BT /F2 14 Tf 1 0 0 1 54.00 635.20 Tm (3. Navigation and common controls) Tj ET
+0.83 0.90 0.94 rg 54 621.20 504 0.6 re f
+0.17 0.23 0.29 rg BT /F1 9.5 Tf 1 0 0 1 54.00 607.20 Tm (The desktop sidebar and mobile bottom navigation expose Home, Sale, Purchase, Accounts,) Tj ET
+0.17 0.23 0.29 rg BT /F1 9.5 Tf 1 0 0 1 54.00 593.60 Tm (Labour / Landing Costs, and Settings. Other common screens include Customers, Vendors, Stock,) Tj ET
+0.17 0.23 0.29 rg BT /F1 9.5 Tf 1 0 0 1 54.00 580.00 Tm (Expense, and Bank & Cash. On desktop these appear in the sidebar; on mobile, use) Tj ET
+0.17 0.23 0.29 rg BT /F1 9.5 Tf 1 0 0 1 54.00 566.40 Tm (Settings/More or the links in Accounts and the dashboard. The exact arrangement changes with) Tj ET
+0.17 0.23 0.29 rg BT /F1 9.5 Tf 1 0 0 1 54.00 552.80 Tm (screen width.) Tj ET
+0.13 0.19 0.25 rg BT /F1 9.1 Tf 1 0 0 1 65.00 531.20 Tm (- The business header includes global search and a reminder bell. Search finds) Tj ET
+0.13 0.19 0.25 rg BT /F1 9.1 Tf 1 0 0 1 65.00 518.70 Tm (  invoices, returns, customers, and vendors. Select a result to open its record.) Tj ET
+0.13 0.19 0.25 rg BT /F1 9.1 Tf 1 0 0 1 65.00 504.20 Tm (- The reminder bell lists customer collections or vendor payments due today or) Tj ET
+0.13 0.19 0.25 rg BT /F1 9.1 Tf 1 0 0 1 65.00 491.70 Tm (  tomorrow when a next date is recorded. Opening a reminder takes you to the related) Tj ET
+0.13 0.19 0.25 rg BT /F1 9.1 Tf 1 0 0 1 65.00 479.20 Tm (  party/account view.) Tj ET
+0.13 0.19 0.25 rg BT /F1 9.1 Tf 1 0 0 1 65.00 464.70 Tm (- Forms show required fields and validation messages. Dates use the app's calendar.) Tj ET
+0.13 0.19 0.25 rg BT /F1 9.1 Tf 1 0 0 1 65.00 452.20 Tm (  Numeric fields accept Bengali or English digits.) Tj ET
+0.13 0.19 0.25 rg BT /F1 9.1 Tf 1 0 0 1 65.00 437.70 Tm (- Lists commonly support search, date and status filters, sorting, pagination, and PDF) Tj ET
+0.13 0.19 0.25 rg BT /F1 9.1 Tf 1 0 0 1 65.00 425.20 Tm (  or CSV export. Exports reflect the current filtered list where the screen indicates) Tj ET
+0.13 0.19 0.25 rg BT /F1 9.1 Tf 1 0 0 1 65.00 412.70 Tm (  filtered results.) Tj ET
+0.13 0.19 0.25 rg BT /F1 9.1 Tf 1 0 0 1 65.00 398.20 Tm (- On the web, invoices and reports can be printed or saved as PDF through the browser) Tj ET
+0.13 0.19 0.25 rg BT /F1 9.1 Tf 1 0 0 1 65.00 385.70 Tm (  print dialog. CSV files open in spreadsheet programs.) Tj ET
+0.055 0.34 0.52 rg BT /F2 14 Tf 1 0 0 1 54.00 364.20 Tm (4. Daily sales workflow) Tj ET
+0.83 0.90 0.94 rg 54 350.20 504 0.6 re f
+0.055 0.20 0.34 rg BT /F2 10 Tf 1 0 0 1 54.00 335.20 Tm (Record a sale) Tj ET
+0.13 0.19 0.25 rg BT /F1 9.1 Tf 1 0 0 1 65.00 317.20 Tm (1. Open Sale and choose New Sale if the history list is showing. Select a customer by) Tj ET
+0.13 0.19 0.25 rg BT /F1 9.1 Tf 1 0 0 1 65.00 304.70 Tm (  code/name, or leave the party blank for a cash sale. A frequently used customer code) Tj ET
+0.13 0.19 0.25 rg BT /F1 9.1 Tf 1 0 0 1 65.00 292.20 Tm (  can be set as the default from the form.) Tj ET
+0.13 0.19 0.25 rg BT /F1 9.1 Tf 1 0 0 1 65.00 277.70 Tm (2. Set the bill date. The form can lock a date for repeated entry; unlock it when you) Tj ET
+0.13 0.19 0.25 rg BT /F1 9.1 Tf 1 0 0 1 65.00 265.20 Tm (  move to another date.) Tj ET
+0.13 0.19 0.25 rg BT /F1 9.1 Tf 1 0 0 1 65.00 250.70 Tm (3. Add one or more products. For each line choose kg, small bag, medium bag, large bag,) Tj ET
+0.13 0.19 0.25 rg BT /F1 9.1 Tf 1 0 0 1 65.00 238.20 Tm (  or ton; enter quantity and the sale rate per kg. Product stock and converted kg are) Tj ET
+0.13 0.19 0.25 rg BT /F1 9.1 Tf 1 0 0 1 65.00 225.70 Tm (  shown. The form calculates line totals and invoice total; apply any invoice discount) Tj ET
+0.13 0.19 0.25 rg BT /F1 9.1 Tf 1 0 0 1 65.00 213.20 Tm (  shown by the form.) Tj ET
+0.13 0.19 0.25 rg BT /F1 9.1 Tf 1 0 0 1 65.00 198.70 Tm (4. Enter the amount received now. If money is received, choose the cash/bank account) Tj ET
+0.13 0.19 0.25 rg BT /F1 9.1 Tf 1 0 0 1 65.00 186.20 Tm (  where it was received. Choose a customer for any unpaid balance and optionally set) Tj ET
+0.13 0.19 0.25 rg BT /F1 9.1 Tf 1 0 0 1 65.00 173.70 Tm (  the next collection date. A credit sale needs a customer; money received needs a) Tj ET
+0.13 0.19 0.25 rg BT /F1 9.1 Tf 1 0 0 1 65.00 161.20 Tm (  payment account.) Tj ET
+0.13 0.19 0.25 rg BT /F1 9.1 Tf 1 0 0 1 65.00 146.70 Tm (5. Review product, quantities, rate, discount, paid amount, due, date, and party.) Tj ET
+0.13 0.19 0.25 rg BT /F1 9.1 Tf 1 0 0 1 65.00 134.20 Tm (  Confirm the sale. The app creates an invoice, updates stock and party balance, and) Tj ET
+0.13 0.19 0.25 rg BT /F1 9.1 Tf 1 0 0 1 65.00 121.70 Tm (  records the received money.) Tj ET
+0.13 0.19 0.25 rg BT /F1 9.1 Tf 1 0 0 1 65.00 107.20 Tm (6. Print, preview, or share the invoice from the success/detail view where available.) Tj ET
+0.13 0.19 0.25 rg BT /F1 9.1 Tf 1 0 0 1 65.00 94.70 Tm (  To find it later, use Sale history, customer transactions, or global search.) Tj ET
+0.83 0.88 0.91 RG 54 42 m 558 42 l S
+0.38 0.47 0.54 rg BT /F1 8 Tf 1 0 0 1 54.00 27.00 Tm (CHALER AROT  |  USER MANUAL) Tj ET
+0.38 0.47 0.54 rg BT /F1 8 Tf 1 0 0 1 537.20 27.00 Tm (3 / 8) Tj ET
+endstream
+endobj
+10 0 obj
+<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Resources << /Font << /F1 3 0 R /F2 4 0 R >> >> /Contents 9 0 R >>
+endobj
+11 0 obj
+<< /Length 6477 >>
+stream
+0.055 0.20 0.34 rg 0 754 612 38 re f
+1 1 1 rg BT /F2 9 Tf 1 0 0 1 54.00 768.00 Tm (CHALER AROT  /  USER MANUAL) Tj ET
+0.82 0.91 0.97 rg BT /F1 8 Tf 1 0 0 1 491.44 768.00 Tm (OPERATIONS GUIDE) Tj ET
+0.20 0.72 0.56 rg 54 741 42 3 re f
+0.17 0.23 0.29 rg BT /F1 9.5 Tf 1 0 0 1 54.00 718.00 Tm (Sale status: paid means no balance remains; partial means some money was received and some) Tj ET
+0.17 0.23 0.29 rg BT /F1 9.5 Tf 1 0 0 1 54.00 704.40 Tm (remains due; due means nothing has been allocated/paid. A cash sale is recorded without a) Tj ET
+0.17 0.23 0.29 rg BT /F1 9.5 Tf 1 0 0 1 54.00 690.80 Tm (customer account. If negative stock is disabled, the form blocks quantities above available) Tj ET
+0.17 0.23 0.29 rg BT /F1 9.5 Tf 1 0 0 1 54.00 677.20 Tm (stock. If enabled, sales can make stock negative; this affects later cost reconciliation and) Tj ET
+0.17 0.23 0.29 rg BT /F1 9.5 Tf 1 0 0 1 54.00 663.60 Tm (should be monitored.) Tj ET
+0.17 0.23 0.29 rg BT /F1 9.5 Tf 1 0 0 1 54.00 642.00 Tm (Correct a sale: open its invoice from history or a customer's transactions and use Edit when) Tj ET
+0.17 0.23 0.29 rg BT /F1 9.5 Tf 1 0 0 1 54.00 628.40 Tm (offered. Editing revalidates the transaction and updates linked stock, balances, payment) Tj ET
+0.17 0.23 0.29 rg BT /F1 9.5 Tf 1 0 0 1 54.00 614.80 Tm (allocations, and accounting. Review the revised invoice and party balance afterward. Deleted) Tj ET
+0.17 0.23 0.29 rg BT /F1 9.5 Tf 1 0 0 1 54.00 601.20 Tm (transactions are not a normal correction path.) Tj ET
+0.055 0.34 0.52 rg BT /F2 14 Tf 1 0 0 1 54.00 576.60 Tm (5. Purchase and landed-cost workflow) Tj ET
+0.83 0.90 0.94 rg 54 562.60 504 0.6 re f
+0.13 0.19 0.25 rg BT /F1 9.1 Tf 1 0 0 1 65.00 548.60 Tm (1. Open Purchase > New Purchase. Select or create the vendor. Enter the supplier) Tj ET
+0.13 0.19 0.25 rg BT /F1 9.1 Tf 1 0 0 1 65.00 536.10 Tm (  memo/reference if used and set the bill date. Purchase memo numbers are) Tj ET
+0.13 0.19 0.25 rg BT /F1 9.1 Tf 1 0 0 1 65.00 523.60 Tm (  generated/remembered by the form and can be adjusted where the field is available.) Tj ET
+0.13 0.19 0.25 rg BT /F1 9.1 Tf 1 0 0 1 65.00 509.10 Tm (2. Add each received product. Enter unit and quantity, supplier purchase rate per kg,) Tj ET
+0.13 0.19 0.25 rg BT /F1 9.1 Tf 1 0 0 1 65.00 496.60 Tm (  and the additional per-bag costs offered by the form \(other cost and transport\).) Tj ET
+0.13 0.19 0.25 rg BT /F1 9.1 Tf 1 0 0 1 65.00 484.10 Tm (  Confirm the product's bag size is correct because per-bag costs are converted into) Tj ET
+0.13 0.19 0.25 rg BT /F1 9.1 Tf 1 0 0 1 65.00 471.60 Tm (  per-kg inventory cost. The form automatically records the other-cost portion as) Tj ET
+0.13 0.19 0.25 rg BT /F1 9.1 Tf 1 0 0 1 65.00 459.10 Tm (  stock-in/stock-out labour landing entries and transport as a transport landing) Tj ET
+0.13 0.19 0.25 rg BT /F1 9.1 Tf 1 0 0 1 65.00 446.60 Tm (  entry.) Tj ET
+0.13 0.19 0.25 rg BT /F1 9.1 Tf 1 0 0 1 65.00 432.10 Tm (3. Enter any amount paid now and select the account used. The unpaid remainder is) Tj ET
+0.13 0.19 0.25 rg BT /F1 9.1 Tf 1 0 0 1 65.00 419.60 Tm (  recorded as payable to the vendor. Review the total, paid amount, due, and line) Tj ET
+0.13 0.19 0.25 rg BT /F1 9.1 Tf 1 0 0 1 65.00 407.10 Tm (  costs, then confirm.) Tj ET
+0.13 0.19 0.25 rg BT /F1 9.1 Tf 1 0 0 1 65.00 392.60 Tm (4. Confirm the goods physically received match the purchase lines. Stock increases in) Tj ET
+0.13 0.19 0.25 rg BT /F1 9.1 Tf 1 0 0 1 65.00 380.10 Tm (  kg. Purchase rates and landed costs update the product's weighted-average cost; the) Tj ET
+0.13 0.19 0.25 rg BT /F1 9.1 Tf 1 0 0 1 65.00 367.60 Tm (  transaction retains its historical detail.) Tj ET
+0.13 0.19 0.25 rg BT /F1 9.1 Tf 1 0 0 1 65.00 353.10 Tm (5. Open the purchase invoice or vendor record to review, print, edit, or return goods) Tj ET
+0.13 0.19 0.25 rg BT /F1 9.1 Tf 1 0 0 1 65.00 340.60 Tm (  later.) Tj ET
+0.17 0.23 0.29 rg BT /F1 9.5 Tf 1 0 0 1 54.00 322.10 Tm (Both purchase-line other cost and transport cost are included in the purchase's per-kg) Tj ET
+0.17 0.23 0.29 rg BT /F1 9.5 Tf 1 0 0 1 54.00 308.50 Tm (inventory cost. Their linked landing entries support the landing-cost accounts and later) Tj ET
+0.17 0.23 0.29 rg BT /F1 9.5 Tf 1 0 0 1 54.00 294.90 Tm (settlements. Use Labour / Landing Costs to record separate operation-level transport or) Tj ET
+0.17 0.23 0.29 rg BT /F1 9.5 Tf 1 0 0 1 54.00 281.30 Tm (labour that was not captured on a purchase line. Avoid recording the same cost twice.) Tj ET
+0.055 0.34 0.52 rg BT /F2 14 Tf 1 0 0 1 54.00 256.70 Tm (6. Customer collections and vendor payments) Tj ET
+0.83 0.90 0.94 rg 54 242.70 504 0.6 re f
+0.17 0.23 0.29 rg BT /F1 9.5 Tf 1 0 0 1 54.00 228.70 Tm (Use Accounts or the Customers/Vendors list to choose a party and inspect its opening balance,) Tj ET
+0.17 0.23 0.29 rg BT /F1 9.5 Tf 1 0 0 1 54.00 215.10 Tm (invoices, payments, returns, and current balance. The account's balance is the amount still) Tj ET
+0.17 0.23 0.29 rg BT /F1 9.5 Tf 1 0 0 1 54.00 201.50 Tm (owed to you for a customer, or still owed by you for a vendor.) Tj ET
+0.17 0.23 0.29 rg BT /F1 9.5 Tf 1 0 0 1 54.00 179.90 Tm (Receive from a customer: choose Collect / Receive, select the customer, date, amount, and) Tj ET
+0.17 0.23 0.29 rg BT /F1 9.5 Tf 1 0 0 1 54.00 166.30 Tm (cash/bank account. Enter an optional note and follow-up date. If prompted to allocate the) Tj ET
+0.17 0.23 0.29 rg BT /F1 9.5 Tf 1 0 0 1 54.00 152.70 Tm (receipt across open invoices, choose the invoices and amounts. Save, then check the customer) Tj ET
+0.17 0.23 0.29 rg BT /F1 9.5 Tf 1 0 0 1 54.00 139.10 Tm (balance and the selected money-account balance. A receipt may be split across multiple) Tj ET
+0.17 0.23 0.29 rg BT /F1 9.5 Tf 1 0 0 1 54.00 125.50 Tm (accounts using the split payment option.) Tj ET
+0.17 0.23 0.29 rg BT /F1 9.5 Tf 1 0 0 1 54.00 103.90 Tm (Pay a vendor: choose Pay, select the vendor, date, amount, and cash/bank account; add a note) Tj ET
+0.17 0.23 0.29 rg BT /F1 9.5 Tf 1 0 0 1 54.00 90.30 Tm (and allocate to open purchases where prompted. Save and confirm that the vendor payable and) Tj ET
+0.17 0.23 0.29 rg BT /F1 9.5 Tf 1 0 0 1 54.00 76.70 Tm (bank/cash balance both decrease. Payments can also be split across accounts.) Tj ET
+0.83 0.88 0.91 RG 54 42 m 558 42 l S
+0.38 0.47 0.54 rg BT /F1 8 Tf 1 0 0 1 54.00 27.00 Tm (CHALER AROT  |  USER MANUAL) Tj ET
+0.38 0.47 0.54 rg BT /F1 8 Tf 1 0 0 1 537.20 27.00 Tm (4 / 8) Tj ET
+endstream
+endobj
+12 0 obj
+<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Resources << /Font << /F1 3 0 R /F2 4 0 R >> >> /Contents 11 0 R >>
+endobj
+13 0 obj
+<< /Length 6126 >>
+stream
+0.055 0.20 0.34 rg 0 754 612 38 re f
+1 1 1 rg BT /F2 9 Tf 1 0 0 1 54.00 768.00 Tm (CHALER AROT  /  USER MANUAL) Tj ET
+0.82 0.91 0.97 rg BT /F1 8 Tf 1 0 0 1 491.44 768.00 Tm (OPERATIONS GUIDE) Tj ET
+0.20 0.72 0.56 rg 54 741 42 3 re f
+0.17 0.23 0.29 rg BT /F1 9.5 Tf 1 0 0 1 54.00 718.00 Tm (The app generates payment numbers and keeps payment records in party history. Use the) Tj ET
+0.17 0.23 0.29 rg BT /F1 9.5 Tf 1 0 0 1 54.00 704.40 Tm (receipt/payment report or receipt print action where available. Do not record a party payment) Tj ET
+0.17 0.23 0.29 rg BT /F1 9.5 Tf 1 0 0 1 54.00 690.80 Tm (as a general deposit or withdrawal as well; that would count the same cash movement twice.) Tj ET
+0.055 0.34 0.52 rg BT /F2 14 Tf 1 0 0 1 54.00 666.20 Tm (7. Sales returns and purchase returns) Tj ET
+0.83 0.90 0.94 rg 54 652.20 504 0.6 re f
+0.17 0.23 0.29 rg BT /F1 9.5 Tf 1 0 0 1 54.00 638.20 Tm (Start a return from the related invoice or the Returns flow. Choose the original sale or) Tj ET
+0.17 0.23 0.29 rg BT /F1 9.5 Tf 1 0 0 1 54.00 624.60 Tm (purchase and the item\(s\) being returned. Enter the returned quantity and classify its) Tj ET
+0.17 0.23 0.29 rg BT /F1 9.5 Tf 1 0 0 1 54.00 611.00 Tm (condition as good, partial damage, or damaged; include a damage reason or note when) Tj ET
+0.17 0.23 0.29 rg BT /F1 9.5 Tf 1 0 0 1 54.00 597.40 Tm (appropriate. The application limits the return to quantities still returnable on that) Tj ET
+0.17 0.23 0.29 rg BT /F1 9.5 Tf 1 0 0 1 54.00 583.80 Tm (invoice.) Tj ET
+0.13 0.19 0.25 rg BT /F1 9.1 Tf 1 0 0 1 65.00 562.20 Tm (- A sale return reduces net sales/receivable or records a refund/settlement, and) Tj ET
+0.13 0.19 0.25 rg BT /F1 9.1 Tf 1 0 0 1 65.00 549.70 Tm (  returned good rice goes back to sellable stock. Damaged rice is tracked separately) Tj ET
+0.13 0.19 0.25 rg BT /F1 9.1 Tf 1 0 0 1 65.00 537.20 Tm (  from sellable stock.) Tj ET
+0.13 0.19 0.25 rg BT /F1 9.1 Tf 1 0 0 1 65.00 522.70 Tm (- A purchase return reduces the purchase/vendor payable or records the amount settled) Tj ET
+0.13 0.19 0.25 rg BT /F1 9.1 Tf 1 0 0 1 65.00 510.20 Tm (  with the vendor, and returned goods leave stock. Damaged status and return notes are) Tj ET
+0.13 0.19 0.25 rg BT /F1 9.1 Tf 1 0 0 1 65.00 497.70 Tm (  included in the return detail.) Tj ET
+0.13 0.19 0.25 rg BT /F1 9.1 Tf 1 0 0 1 65.00 483.20 Tm (- Check the return total, settlement, item condition, and original invoice before) Tj ET
+0.13 0.19 0.25 rg BT /F1 9.1 Tf 1 0 0 1 65.00 470.70 Tm (  confirming. Print the return note for the counterparty when needed.) Tj ET
+0.17 0.23 0.29 rg BT /F1 9.5 Tf 1 0 0 1 54.00 452.20 Tm (Returns are not the same as stock adjustments. Use a return only when goods move back under a) Tj ET
+0.17 0.23 0.29 rg BT /F1 9.5 Tf 1 0 0 1 54.00 438.60 Tm (specific sale or purchase; use stock audit/adjustment for a physical count discrepancy.) Tj ET
+0.055 0.34 0.52 rg BT /F2 14 Tf 1 0 0 1 54.00 414.00 Tm (8. Products, stock counts, and stock reports) Tj ET
+0.83 0.90 0.94 rg 54 400.00 504 0.6 re f
+0.17 0.23 0.29 rg BT /F1 9.5 Tf 1 0 0 1 54.00 386.00 Tm (Stock > Products shows product code/name, current quantity, bag equivalent, and valuation.) Tj ET
+0.17 0.23 0.29 rg BT /F1 9.5 Tf 1 0 0 1 54.00 372.40 Tm (Search by code or name; open a product detail for its configured bag weights and information.) Tj ET
+0.17 0.23 0.29 rg BT /F1 9.5 Tf 1 0 0 1 54.00 358.80 Tm (Add or edit a product here. Bulk upload can be used for supported product/customer/vendor) Tj ET
+0.17 0.23 0.29 rg BT /F1 9.5 Tf 1 0 0 1 54.00 345.20 Tm (sheets; use the template and review rejected rows or duplicate codes before relying on) Tj ET
+0.17 0.23 0.29 rg BT /F1 9.5 Tf 1 0 0 1 54.00 331.60 Tm (imported balances.) Tj ET
+0.17 0.23 0.29 rg BT /F1 9.5 Tf 1 0 0 1 54.00 310.00 Tm (Stock > Movements provides the dated stock movement history \(opening stock, purchases, sales,) Tj ET
+0.17 0.23 0.29 rg BT /F1 9.5 Tf 1 0 0 1 54.00 296.40 Tm (returns, adjustments, and related movements\). Use it to trace why a current quantity changed.) Tj ET
+0.17 0.23 0.29 rg BT /F1 9.5 Tf 1 0 0 1 54.00 282.80 Tm (Product and stock reports can be downloaded/printed from the relevant screen.) Tj ET
+0.055 0.20 0.34 rg BT /F2 10 Tf 1 0 0 1 54.00 260.20 Tm (Physical stock audit workflow) Tj ET
+0.13 0.19 0.25 rg BT /F1 9.1 Tf 1 0 0 1 65.00 242.20 Tm (1. Count the physical bags/kg by product before changing system stock.) Tj ET
+0.13 0.19 0.25 rg BT /F1 9.1 Tf 1 0 0 1 65.00 227.70 Tm (2. Open Stock > Audit. Enter physical bag quantity and/or kg using that product's) Tj ET
+0.13 0.19 0.25 rg BT /F1 9.1 Tf 1 0 0 1 65.00 215.20 Tm (  configured medium-bag conversion. Filter to discrepancies if useful.) Tj ET
+0.13 0.19 0.25 rg BT /F1 9.1 Tf 1 0 0 1 65.00 200.70 Tm (3. Review system quantity, physical quantity, shortage/surplus, and the reason/note for) Tj ET
+0.13 0.19 0.25 rg BT /F1 9.1 Tf 1 0 0 1 65.00 188.20 Tm (  each difference.) Tj ET
+0.13 0.19 0.25 rg BT /F1 9.1 Tf 1 0 0 1 65.00 173.70 Tm (4. Apply the adjustment only after checking the physical count and selected date. The) Tj ET
+0.13 0.19 0.25 rg BT /F1 9.1 Tf 1 0 0 1 65.00 161.20 Tm (  system writes a dated adjustment and history entry; it also affects stock valuation) Tj ET
+0.13 0.19 0.25 rg BT /F1 9.1 Tf 1 0 0 1 65.00 148.70 Tm (  and the stock-adjustment expense view.) Tj ET
+0.13 0.19 0.25 rg BT /F1 9.1 Tf 1 0 0 1 65.00 134.20 Tm (5. Open adjustment history or stock movements to confirm what was applied.) Tj ET
+0.17 0.23 0.29 rg BT /F1 9.5 Tf 1 0 0 1 54.00 115.70 Tm (Do not use audit to silently rewrite an invoice error; correct the source transaction when) Tj ET
+0.17 0.23 0.29 rg BT /F1 9.5 Tf 1 0 0 1 54.00 102.10 Tm (possible. Negative-stock mode can make a count and cost history less intuitive; resolve) Tj ET
+0.17 0.23 0.29 rg BT /F1 9.5 Tf 1 0 0 1 54.00 88.50 Tm (missing purchase records and cutover quantities before interpreting valuation.) Tj ET
+0.83 0.88 0.91 RG 54 42 m 558 42 l S
+0.38 0.47 0.54 rg BT /F1 8 Tf 1 0 0 1 54.00 27.00 Tm (CHALER AROT  |  USER MANUAL) Tj ET
+0.38 0.47 0.54 rg BT /F1 8 Tf 1 0 0 1 537.20 27.00 Tm (5 / 8) Tj ET
+endstream
+endobj
+14 0 obj
+<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Resources << /Font << /F1 3 0 R /F2 4 0 R >> >> /Contents 13 0 R >>
+endobj
+15 0 obj
+<< /Length 6281 >>
+stream
+0.055 0.20 0.34 rg 0 754 612 38 re f
+1 1 1 rg BT /F2 9 Tf 1 0 0 1 54.00 768.00 Tm (CHALER AROT  /  USER MANUAL) Tj ET
+0.82 0.91 0.97 rg BT /F1 8 Tf 1 0 0 1 491.44 768.00 Tm (OPERATIONS GUIDE) Tj ET
+0.20 0.72 0.56 rg 54 741 42 3 re f
+0.055 0.34 0.52 rg BT /F2 14 Tf 1 0 0 1 54.00 715.00 Tm (9. Expenses, labour, and household withdrawals) Tj ET
+0.83 0.90 0.94 rg 54 701.00 504 0.6 re f
+0.17 0.23 0.29 rg BT /F1 9.5 Tf 1 0 0 1 54.00 687.00 Tm (Operating expenses: open Expense, select date and category, enter description \(required for) Tj ET
+0.17 0.23 0.29 rg BT /F1 9.5 Tf 1 0 0 1 54.00 673.40 Tm (Other\), amount, cash/bank account, and optional note. Save. The expense appears in the) Tj ET
+0.17 0.23 0.29 rg BT /F1 9.5 Tf 1 0 0 1 54.00 659.80 Tm (expense register and reduces profit. Custom categories can be managed by an administrator.) Tj ET
+0.17 0.23 0.29 rg BT /F1 9.5 Tf 1 0 0 1 54.00 646.20 Tm (Categories distinguish operating expense from landing cost or other classifications; use the) Tj ET
+0.17 0.23 0.29 rg BT /F1 9.5 Tf 1 0 0 1 54.00 632.60 Tm (closest correct type.) Tj ET
+0.17 0.23 0.29 rg BT /F1 9.5 Tf 1 0 0 1 54.00 611.00 Tm (Labour / Landing Costs: add a labourer, then record stock-in labour cost, stock-out wages) Tj ET
+0.17 0.23 0.29 rg BT /F1 9.5 Tf 1 0 0 1 54.00 597.40 Tm (\(bags x wage per bag, shared among selected workers\), or transport/landing costs. Review each) Tj ET
+0.17 0.23 0.29 rg BT /F1 9.5 Tf 1 0 0 1 54.00 583.80 Tm (worker/operation balance. Record a payment or advance from the selected cash/bank account,) Tj ET
+0.17 0.23 0.29 rg BT /F1 9.5 Tf 1 0 0 1 54.00 570.20 Tm (allocate to the relevant worker\(s\) or operation, and verify the unpaid amount. Advances) Tj ET
+0.17 0.23 0.29 rg BT /F1 9.5 Tf 1 0 0 1 54.00 556.60 Tm (reduce the amount left to settle later. Use the dedicated labour workflow when worker-level) Tj ET
+0.17 0.23 0.29 rg BT /F1 9.5 Tf 1 0 0 1 54.00 543.00 Tm (balances matter; avoid duplicate general expenses.) Tj ET
+0.17 0.23 0.29 rg BT /F1 9.5 Tf 1 0 0 1 54.00 521.40 Tm (House expense / owner withdrawal: Accounts includes a separate house-expense withdrawal) Tj ET
+0.17 0.23 0.29 rg BT /F1 9.5 Tf 1 0 0 1 54.00 507.80 Tm (record with date, one or more cash/bank account amounts, and a description. Use it for money) Tj ET
+0.17 0.23 0.29 rg BT /F1 9.5 Tf 1 0 0 1 54.00 494.20 Tm (taken out for personal/household use, not for a shop operating cost. It reduces business) Tj ET
+0.17 0.23 0.29 rg BT /F1 9.5 Tf 1 0 0 1 54.00 480.60 Tm (cash/bank, but it is not the same as a trade supplier payment.) Tj ET
+0.055 0.34 0.52 rg BT /F2 14 Tf 1 0 0 1 54.00 456.00 Tm (10. Cash, bank, and financial accounts) Tj ET
+0.83 0.90 0.94 rg 54 442.00 504 0.6 re f
+0.17 0.23 0.29 rg BT /F1 9.5 Tf 1 0 0 1 54.00 428.00 Tm (Open Bank & Cash to see active account balances and recent movements. Add accounts for real) Tj ET
+0.17 0.23 0.29 rg BT /F1 9.5 Tf 1 0 0 1 54.00 414.40 Tm (cash boxes, bank accounts, or supported mobile financial accounts. Set the opening balance) Tj ET
+0.17 0.23 0.29 rg BT /F1 9.5 Tf 1 0 0 1 54.00 400.80 Tm (and date once. Account detail shows dated movements; accounts with history cannot be) Tj ET
+0.17 0.23 0.29 rg BT /F1 9.5 Tf 1 0 0 1 54.00 387.20 Tm (permanently deleted. Inactive accounts can be archived/hidden from normal entry while) Tj ET
+0.17 0.23 0.29 rg BT /F1 9.5 Tf 1 0 0 1 54.00 373.60 Tm (retaining history.) Tj ET
+0.13 0.19 0.25 rg BT /F1 9.1 Tf 1 0 0 1 65.00 352.00 Tm (- Deposit / Withdraw: use for money entering or leaving the business that is not) Tj ET
+0.13 0.19 0.25 rg BT /F1 9.1 Tf 1 0 0 1 65.00 339.50 Tm (  already recorded by a sale, party payment, expense, labour settlement, or other) Tj ET
+0.13 0.19 0.25 rg BT /F1 9.1 Tf 1 0 0 1 65.00 327.00 Tm (  linked transaction. Enter date, amount, account, and description.) Tj ET
+0.13 0.19 0.25 rg BT /F1 9.1 Tf 1 0 0 1 65.00 312.50 Tm (- Transfer: move money between two business accounts. Choose different source and) Tj ET
+0.13 0.19 0.25 rg BT /F1 9.1 Tf 1 0 0 1 65.00 300.00 Tm (  destination accounts, amount, date, and note. This reduces one balance and increases) Tj ET
+0.13 0.19 0.25 rg BT /F1 9.1 Tf 1 0 0 1 65.00 287.50 Tm (  the other; it is not income or expense.) Tj ET
+0.13 0.19 0.25 rg BT /F1 9.1 Tf 1 0 0 1 65.00 273.00 Tm (- Opening balance: use only for the cutover amount and effective date. Avoid setting) Tj ET
+0.13 0.19 0.25 rg BT /F1 9.1 Tf 1 0 0 1 65.00 260.50 Tm (  it again after the account has live movements.) Tj ET
+0.13 0.19 0.25 rg BT /F1 9.1 Tf 1 0 0 1 65.00 246.00 Tm (- Bank & Cash report: choose a date range and account \(or all accounts\) to print/save) Tj ET
+0.13 0.19 0.25 rg BT /F1 9.1 Tf 1 0 0 1 65.00 233.50 Tm (  PDF or download CSV with opening, movements, debit/credit, running, and closing) Tj ET
+0.13 0.19 0.25 rg BT /F1 9.1 Tf 1 0 0 1 65.00 221.00 Tm (  balances.) Tj ET
+0.17 0.23 0.29 rg BT /F1 9.5 Tf 1 0 0 1 54.00 202.50 Tm (Accounts dashboard and accounting reports: use date presets/custom range to review sales,) Tj ET
+0.17 0.23 0.29 rg BT /F1 9.5 Tf 1 0 0 1 54.00 188.90 Tm (collections, dues, vendor payables, expenses, profit, and trends. Report Center includes) Tj ET
+0.17 0.23 0.29 rg BT /F1 9.5 Tf 1 0 0 1 54.00 175.30 Tm (profit and loss, cash flow, balance sheet, aged receivables/payables, expense register,) Tj ET
+0.17 0.23 0.29 rg BT /F1 9.5 Tf 1 0 0 1 54.00 161.70 Tm (cash/bank statement, general ledger, and journal entries where applicable. In the profit and) Tj ET
+0.17 0.23 0.29 rg BT /F1 9.5 Tf 1 0 0 1 54.00 148.10 Tm (loss report, net sales less cost of goods sold \(COGS\) gives gross profit; operating and other) Tj ET
+0.17 0.23 0.29 rg BT /F1 9.5 Tf 1 0 0 1 54.00 134.50 Tm (income/expense then determine net profit or loss. Aged balances group open invoices by) Tj ET
+0.17 0.23 0.29 rg BT /F1 9.5 Tf 1 0 0 1 54.00 120.90 Tm (invoice date; opening balances without invoice dates appear in the 90+ day group. Reports use) Tj ET
+0.17 0.23 0.29 rg BT /F1 9.5 Tf 1 0 0 1 54.00 107.30 Tm (the saved dated transaction history and account classifications.) Tj ET
+0.83 0.88 0.91 RG 54 42 m 558 42 l S
+0.38 0.47 0.54 rg BT /F1 8 Tf 1 0 0 1 54.00 27.00 Tm (CHALER AROT  |  USER MANUAL) Tj ET
+0.38 0.47 0.54 rg BT /F1 8 Tf 1 0 0 1 537.20 27.00 Tm (6 / 8) Tj ET
+endstream
+endobj
+16 0 obj
+<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Resources << /Font << /F1 3 0 R /F2 4 0 R >> >> /Contents 15 0 R >>
+endobj
+17 0 obj
+<< /Length 5804 >>
+stream
+0.055 0.20 0.34 rg 0 754 612 38 re f
+1 1 1 rg BT /F2 9 Tf 1 0 0 1 54.00 768.00 Tm (CHALER AROT  /  USER MANUAL) Tj ET
+0.82 0.91 0.97 rg BT /F1 8 Tf 1 0 0 1 491.44 768.00 Tm (OPERATIONS GUIDE) Tj ET
+0.20 0.72 0.56 rg 54 741 42 3 re f
+0.17 0.23 0.29 rg BT /F1 9.5 Tf 1 0 0 1 54.00 718.00 Tm (Normal sales, purchases, payments, expenses, returns, and transfers create their own linked) Tj ET
+0.17 0.23 0.29 rg BT /F1 9.5 Tf 1 0 0 1 54.00 704.40 Tm (accounting and stock records. Do not enter a second manual journal for a transaction already) Tj ET
+0.17 0.23 0.29 rg BT /F1 9.5 Tf 1 0 0 1 54.00 690.80 Tm (recorded through its operating screen. Use the chart of accounts and manual journal tools) Tj ET
+0.17 0.23 0.29 rg BT /F1 9.5 Tf 1 0 0 1 54.00 677.20 Tm (only when authorized and familiar with accounting: each journal must balance total debits and) Tj ET
+0.17 0.23 0.29 rg BT /F1 9.5 Tf 1 0 0 1 54.00 663.60 Tm (credits. Draft entries are not posted results; confirm a posted status before expecting them) Tj ET
+0.17 0.23 0.29 rg BT /F1 9.5 Tf 1 0 0 1 54.00 650.00 Tm (in reports.) Tj ET
+0.055 0.34 0.52 rg BT /F2 14 Tf 1 0 0 1 54.00 625.40 Tm (11. Dashboard, search, reminders, and exports) Tj ET
+0.83 0.90 0.94 rg 54 611.40 504 0.6 re f
+0.17 0.23 0.29 rg BT /F1 9.5 Tf 1 0 0 1 54.00 597.40 Tm (Home summarizes today's sales, collections, profit, and stock value, plus customer due,) Tj ET
+0.17 0.23 0.29 rg BT /F1 9.5 Tf 1 0 0 1 54.00 583.80 Tm (vendor payable, and cash/bank position. Click a KPI to drill into its underlying items.) Tj ET
+0.17 0.23 0.29 rg BT /F1 9.5 Tf 1 0 0 1 54.00 570.20 Tm (Recent invoices have Today, Due, and All views. Treat dashboard figures as a quick view; use) Tj ET
+0.17 0.23 0.29 rg BT /F1 9.5 Tf 1 0 0 1 54.00 556.60 Tm (the relevant report and date filter for reconciliation.) Tj ET
+0.17 0.23 0.29 rg BT /F1 9.5 Tf 1 0 0 1 54.00 535.00 Tm (Global search searches invoice numbers, return numbers, customers, and vendors. Click a) Tj ET
+0.17 0.23 0.29 rg BT /F1 9.5 Tf 1 0 0 1 54.00 521.40 Tm (result to open its invoice, return detail, or party record. Search does not replace list) Tj ET
+0.17 0.23 0.29 rg BT /F1 9.5 Tf 1 0 0 1 54.00 507.80 Tm (filters for detailed reporting.) Tj ET
+0.17 0.23 0.29 rg BT /F1 9.5 Tf 1 0 0 1 54.00 486.20 Tm (Use list filters before exporting. Sales and purchase history can export a filtered report as) Tj ET
+0.17 0.23 0.29 rg BT /F1 9.5 Tf 1 0 0 1 54.00 472.60 Tm (PDF or Excel-compatible CSV. Stock, expense, cash/bank, payment, and account screens provide) Tj ET
+0.17 0.23 0.29 rg BT /F1 9.5 Tf 1 0 0 1 54.00 459.00 Tm (their own reports or CSV/PDF actions. In the web app, choose Print / Save PDF, then choose) Tj ET
+0.17 0.23 0.29 rg BT /F1 9.5 Tf 1 0 0 1 54.00 445.40 Tm (Save as PDF in the browser print dialog. Review paper size and page orientation if a wide) Tj ET
+0.17 0.23 0.29 rg BT /F1 9.5 Tf 1 0 0 1 54.00 431.80 Tm (table is clipped.) Tj ET
+0.055 0.34 0.52 rg BT /F2 14 Tf 1 0 0 1 54.00 407.20 Tm (12. Settings, corrections, and record safety) Tj ET
+0.83 0.90 0.94 rg 54 393.20 504 0.6 re f
+0.17 0.23 0.29 rg BT /F1 9.5 Tf 1 0 0 1 54.00 379.20 Tm (Settings contains Business details, Inventory settings, Language, My profile, Users) Tj ET
+0.17 0.23 0.29 rg BT /F1 9.5 Tf 1 0 0 1 54.00 365.60 Tm (\(administrator\), Activity Log, and Trash. Profile edits can require the current password; new) Tj ET
+0.17 0.23 0.29 rg BT /F1 9.5 Tf 1 0 0 1 54.00 352.00 Tm (passwords must be at least 10 characters. An administrator can create staff/admin users, edit) Tj ET
+0.17 0.23 0.29 rg BT /F1 9.5 Tf 1 0 0 1 54.00 338.40 Tm (users, reset a password, or deactivate a user. Deactivation revokes sessions.) Tj ET
+0.17 0.23 0.29 rg BT /F1 9.5 Tf 1 0 0 1 54.00 316.80 Tm (Products, customers, vendors, and expenses moved to Trash can be restored for 30 days. Trash) Tj ET
+0.17 0.23 0.29 rg BT /F1 9.5 Tf 1 0 0 1 54.00 303.20 Tm (shows remaining days and offers purge for expired items; after permanent purge, the record) Tj ET
+0.17 0.23 0.29 rg BT /F1 9.5 Tf 1 0 0 1 54.00 289.60 Tm (cannot be restored. Deleting an account with financial history is blocked. Prefer editing a) Tj ET
+0.17 0.23 0.29 rg BT /F1 9.5 Tf 1 0 0 1 54.00 276.00 Tm (mistaken transaction or restoring a deleted master record over creating a duplicate.) Tj ET
+0.17 0.23 0.29 rg BT /F1 9.5 Tf 1 0 0 1 54.00 254.40 Tm (The activity log is useful for reviewing who changed records. Before closing a shift, compare) Tj ET
+0.17 0.23 0.29 rg BT /F1 9.5 Tf 1 0 0 1 54.00 240.80 Tm (cash and bank against actual balances, review due and payable lists, check recent invoices) Tj ET
+0.17 0.23 0.29 rg BT /F1 9.5 Tf 1 0 0 1 54.00 227.20 Tm (and returns, confirm stock movement/audit entries, and export important reports for your) Tj ET
+0.17 0.23 0.29 rg BT /F1 9.5 Tf 1 0 0 1 54.00 213.60 Tm (records. Arrange regular database backups with the system administrator; a printed report is) Tj ET
+0.17 0.23 0.29 rg BT /F1 9.5 Tf 1 0 0 1 54.00 200.00 Tm (not a restorable backup.) Tj ET
+0.055 0.34 0.52 rg BT /F2 14 Tf 1 0 0 1 54.00 175.40 Tm (13. Recommended operating workflows) Tj ET
+0.83 0.90 0.94 rg 54 161.40 504 0.6 re f
+0.17 0.23 0.29 rg BT /F1 9.5 Tf 1 0 0 1 54.00 147.40 Tm (Open a new business file: administrator setup -> business settings -> cash/bank accounts and) Tj ET
+0.17 0.23 0.29 rg BT /F1 9.5 Tf 1 0 0 1 54.00 133.80 Tm (dated openings -> product bag sizes and opening stock/cost -> customer/vendor master records) Tj ET
+0.17 0.23 0.29 rg BT /F1 9.5 Tf 1 0 0 1 54.00 120.20 Tm (and opening balances -> staff accounts -> verify dashboard and stock list.) Tj ET
+0.83 0.88 0.91 RG 54 42 m 558 42 l S
+0.38 0.47 0.54 rg BT /F1 8 Tf 1 0 0 1 54.00 27.00 Tm (CHALER AROT  |  USER MANUAL) Tj ET
+0.38 0.47 0.54 rg BT /F1 8 Tf 1 0 0 1 537.20 27.00 Tm (7 / 8) Tj ET
+endstream
+endobj
+18 0 obj
+<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Resources << /Font << /F1 3 0 R /F2 4 0 R >> >> /Contents 17 0 R >>
+endobj
+19 0 obj
+<< /Length 5955 >>
+stream
+0.055 0.20 0.34 rg 0 754 612 38 re f
+1 1 1 rg BT /F2 9 Tf 1 0 0 1 54.00 768.00 Tm (CHALER AROT  /  USER MANUAL) Tj ET
+0.82 0.91 0.97 rg BT /F1 8 Tf 1 0 0 1 491.44 768.00 Tm (OPERATIONS GUIDE) Tj ET
+0.20 0.72 0.56 rg 54 741 42 3 re f
+0.17 0.23 0.29 rg BT /F1 9.5 Tf 1 0 0 1 54.00 718.00 Tm (Receive and sell rice: purchase invoice -> inspect landed cost and payment/account -> confirm) Tj ET
+0.17 0.23 0.29 rg BT /F1 9.5 Tf 1 0 0 1 54.00 704.40 Tm (stock receipt -> sale invoice -> collect money to the correct account or record customer due) Tj ET
+0.17 0.23 0.29 rg BT /F1 9.5 Tf 1 0 0 1 54.00 690.80 Tm (-> print invoice -> collect later through customer account -> reconcile cash/bank.) Tj ET
+0.17 0.23 0.29 rg BT /F1 9.5 Tf 1 0 0 1 54.00 669.20 Tm (Settle a vendor: record purchase and due -> record vendor payment with the account used and) Tj ET
+0.17 0.23 0.29 rg BT /F1 9.5 Tf 1 0 0 1 54.00 655.60 Tm (invoice allocation -> check vendor balance -> check bank/cash ledger.) Tj ET
+0.17 0.23 0.29 rg BT /F1 9.5 Tf 1 0 0 1 54.00 634.00 Tm (Handle returned goods: find original invoice -> create linked return -> record returned) Tj ET
+0.17 0.23 0.29 rg BT /F1 9.5 Tf 1 0 0 1 54.00 620.40 Tm (quantity and condition -> confirm refund/credit settlement -> inspect stock buckets and party) Tj ET
+0.17 0.23 0.29 rg BT /F1 9.5 Tf 1 0 0 1 54.00 606.80 Tm (balance -> print return note.) Tj ET
+0.17 0.23 0.29 rg BT /F1 9.5 Tf 1 0 0 1 54.00 585.20 Tm (Close the day: review dashboard drill-downs -> verify all sales, purchases, receipts,) Tj ET
+0.17 0.23 0.29 rg BT /F1 9.5 Tf 1 0 0 1 54.00 571.60 Tm (payments, expenses, and returns -> reconcile physical stock exceptions -> reconcile each) Tj ET
+0.17 0.23 0.29 rg BT /F1 9.5 Tf 1 0 0 1 54.00 558.00 Tm (cash/bank account -> review customer collections/vendor payments due -> export cash and) Tj ET
+0.17 0.23 0.29 rg BT /F1 9.5 Tf 1 0 0 1 54.00 544.40 Tm (transaction reports.) Tj ET
+0.17 0.23 0.29 rg BT /F1 9.5 Tf 1 0 0 1 54.00 522.80 Tm (Review a month: set the month date range -> review profit and loss and cash flow -> review) Tj ET
+0.17 0.23 0.29 rg BT /F1 9.5 Tf 1 0 0 1 54.00 509.20 Tm (aged receivables and payables -> inspect inventory valuation and adjustments -> review) Tj ET
+0.17 0.23 0.29 rg BT /F1 9.5 Tf 1 0 0 1 54.00 495.60 Tm (account ledgers/journals -> save PDF/CSV reports. Confirm the fiscal-year starting month in) Tj ET
+0.17 0.23 0.29 rg BT /F1 9.5 Tf 1 0 0 1 54.00 482.00 Tm (Business settings before year reporting.) Tj ET
+0.055 0.34 0.52 rg BT /F2 14 Tf 1 0 0 1 54.00 457.40 Tm (14. Quick troubleshooting) Tj ET
+0.83 0.90 0.94 rg 54 443.40 504 0.6 re f
+0.13 0.19 0.25 rg BT /F1 9.1 Tf 1 0 0 1 65.00 429.40 Tm (- Cannot sign in: check that the account exists and is active; use the exact email) Tj ET
+0.13 0.19 0.25 rg BT /F1 9.1 Tf 1 0 0 1 65.00 416.90 Tm (  address. Ask the administrator to reset the password. Sessions end after 12 hours.) Tj ET
+0.13 0.19 0.25 rg BT /F1 9.1 Tf 1 0 0 1 65.00 402.40 Tm (- No user can be created from setup: initial administrator setup is one-time. Ask an) Tj ET
+0.13 0.19 0.25 rg BT /F1 9.1 Tf 1 0 0 1 65.00 389.90 Tm (  administrator to add a user in Settings > Users.) Tj ET
+0.13 0.19 0.25 rg BT /F1 9.1 Tf 1 0 0 1 65.00 375.40 Tm (- Sale is blocked: check product stock and selected unit conversion. If negative stock) Tj ET
+0.13 0.19 0.25 rg BT /F1 9.1 Tf 1 0 0 1 65.00 362.90 Tm (  is intentionally required, an administrator can review Inventory settings.) Tj ET
+0.13 0.19 0.25 rg BT /F1 9.1 Tf 1 0 0 1 65.00 348.40 Tm (- Payment cannot be saved: make sure an active cash/bank account is set up, the amount) Tj ET
+0.13 0.19 0.25 rg BT /F1 9.1 Tf 1 0 0 1 65.00 335.90 Tm (  is positive, and the customer/vendor is selected where required.) Tj ET
+0.13 0.19 0.25 rg BT /F1 9.1 Tf 1 0 0 1 65.00 321.40 Tm (- Stock or profit looks wrong: check product opening quantity/cost and bag weights,) Tj ET
+0.13 0.19 0.25 rg BT /F1 9.1 Tf 1 0 0 1 65.00 308.90 Tm (  missing purchase/return records, landed costs, date filters, and any negative-stock) Tj ET
+0.13 0.19 0.25 rg BT /F1 9.1 Tf 1 0 0 1 65.00 296.40 Tm (  interval. Trace movements before applying an adjustment.) Tj ET
+0.13 0.19 0.25 rg BT /F1 9.1 Tf 1 0 0 1 65.00 281.90 Tm (- A report appears incomplete: clear search/status filters, check the date range, and) Tj ET
+0.13 0.19 0.25 rg BT /F1 9.1 Tf 1 0 0 1 65.00 269.40 Tm (  confirm relevant entries are saved/posted. Some reports are web print/save flows.) Tj ET
+0.13 0.19 0.25 rg BT /F1 9.1 Tf 1 0 0 1 65.00 254.90 Tm (- Deleted product or party needed: open Settings > Trash and restore it before its) Tj ET
+0.13 0.19 0.25 rg BT /F1 9.1 Tf 1 0 0 1 65.00 242.40 Tm (  retention period ends.) Tj ET
+0.055 0.34 0.52 rg BT /F2 14 Tf 1 0 0 1 54.00 220.90 Tm (Functional coverage checked) Tj ET
+0.83 0.90 0.94 rg 54 206.90 504 0.6 re f
+0.17 0.23 0.29 rg BT /F1 9.5 Tf 1 0 0 1 54.00 192.90 Tm (This manual was prepared by reviewing the current navigation, screen forms, API capabilities,) Tj ET
+0.17 0.23 0.29 rg BT /F1 9.5 Tf 1 0 0 1 54.00 179.30 Tm (and data model for authentication/roles, product and party records, purchases and sales,) Tj ET
+0.17 0.23 0.29 rg BT /F1 9.5 Tf 1 0 0 1 54.00 165.70 Tm (collections and payables, returns, stock movements/audits, expenses, labour/landing costs,) Tj ET
+0.17 0.23 0.29 rg BT /F1 9.5 Tf 1 0 0 1 54.00 152.10 Tm (cash/bank accounts and transfers, reports/accounting, activity log, reminders, search, and) Tj ET
+0.17 0.23 0.29 rg BT /F1 9.5 Tf 1 0 0 1 54.00 138.50 Tm (Trash. It describes the implemented workflows at a user level. It is not a formal accounting) Tj ET
+0.17 0.23 0.29 rg BT /F1 9.5 Tf 1 0 0 1 54.00 124.90 Tm (certification or a claim that every edge case has been runtime-tested.) Tj ET
+0.83 0.88 0.91 RG 54 42 m 558 42 l S
+0.38 0.47 0.54 rg BT /F1 8 Tf 1 0 0 1 54.00 27.00 Tm (CHALER AROT  |  USER MANUAL) Tj ET
+0.38 0.47 0.54 rg BT /F1 8 Tf 1 0 0 1 537.20 27.00 Tm (8 / 8) Tj ET
+endstream
+endobj
+20 0 obj
+<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Resources << /Font << /F1 3 0 R /F2 4 0 R >> >> /Contents 19 0 R >>
+endobj
+xref
+0 21
+0000000000 65535 f 
+0000000017 00000 n 
+0000000066 00000 n 
+0000000171 00000 n 
+0000000268 00000 n 
+0000000370 00000 n 
+0000001779 00000 n 
+0000001915 00000 n 
+0000008400 00000 n 
+0000008536 00000 n 
+0000014664 00000 n 
+0000014801 00000 n 
+0000021331 00000 n 
+0000021469 00000 n 
+0000027648 00000 n 
+0000027786 00000 n 
+0000034120 00000 n 
+0000034258 00000 n 
+0000040115 00000 n 
+0000040253 00000 n 
+0000046261 00000 n 
+trailer
+<< /Size 21 /Root 1 0 R /Info << /Title (Chaler Arot User Manual) /Author (Chaler Arot) >> >>
+startxref
+46399
+%%EOF

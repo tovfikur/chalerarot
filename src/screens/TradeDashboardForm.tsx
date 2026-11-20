@@ -1480,16 +1480,16 @@ export function TradeDashboardForm({ mode, onDone, onOpenHistory, editId }: Trad
               style={styles.backButton3D}
               accessibilityLabel={tx('পিছনে যান', 'Go back')}
             >
-              <AppIcon name={icons.back} size={22} iconColor="#fff" />
+              <AppIcon name={icons.back} size={22} iconColor={color.primary} />
             </TouchableOpacity>
 
             <View style={styles.headerTitleRow}>
               <View style={styles.titleIconBadge}>
-                <AppIcon name={isSale ? icons.sale : icons.purchase} size={22} iconColor="#fff" />
+                <AppIcon name={isSale ? icons.sale : icons.purchase} size={22} iconColor={color.primary} />
               </View>
               <Text style={styles.headerTitle}>{editId ? (isSale ? tx('বিক্রয় সম্পাদনা', 'Edit sale') : tx('ক্রয় সম্পাদনা', 'Edit purchase')) : (isSale ? tx('নতুন বিক্রয়', 'New sale') : tx('নতুন ক্রয়', 'New purchase'))}</Text>
             </View>
-            {editId ? <Text style={{ color: '#DBEAFE', fontSize: 12, marginTop: 4, marginLeft: 54 }}>{tx('ড্রাফট পরিবর্তন', 'Draft changes')} · #{lang === 'bn' ? toBnDigits(memoNo) : memoNo} · {tx('নিশ্চিত না করা পর্যন্ত ইনভয়েস ও স্টক পোস্ট হবে না', 'Invoice and stock stay unchanged until confirmed')}</Text> : null}
+            {editId ? <Text style={{ color: color.muted, fontSize: 12, marginTop: 4, marginLeft: 54 }}>{tx('ড্রাফট পরিবর্তন', 'Draft changes')} · #{lang === 'bn' ? toBnDigits(memoNo) : memoNo} · {tx('নিশ্চিত না করা পর্যন্ত ইনভয়েস ও স্টক পোস্ট হবে না', 'Invoice and stock stay unchanged until confirmed')}</Text> : null}
           </View>
 
           {/* Right: Tactile 3D Buttons for F1, Search, Bell */}
@@ -1514,11 +1514,11 @@ export function TradeDashboardForm({ mode, onDone, onOpenHistory, editId }: Trad
             </TouchableOpacity>
 
             <TouchableOpacity style={styles.iconCircleButton3D} accessibilityLabel={tx('খুঁজুন', 'Search')}>
-              <AppIcon name={icons.search} size={20} iconColor="#fff" />
+              <AppIcon name={icons.search} size={20} iconColor={color.primary} />
             </TouchableOpacity>
 
             <TouchableOpacity style={styles.iconCircleButton3D} accessibilityLabel={tx('নোটিফিকেশন', 'Notifications')}>
-              <AppIcon name={icons.bell} size={20} iconColor="#fff" />
+              <AppIcon name={icons.bell} size={20} iconColor={color.primary} />
             </TouchableOpacity>
           </View>
         </View>
@@ -1529,7 +1529,7 @@ export function TradeDashboardForm({ mode, onDone, onOpenHistory, editId }: Trad
           {/* Left Card: Purchase Info */}
           <View style={[styles.card3D, styles.colLeft, { position: 'relative', zIndex: partyDropdownOpen ? 1000 : 10 }]}>
             <View style={styles.cardHeaderFlex}>
-              <View style={[styles.cardHeaderDot, { backgroundColor: '#1c70b9' }]} />
+              <View style={[styles.cardHeaderDot, { backgroundColor: color.primary }]} />
               <Text style={styles.cardHeaderTitle}>{isSale ? tx('বিক্রয়ের তথ্য', 'Sale details') : tx('ক্রয়ের তথ্য', 'Purchase details')}</Text>
             </View>
 
@@ -2935,7 +2935,7 @@ export function TradeDashboardForm({ mode, onDone, onOpenHistory, editId }: Trad
                         testID="execute-invoice"
                         disabled={submitting}
                         style={{
-                          backgroundColor: '#1c70b9',
+                          backgroundColor: color.primary,
                           borderRadius: 12,
                           minHeight: 46,
                           alignItems: 'center',
@@ -3070,11 +3070,11 @@ const styles = StyleSheet.create({
   outerWrapper: {
     flex: 1,
     position: 'relative',
-    backgroundColor: '#F0F6FC',
+    backgroundColor: 'transparent',
   },
   container: {
     flex: 1,
-    backgroundColor: '#F0F6FC',
+    backgroundColor: 'transparent',
   },
   contentContainer: {
     padding: 18,
@@ -3106,25 +3106,21 @@ const styles = StyleSheet.create({
     fontWeight: '700',
   },
 
-  // SKEUOMORPHIC HEADER BAR
   headerBar: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    backgroundColor: '#1c70b9',
-    borderRadius: 16,
+    flexWrap: 'wrap',
+    gap: 12,
+    backgroundColor: '#FFFFFF',
+    borderRadius: 14,
     paddingHorizontal: 18,
-    paddingVertical: 14,
+    paddingVertical: 12,
     marginBottom: 16,
-    position: 'relative',
-    overflow: 'hidden',
-    borderTopWidth: 1.5,
-    borderTopColor: '#60b0f4',
-    borderBottomWidth: 3.5,
-    borderBottomColor: '#124c7e',
+    borderWidth: 1,
+    borderColor: color.line,
     ...(Platform.OS === 'web' ? {
-      backgroundImage: 'linear-gradient(135deg, #2592ed 0%, #1c70b9 52%, #12518e 100%)',
-      boxShadow: '0 8px 22px rgba(28, 112, 185, 0.38), inset 0 1px 0 rgba(255, 255, 255, 0.45)',
+      boxShadow: '0 4px 14px rgba(15, 23, 42, 0.05)',
     } as any : {}),
   },
   headerGlossSheen: {
@@ -3132,23 +3128,21 @@ const styles = StyleSheet.create({
     top: 0,
     left: 0,
     right: 0,
-    height: 18,
-    backgroundColor: 'rgba(255, 255, 255, 0.18)',
+    height: 0,
+    backgroundColor: 'transparent',
   },
   headerLeft: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: 12,
     zIndex: 2,
+    flex: 1,
+    minWidth: 220,
   },
   backButton3D: {
     padding: 7,
     borderRadius: 10,
-    backgroundColor: 'rgba(255, 255, 255, 0.16)',
-    borderTopWidth: 1,
-    borderTopColor: 'rgba(255, 255, 255, 0.4)',
-    borderBottomWidth: 2,
-    borderBottomColor: 'rgba(0, 0, 0, 0.25)',
+    backgroundColor: '#EAF1FF',
     ...(Platform.OS === 'web' ? {
       cursor: 'pointer',
       boxShadow: '0 2px 6px rgba(0, 0, 0, 0.15)',
@@ -3163,22 +3157,15 @@ const styles = StyleSheet.create({
     width: 34,
     height: 34,
     borderRadius: 10,
-    backgroundColor: 'rgba(255, 255, 255, 0.2)',
+    backgroundColor: '#EAF1FF',
     alignItems: 'center',
     justifyContent: 'center',
-    borderTopWidth: 1,
-    borderTopColor: 'rgba(255, 255, 255, 0.45)',
-    borderBottomWidth: 2,
-    borderBottomColor: 'rgba(0, 0, 0, 0.2)',
   },
   headerTitle: {
-    color: '#fff',
+    color: color.text,
     fontSize: 21,
     fontWeight: '800',
     letterSpacing: 0.3,
-    ...(Platform.OS === 'web' ? {
-      textShadow: '0 1px 2px rgba(0, 0, 0, 0.25)',
-    } as any : {}),
   },
   flashyHeaderTag: {
     backgroundColor: '#38BDF8',
@@ -3198,24 +3185,24 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     gap: 10,
+    flexWrap: 'wrap',
+    justifyContent: 'flex-end',
     zIndex: 2,
   },
   shortcutGuideBadge3D: {
     paddingHorizontal: 12,
     paddingVertical: 7,
     borderRadius: 10,
-    backgroundColor: 'rgba(255, 255, 255, 0.18)',
-    borderTopWidth: 1,
-    borderTopColor: 'rgba(255, 255, 255, 0.4)',
-    borderBottomWidth: 2,
-    borderBottomColor: 'rgba(0, 0, 0, 0.25)',
+    backgroundColor: '#EAF1FF',
+    borderWidth: 1,
+    borderColor: color.line,
     ...(Platform.OS === 'web' ? {
       cursor: 'pointer',
       boxShadow: '0 2px 6px rgba(0, 0, 0, 0.15)',
     } as any : {}),
   },
   shortcutGuideBadgeText: {
-    color: '#fff',
+    color: color.primaryDark,
     fontSize: 12,
     fontWeight: '800',
   },
@@ -3223,11 +3210,9 @@ const styles = StyleSheet.create({
     width: 38,
     height: 38,
     borderRadius: 19,
-    backgroundColor: 'rgba(255, 255, 255, 0.18)',
-    borderTopWidth: 1,
-    borderTopColor: 'rgba(255, 255, 255, 0.4)',
-    borderBottomWidth: 2,
-    borderBottomColor: 'rgba(0, 0, 0, 0.25)',
+    backgroundColor: '#EAF1FF',
+    borderWidth: 1,
+    borderColor: color.line,
     alignItems: 'center',
     justifyContent: 'center',
     ...(Platform.OS === 'web' ? {
@@ -3252,17 +3237,17 @@ const styles = StyleSheet.create({
   card3D: {
     backgroundColor: '#FFFFFF',
     borderRadius: 16,
-    borderWidth: 1.5,
-    borderColor: '#D8E7F5',
+    borderWidth: 1,
+    borderColor: color.line,
     padding: 18,
     ...(Platform.OS === 'web' ? {
-      boxShadow: '0 10px 28px -4px rgba(28, 112, 185, 0.09), 0 2px 6px rgba(0, 0, 0, 0.03), inset 0 1px 0 #FFFFFF',
+      boxShadow: '0 4px 14px rgba(15, 23, 42, 0.045)',
     } as any : {
-      elevation: 4,
-      shadowColor: '#1c70b9',
-      shadowOffset: { width: 0, height: 4 },
-      shadowOpacity: 0.1,
-      shadowRadius: 8,
+      elevation: 1,
+      shadowColor: '#0F172A',
+      shadowOffset: { width: 0, height: 2 },
+      shadowOpacity: 0.04,
+      shadowRadius: 6,
     }),
   },
   cardHeaderFlex: {
@@ -3515,17 +3500,12 @@ const styles = StyleSheet.create({
     borderRadius: 10,
     paddingHorizontal: 16,
     paddingVertical: 9,
-    backgroundColor: '#1c70b9',
-    borderWidth: 1.5,
-    borderColor: '#60b0f4',
-    borderBottomWidth: 3,
-    borderBottomColor: '#124c7e',
-    borderTopWidth: 1,
-    borderTopColor: '#70bcf7',
+    backgroundColor: color.primary,
+    borderWidth: 1,
+    borderColor: color.primaryDark,
     ...(Platform.OS === 'web' ? {
       cursor: 'pointer',
-      backgroundImage: 'linear-gradient(180deg, #258ee0 0%, #1c70b9 52%, #135591 100%)',
-      boxShadow: '0 4px 14px rgba(28, 112, 185, 0.35), inset 0 1px 0 rgba(255, 255, 255, 0.4)',
+      boxShadow: '0 2px 6px rgba(57, 118, 229, 0.18)',
     } as any : {
       elevation: 3,
     }),
@@ -3544,7 +3524,7 @@ const styles = StyleSheet.create({
     fontWeight: '800',
     letterSpacing: 0.3,
     ...(Platform.OS === 'web' ? {
-      textShadow: '0 1px 2px rgba(0, 0, 0, 0.35)',
+      textShadow: 'none',
     } as any : {}),
   },
   shortcutKeyBadge: {
@@ -3617,7 +3597,7 @@ const styles = StyleSheet.create({
   tableInputDebossed: {
     flexDirection: 'row',
     alignItems: 'center',
-    borderWidth: 1.5,
+    borderWidth: 1,
     borderColor: '#CCE0F2',
     borderRadius: 8,
     backgroundColor: '#FFFFFF',
@@ -3886,7 +3866,7 @@ const styles = StyleSheet.create({
     paddingHorizontal: 20,
     paddingVertical: 11,
     backgroundColor: '#FFFFFF',
-    borderBottomWidth: 3,
+    borderBottomWidth: 1,
     borderBottomColor: '#64748B',
     ...(Platform.OS === 'web' ? {
       cursor: 'pointer',
@@ -3903,12 +3883,12 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     gap: 6,
     borderWidth: 1.5,
-    borderColor: '#1c70b9',
+    borderColor: color.primary,
     borderRadius: 10,
     paddingHorizontal: 20,
     paddingVertical: 11,
     backgroundColor: '#FFFFFF',
-    borderBottomWidth: 3,
+    borderBottomWidth: 1,
     borderBottomColor: '#124c7e',
     ...(Platform.OS === 'web' ? {
       cursor: 'pointer',
@@ -3917,7 +3897,7 @@ const styles = StyleSheet.create({
     } as any : {}),
   },
   draftButton3DText: {
-    color: '#0F2B48',
+    color: color.primaryDark,
     fontSize: 14,
     fontWeight: '800',
   },
@@ -3933,18 +3913,15 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     gap: 8,
-    backgroundColor: '#1c70b9',
+    backgroundColor: color.primaryDark,
     borderRadius: 10,
     paddingHorizontal: 28,
     paddingVertical: 12,
-    borderTopWidth: 1.5,
-    borderTopColor: '#6cb8f7',
-    borderBottomWidth: 3.5,
-    borderBottomColor: '#0a3359',
+    borderWidth: 1,
+    borderColor: color.primaryDark,
     ...(Platform.OS === 'web' ? {
       cursor: 'pointer',
-      backgroundImage: 'linear-gradient(180deg, #258ee0 0%, #1c70b9 52%, #104c82 100%)',
-      boxShadow: '0 8px 22px rgba(28, 112, 185, 0.45), inset 0 1px 1px rgba(255, 255, 255, 0.5)',
+      boxShadow: '0 3px 10px rgba(40, 95, 200, 0.22)',
     } as any : {}),
   },
   completeButton3DText: {
@@ -3953,7 +3930,7 @@ const styles = StyleSheet.create({
     fontWeight: '900',
     letterSpacing: 0.3,
     ...(Platform.OS === 'web' ? {
-      textShadow: '0 1px 2px rgba(0, 0, 0, 0.35)',
+      textShadow: 'none',
     } as any : {}),
   },
 
@@ -3983,14 +3960,11 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    backgroundColor: '#1c70b9',
+    backgroundColor: color.primaryDark,
     paddingHorizontal: 16,
     paddingVertical: 14,
-    borderBottomWidth: 3,
-    borderBottomColor: '#124c7e',
-    ...(Platform.OS === 'web' ? {
-      backgroundImage: 'linear-gradient(135deg, #2592ed 0%, #1c70b9 52%, #12518e 100%)',
-    } as any : {}),
+    borderBottomWidth: 1,
+    borderBottomColor: color.primaryDark,
   },
   modalTitle: {
     color: '#fff',

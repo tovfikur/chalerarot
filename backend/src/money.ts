@@ -14,12 +14,14 @@ import { businessToday } from './units';
  * and is kept for legacy rows and quick grouping.
  */
 
-export const MONEY_METHODS = ['cash', 'bkash', 'nagad', 'bank'] as const;
-export type MoneyMethod = (typeof MONEY_METHODS)[number];
+// New money operations are cash or bank only. Legacy method values remain
+// typed below so old transaction records can still be read and reported.
+export const MONEY_METHODS = ['cash', 'bank'] as const;
+export type MoneyMethod = 'cash' | 'bank' | 'bkash' | 'nagad';
 
 /** Account types. Extra types can be added here without touching movements. */
-export const ACCOUNT_TYPES = ['cash', 'bank', 'bkash', 'nagad', 'rocket'] as const;
-export type AccountType = (typeof ACCOUNT_TYPES)[number];
+export const ACCOUNT_TYPES = ['cash', 'bank'] as const;
+export type AccountType = 'cash' | 'bank' | 'bkash' | 'nagad' | 'rocket';
 
 export const ACCOUNT_TYPE_LABEL: Record<AccountType, { bn: string; en: string }> = {
   cash: { bn: 'ক্যাশ', en: 'Cash' },
@@ -94,6 +96,7 @@ export async function resolveAccount(
   if (input.accountId) {
     const a = await t.moneyAccount.findUnique({ where: { id: String(input.accountId) } });
     if (!a) throw Object.assign(new Error('Money account not found'), { status: 400 });
+    if (!isAccountType(a.type)) throw Object.assign(new Error('Only cash and bank accounts can be used for new transactions.'), { status: 400 });
     if (!a.active) throw Object.assign(new Error('This money account is inactive'), { status: 400 });
     return a;
   }

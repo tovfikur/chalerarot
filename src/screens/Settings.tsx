@@ -2,7 +2,7 @@ import React, { useState } from 'react';
 import { ScrollView, View, Text, TouchableOpacity } from 'react-native';
 import { useApp } from '../store';
 import { Card, Title, Field, Btn, Chips } from '../ui';
-import { Trash } from '../screens';
+import { ChartOfAccountsModal, Trash } from '../screens';
 import { UserSettings } from './UserSettings';
 import { ActivityLog } from './ActivityLog';
 import { useAuth } from '../auth';
@@ -13,7 +13,8 @@ export function Settings() {
   const { user } = useAuth();
   const { business, saveBusiness, lang } = useApp();
   const [draft, setDraft] = useState(business);
-  const [section, setSection] = useState<'business' | 'language' | 'inventory' | 'profile' | 'users' | 'log' | 'trash' | null>(null);
+  const [section, setSection] = useState<'business' | 'language' | 'inventory' | 'accounting' | 'profile' | 'users' | 'log' | 'trash' | null>(null);
+  const [chartOpen, setChartOpen] = useState(false);
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState('');
   const [failed, setFailed] = useState(false);
@@ -33,6 +34,7 @@ export function Settings() {
   const menus: { id: NonNullable<typeof section>; title: string; icon: IconName; admin?: boolean }[] = [
     { id: 'business', title: label('ব্যবসার তথ্য', 'Business settings'), icon: icons.office, admin: true },
     { id: 'inventory', title: label('ইনভেন্টরি সেটিংস', 'Inventory settings'), icon: icons.stock, admin: true },
+    { id: 'accounting', title: label('হিসাবের চার্ট', 'Chart of accounts'), icon: icons.report, admin: true },
     { id: 'language', title: label('ভাষা', 'Language'), icon: icons.language, admin: true },
     { id: 'profile', title: label('আমার প্রোফাইল', 'My profile'), icon: icons.customers },
     { id: 'users', title: label('ব্যবহারকারী', 'Users'), icon: icons.customers, admin: true },
@@ -51,6 +53,14 @@ export function Settings() {
     )}</View> : null}
     {section === 'profile' || section === 'users' ? <UserSettings key={section} section={section} /> : null}
     {section === 'log' ? <ActivityLog /> : null}
+    {user.role === 'admin' && section === 'accounting' ? <Card>
+      <Title>{label('হিসাবের চার্ট', 'Chart of accounts')}</Title>
+      <Text style={{ color: '#475569', fontSize: 14, lineHeight: 21, marginTop: 6, marginBottom: 14 }}>{label(
+        'ডিফল্ট সিস্টেম অ্যাকাউন্ট, ক্যাশ/ব্যাংক লেজার লিংক এবং নিজস্ব খাত দেখুন ও পরিচালনা করুন।',
+        'Review the default system accounts, linked cash and bank ledgers, and your own accounts. System accounts used by automatic postings stay protected.'
+      )}</Text>
+      <Btn icon={icons.report} label={label('অ্যাকাউন্টস দেখুন', 'Manage chart of accounts')} onPress={() => setChartOpen(true)} testID="settings-chart-of-accounts" />
+    </Card> : null}
     {user.role === 'admin' && section === 'inventory' ? <>
       <Card>
         <Title>{label('ইনভেন্টরি সেটিংস', 'Inventory settings')}</Title>
@@ -83,5 +93,6 @@ export function Settings() {
     {message ? <Text accessibilityRole="alert" style={{ color: failed ? '#DC2626' : '#15803D' }}>{message}</Text> : null}
     <Btn label={busy ? label('সংরক্ষণ হচ্ছে…', 'Saving…') : label('সংরক্ষণ করুন', 'Save settings')} onPress={save} testID="save-settings" />
     </> : null}
+    {chartOpen ? <ChartOfAccountsModal onClose={() => setChartOpen(false)} onSaved={() => setChartOpen(false)} /> : null}
   </ScrollView>;
 }

@@ -51,7 +51,7 @@ const SYSTEM_META: { key: string; kind: ExpenseCategoryKind; bn: string; en: str
   { key: 'vehicleRepair', kind: 'operating', bn: 'গাড়ি মেরামত', en: 'Vehicle Maintenance' },
   { key: 'cleaning', kind: 'operating', bn: 'পরিষ্কার-পরিচ্ছন্নতা', en: 'Cleaning' },
   { key: 'office', kind: 'operating', bn: 'অফিস সামগ্রী', en: 'Office Supplies' },
-  { key: 'bankCharge', kind: 'operating', bn: 'ব্যাংক/মোবাইল ব্যাংকিং চার্জ', en: 'Bank/Mobile Banking Charge' },
+  { key: 'bankCharge', kind: 'operating', bn: 'ব্যাংক চার্জ', en: 'Bank Charge' },
 ];
 
 const KIND_OPTIONS: { id: ExpenseCategoryKind; bn: string; en: string }[] = [

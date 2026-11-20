@@ -44,7 +44,7 @@ import { printReport, previewReport, printedAtStamp, downloadReportCSV, type Rep
 import { api } from '../api';
 import { showEntryError } from '../entryDialog';
 import { EntryReportButtons } from '../EntryReportButtons';
-import type { GeneralLedger, JournalEntries, SavedJournalEntry, HouseExpenseRow, MoneyMovementRow, StockMovementReportRow } from '../api';
+import type { ChartAccountRow, GeneralLedger, JournalEntries, SavedJournalEntry, HouseExpenseRow, MoneyMovementRow, StockMovementReportRow } from '../api';
 import type { Key } from '../i18n';
 import { DailyCashDashboard } from './DailyCashDashboard';
 import {
@@ -67,6 +67,42 @@ interface AccountsDashboardProps {
   go?: (route: string) => void;
   focus?: { kind: 'c' | 'v'; id: string } | null;
   onFocusDone?: () => void;
+}
+
+const reportAccountName = (name: string) => name.replace(/^(Cash|Bank):\s*(cash|bank)$/i, '$1');
+
+type ProfitLossAccountAmount = { code: string; account: string; amount: number };
+function classifyProfitLossAccounts(ledger: GeneralLedger): {
+  income: ProfitLossAccountAmount[];
+  costOfSales: ProfitLossAccountAmount[];
+  operatingExpenses: ProfitLossAccountAmount[];
+  totalIncome: number;
+  totalCostOfSales: number;
+  totalOperatingExpenses: number;
+  netProfit: number;
+} {
+  const income: ProfitLossAccountAmount[] = [];
+  const costOfSales: ProfitLossAccountAmount[] = [];
+  const operatingExpenses: ProfitLossAccountAmount[] = [];
+  for (const account of ledger.accounts) {
+    const type = account.rows.find(row => row.accountType)?.accountType;
+    const amount = type === 'income'
+      ? account.periodCredit - account.periodDebit
+      : type === 'expense' ? account.periodDebit - account.periodCredit : 0;
+    if (!type || Math.abs(amount) < 0.01) continue;
+    const row = { code: account.code, account: account.account, amount: Math.round(amount * 100) / 100 };
+    // The default chart reserves 5xxx expense codes for cost of sales; other
+    // expense accounts are presented separately as operating/other expenses.
+    if (type === 'income') income.push(row);
+    else if (type === 'expense' && account.code.startsWith('5')) costOfSales.push(row);
+    else if (type === 'expense') operatingExpenses.push(row);
+  }
+  const sum = (rows: ProfitLossAccountAmount[]) => Math.round(rows.reduce((total, row) => total + row.amount, 0) * 100) / 100;
+  const totalIncome = sum(income);
+  const totalCostOfSales = sum(costOfSales);
+  const totalOperatingExpenses = sum(operatingExpenses);
+  return { income, costOfSales, operatingExpenses, totalIncome, totalCostOfSales, totalOperatingExpenses,
+    netProfit: Math.round((totalIncome - totalCostOfSales - totalOperatingExpenses) * 100) / 100 };
 }
 
 function HouseExpenseEntryForm({ onSaved }: { onSaved: () => Promise<void> }) {
@@ -122,6 +158,127 @@ function HouseExpenseEntryForm({ onSaved }: { onSaved: () => Promise<void> }) {
     <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginTop: 8 }}>
       <Btn label={busy ? t('wait') : label('Save withdrawal', 'উত্তোলন সংরক্ষণ')} icon={icons.moneyOut} onPress={() => { if (!busy) void save(); }} />
     </View>
+  </View>;
+}
+
+function GeneralLedgerReportView({ initial, onBack }: { initial: GeneralLedger | null; onBack: () => void }) {
+  const { lang, business } = useApp();
+  const m = useMoney();
+  const { width: viewportWidth, isMobile } = useBreakpoint();
+  const label = (en: string, bn: string) => lang === 'bn' ? bn : en;
+  const initialRange = initial ?? { from: presetRange('thisMonth', today()).from, to: today() };
+  const [data, setData] = useState<GeneralLedger | null>(initial);
+  const [from, setFrom] = useState(initialRange.from);
+  const [to, setTo] = useState(initialRange.to);
+  const [source, setSource] = useState<'all' | 'manual' | 'automatic'>(initial?.source ?? 'all');
+  const [accountQuery, setAccountQuery] = useState('');
+  const [query, setQuery] = useState('');
+  const [expanded, setExpanded] = useState<Set<string>>(new Set());
+  const [selected, setSelected] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState('');
+  const periodLabel = (start: string, end: string) => {
+    const format = (value: string) => new Date(`${value}T12:00:00`).toLocaleDateString(lang === 'bn' ? 'bn-BD' : 'en-US', { year: 'numeric', month: 'short', day: 'numeric' });
+    return start === end ? format(start) : `${format(start)} – ${format(end)}`;
+  };
+  const formatSide = (value: number) => `${m(Math.abs(value))} ${value < 0 ? 'Cr' : 'Dr'}`;
+  const tableWidth = Math.max(isMobile ? 760 : 920, viewportWidth > 1200 ? viewportWidth - 330 : viewportWidth - 40);
+  const summaryWidths = [Math.round(tableWidth * 0.12), Math.round(tableWidth * 0.22), Math.round(tableWidth * 0.16), Math.round(tableWidth * 0.16), Math.round(tableWidth * 0.16), Math.round(tableWidth * 0.18)];
+  const detailWidths = [Math.round(tableWidth * 0.1), Math.round(tableWidth * 0.19), Math.round(tableWidth * 0.32), Math.round(tableWidth * 0.13), Math.round(tableWidth * 0.13), Math.round(tableWidth * 0.13)];
+  const load = async (nextFrom = from, nextTo = to, nextSource = source) => {
+    if (!nextFrom || !nextTo || nextFrom > nextTo) {
+      setError(label('Choose a valid date range.', 'সঠিক তারিখের সীমা নির্বাচন করুন।'));
+      return;
+    }
+    setBusy(true); setError('');
+    try {
+      const result = await api.generalLedger(nextFrom, nextTo, nextSource);
+      setData(result); setFrom(nextFrom); setTo(nextTo); setSelected(null); setExpanded(new Set());
+    } catch (e) { setError(e instanceof Error ? e.message : label('Could not load the general ledger.', 'সাধারণ খতিয়ান লোড করা যায়নি।')); }
+    finally { setBusy(false); }
+  };
+  const accounts = (data?.accounts ?? []).filter(account => {
+    const text = `${account.code} ${account.account} ${account.rows.map(row => `${row.reference} ${row.journalNo} ${row.description}`).join(' ')}`;
+    const accountText = `${account.code} ${account.account}`.toLocaleLowerCase();
+    return (!accountQuery.trim() || accountText.includes(accountQuery.trim().toLocaleLowerCase()))
+      && (!query.trim() || text.toLocaleLowerCase().includes(query.trim().toLocaleLowerCase()));
+  });
+  const selectedAccount = selected ? data?.accounts.find(account => account.account === selected) : undefined;
+  const shownData = data ? { ...data, source, accounts: selectedAccount ? [selectedAccount] : accounts,
+    debitTotal: accounts.reduce((sum, account) => sum + account.periodDebit, 0), creditTotal: accounts.reduce((sum, account) => sum + account.periodCredit, 0) } : null;
+  const toDoc = (ledger: GeneralLedger, account?: GeneralLedger['accounts'][number]): ReportDoc => ({
+    language: lang, shop: business.name, title: label('General Ledger', 'সাধারণ খতিয়ান'), period: periodLabel(ledger.from, ledger.to),
+    meta: [{ label: label('Journal filter', 'জার্নাল ফিল্টার'), value: ledger.source === 'manual' ? label('Manual entries', 'ম্যানুয়াল এন্ট্রি') : ledger.source === 'automatic' ? label('Automatic postings', 'স্বয়ংক্রিয় পোস্টিং') : label('All journals', 'সব জার্নাল') }],
+    sections: account ? [{ title: `${account.code} · ${reportAccountName(account.account)}`, columns: [label('Date', 'তারিখ'), label('Journal', 'জার্নাল'), label('Reference', 'রেফারেন্স'), label('Description', 'বিবরণ'), label('Debit', 'ডেবিট'), label('Credit', 'ক্রেডিট'), label('Balance', 'স্থিতি')], rows: [
+      { label: label('Opening balance', 'প্রারম্ভিক স্থিতি'), right: formatSide(account.openingBalance), cells: [label('Opening balance', 'প্রারম্ভিক স্থিতি'), '', '', '', '', '', formatSide(account.openingBalance)], bold: true },
+      ...account.rows.map(row => ({ label: row.journalNo, sub: row.description, right: formatSide(row.runningBalance), cells: [row.date, row.journalNo, row.reference, row.description, row.debit ? m(row.debit) : '', row.credit ? m(row.credit) : '', formatSide(row.runningBalance)] })),
+      { label: label('Closing balance', 'সমাপনী স্থিতি'), right: formatSide(account.closingBalance), cells: [label('Closing balance', 'সমাপনী স্থিতি'), '', '', '', m(account.periodDebit), m(account.periodCredit), formatSide(account.closingBalance)], bold: true },
+    ] }] : [{ title: label('Account summary', 'অ্যাকাউন্ট সারাংশ'), columns: [label('Code', 'কোড'), label('Account', 'অ্যাকাউন্ট'), label('Opening', 'প্রারম্ভিক'), label('Debit', 'ডেবিট'), label('Credit', 'ক্রেডিট'), label('Closing', 'সমাপনী')], rows: accounts.map(row => ({ label: row.code, sub: row.account, right: formatSide(row.closingBalance), cells: [row.code, row.account, formatSide(row.openingBalance), m(row.periodDebit), m(row.periodCredit), formatSide(row.closingBalance)] })) }],
+    total: account ? { label: label('Closing balance', 'সমাপনী স্থিতি'), value: formatSide(account.closingBalance) } : { label: label('Debits / Credits', 'ডেবিট / ক্রেডিট'), value: `${m(ledger.debitTotal)} / ${m(ledger.creditTotal)}` },
+    printedAt: printedAtStamp(lang), printLabel: label('Print / Save PDF', 'প্রিন্ট / PDF সংরক্ষণ'),
+  });
+  const exportReport = () => { if (shownData) downloadReportCSV(toDoc(shownData, selectedAccount), `general_ledger_${from}_${to}.csv`); };
+  const quickRanges = [
+    { id: 'last7' as const, en: 'Last 7 days', bn: 'গত ৭ দিন' }, { id: 'thisMonth' as const, en: 'This month', bn: 'এই মাস' },
+    { id: 'last3m' as const, en: 'Last 3 months', bn: 'গত ৩ মাস' }, { id: 'thisYear' as const, en: 'This year', bn: 'এই বছর' },
+  ];
+  const column = (width: number, title: string, align: 'left' | 'right' = 'right') => <Text key={title} style={{ width, paddingHorizontal: 9, textAlign: align, color: '#475569', fontSize: 12, fontWeight: '800' }}>{title}</Text>;
+  return <View style={{ flex: 1, backgroundColor: '#F5F8FF' }}>
+    <View style={{ backgroundColor: '#FFFFFF', borderBottomWidth: 1, borderColor: '#E2E8F0', paddingHorizontal: 20, paddingVertical: 13, flexDirection: 'row', flexWrap: 'wrap', alignItems: 'center', justifyContent: 'space-between', gap: 12 }}>
+      <View style={{ flexDirection: 'row', alignItems: 'center', gap: 12 }}><TouchableOpacity accessibilityRole="button" onPress={onBack} style={{ paddingHorizontal: 11, paddingVertical: 8, borderRadius: 8, backgroundColor: '#F1F5F9' }}><Text style={{ color: '#334155', fontWeight: '700' }}>‹ {label('Reports', 'রিপোর্ট')}</Text></TouchableOpacity><View><Text style={{ color: '#172554', fontSize: 20, fontWeight: '800' }}>{label('General Ledger', 'সাধারণ খতিয়ান')}</Text><Text style={{ color: '#64748B', fontSize: 12 }}>{periodLabel(from, to)}</Text></View></View>
+      <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8 }}>
+        <TouchableOpacity accessibilityRole="button" onPress={() => { if (shownData && !previewReport(toDoc(shownData, selectedAccount))) Alert.alert(label('Could not open preview', 'প্রিভিউ খোলা যায়নি')); }} style={{ minHeight: 38, justifyContent: 'center', paddingHorizontal: 13, borderRadius: 8, backgroundColor: '#FFFFFF', borderWidth: 1, borderColor: '#CBD5E1' }}><Text style={{ color: '#334155', fontWeight: '700' }}>{label('Preview', 'প্রিভিউ')}</Text></TouchableOpacity>
+        <TouchableOpacity accessibilityRole="button" onPress={exportReport} style={{ minHeight: 38, justifyContent: 'center', paddingHorizontal: 13, borderRadius: 8, backgroundColor: '#ECFDF5', borderWidth: 1, borderColor: '#A7F3D0' }}><Text style={{ color: '#047857', fontWeight: '700' }}>{label('Excel / CSV', 'এক্সেল / CSV')}</Text></TouchableOpacity>
+        <TouchableOpacity accessibilityRole="button" onPress={() => { if (shownData && !printReport(toDoc(shownData, selectedAccount))) Alert.alert(label('Could not open print dialog', 'প্রিন্ট খোলা যায়নি')); }} style={{ minHeight: 38, justifyContent: 'center', paddingHorizontal: 15, borderRadius: 8, backgroundColor: '#2563EB' }}><Text style={{ color: '#FFFFFF', fontWeight: '700' }}>PDF</Text></TouchableOpacity>
+      </View>
+    </View>
+    <ScrollView contentContainerStyle={{ padding: isMobile ? 12 : 18, gap: 13 }}>
+      <View style={{ backgroundColor: '#FFFFFF', borderWidth: 1, borderColor: '#E2E8F0', borderRadius: 11, padding: 14, gap: 12 }}>
+        <View style={{ flexDirection: 'row', flexWrap: 'wrap', alignItems: 'flex-end', gap: 10 }}>
+          <View style={{ flex: 1, minWidth: 150 }}><DateField label={label('From date', 'শুরুর তারিখ')} value={from} onChange={setFrom} clearable /></View>
+          <View style={{ flex: 1, minWidth: 150 }}><DateField label={label('To date', 'শেষ তারিখ')} value={to} onChange={setTo} clearable minDate={from || undefined} /></View>
+          {quickRanges.map(item => { const range = presetRange(item.id, today()); const active = range.from === from && range.to === to; return <TouchableOpacity key={item.id} onPress={() => { void load(range.from, range.to); }} style={{ paddingHorizontal: 10, paddingVertical: 7, borderRadius: 8, backgroundColor: active ? '#EAF2FF' : '#FFFFFF', borderWidth: 1, borderColor: active ? '#93C5FD' : '#CBD5E1' }}><Text style={{ color: active ? '#1D4ED8' : '#475569', fontSize: 12, fontWeight: '700' }}>{label(item.en, item.bn)}</Text></TouchableOpacity>; })}
+        </View><View style={{ flexDirection: 'row', flexWrap: 'wrap', alignItems: 'center', gap: 7 }}>
+          <Text style={{ color: '#64748B', fontSize: 12, fontWeight: '700' }}>{label('Journals', 'জার্নাল')}:</Text>
+          {([{ id: 'all', en: 'All journals', bn: 'সব জার্নাল' }, { id: 'manual', en: 'Manual entries', bn: 'ম্যানুয়াল এন্ট্রি' }, { id: 'automatic', en: 'Automatic postings', bn: 'স্বয়ংক্রিয় পোস্টিং' }] as const).map(item => <TouchableOpacity key={item.id} accessibilityRole="button" accessibilityState={{ selected: source === item.id }} onPress={() => { setSource(item.id); void load(from, to, item.id); }} style={{ paddingHorizontal: 10, paddingVertical: 7, borderRadius: 8, backgroundColor: source === item.id ? '#EAF2FF' : '#FFFFFF', borderWidth: 1, borderColor: source === item.id ? '#93C5FD' : '#CBD5E1' }}><Text style={{ color: source === item.id ? '#1D4ED8' : '#475569', fontSize: 12, fontWeight: '700' }}>{label(item.en, item.bn)}</Text></TouchableOpacity>)}
+          <View style={{ marginLeft: 'auto', flexDirection: 'row', flexWrap: 'wrap', gap: 8 }}><TouchableOpacity accessibilityRole='button' disabled={busy} onPress={() => { void load(); }} style={{ minHeight: 42, justifyContent: 'center', paddingHorizontal: 18, borderRadius: 9, backgroundColor: '#2563EB', opacity: busy ? 0.65 : 1 }}><Text style={{ color: '#FFFFFF', fontSize: 14, fontWeight: '700' }}>{busy ? label('Applying…', 'ফিল্টার হচ্ছে…') : label('Apply filters', 'ফিল্টার করুন')}</Text></TouchableOpacity><TouchableOpacity accessibilityRole='button' disabled={busy} onPress={() => { const range = presetRange('thisMonth', today()); setQuery(''); setAccountQuery(''); setSource('all'); setFrom(range.from); setTo(range.to); void load(range.from, range.to, 'all'); }} style={{ minHeight: 42, justifyContent: 'center', paddingHorizontal: 16, borderRadius: 9, backgroundColor: '#FFFFFF', borderWidth: 1, borderColor: '#CBD5E1' }}><Text style={{ color: '#334155', fontSize: 14, fontWeight: '700' }}>{label('Reset filters', 'ফিল্টার রিসেট')}</Text></TouchableOpacity></View>
+        </View>
+        <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 10 }}>
+          <TextInput value={accountQuery} onChangeText={setAccountQuery} placeholder={label('Filter by account code or name', 'অ্যাকাউন্ট কোড বা নাম দিয়ে ফিল্টার')} placeholderTextColor="#94A3B8" style={{ flex: 1, minWidth: 220, minHeight: 44, borderWidth: 1, borderColor: '#CBD5E1', backgroundColor: '#FFFFFF', borderRadius: 9, paddingHorizontal: 13, color: '#0F172A', fontSize: 14 }} />
+          <TextInput value={query} onChangeText={setQuery} placeholder={label('Search reference, journal number, or description', 'রেফারেন্স, জার্নাল নম্বর বা বিবরণ খুঁজুন')} placeholderTextColor="#94A3B8" style={{ flex: 1.5, minWidth: 260, minHeight: 44, borderWidth: 1, borderColor: '#CBD5E1', backgroundColor: '#FFFFFF', borderRadius: 9, paddingHorizontal: 13, color: '#0F172A', fontSize: 14 }} />
+        </View>
+      </View>
+      {error ? <Text style={{ color: '#B91C1C', backgroundColor: '#FEF2F2', padding: 12, borderRadius: 8 }}>{error}</Text> : null}
+      {busy ? <Text style={{ color: '#64748B' }}>{label('Loading ledger…', 'খতিয়ান লোড হচ্ছে…')}</Text> : null}
+      {data?.unpostedCount ? <View style={{ padding: 13, borderRadius: 9, backgroundColor: '#D9F0F5', borderWidth: 1, borderColor: '#BAE6FD' }}><Text style={{ color: '#155E75', fontSize: 13, fontWeight: '600' }}>{label(`There are ${data.unpostedCount} unposted journal entries dated on or before this period.`, `এই সময়সীমার আগে বা মধ্যে ${toBnDigits(data.unpostedCount)}টি পোস্ট না করা জার্নাল এন্ট্রি আছে।`)}</Text></View> : null}
+      {data && <View style={{ backgroundColor: '#FFFFFF', borderWidth: 1, borderColor: '#D6DEE8', borderRadius: 10, overflow: 'hidden' }}>
+        {selectedAccount ? <View style={{ padding: 12, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', borderBottomWidth: 1, borderColor: '#E2E8F0' }}><Text style={{ color: '#172554', fontWeight: '800' }}>{selectedAccount.code} · {reportAccountName(selectedAccount.account)}</Text><TouchableOpacity onPress={() => setSelected(null)}><Text style={{ color: '#2563EB', fontWeight: '700' }}>‹ {label('All accounts', 'সকল অ্যাকাউন্ট')}</Text></TouchableOpacity></View> : null}
+        <ScrollView horizontal showsHorizontalScrollIndicator contentContainerStyle={{ minWidth: tableWidth }}>
+          <View style={{ flex: 1 }}>
+            {!selectedAccount ? <View style={{ flexDirection: 'row', backgroundColor: '#F1F5F9', paddingVertical: 10, borderBottomWidth: 1, borderColor: '#DCE4EC' }}>{column(summaryWidths[0], label('CODE', 'কোড'), 'left')}{column(summaryWidths[1], label('ACCOUNT', 'অ্যাকাউন্ট'), 'left')}{column(summaryWidths[2], label('OPENING BALANCE', 'প্রারম্ভিক স্থিতি'))}{column(summaryWidths[3], label('DEBIT', 'ডেবিট'))}{column(summaryWidths[4], label('CREDIT', 'ক্রেডিট'))}{column(summaryWidths[5], label('CLOSING BALANCE', 'সমাপনী স্থিতি'))}</View> : <View style={{ flexDirection: 'row', backgroundColor: '#F1F5F9', paddingVertical: 10, borderBottomWidth: 1, borderColor: '#DCE4EC' }}>{column(detailWidths[0], label('DATE', 'তারিখ'), 'left')}{column(detailWidths[1], label('JOURNAL / COMMUNICATION', 'জার্নাল / রেফারেন্স'), 'left')}{column(detailWidths[2], label('PARTNER / DESCRIPTION', 'বিবরণ'), 'left')}{column(detailWidths[3], label('DEBIT', 'ডেবিট'))}{column(detailWidths[4], label('CREDIT', 'ক্রেডিট'))}{column(detailWidths[5], label('BALANCE', 'স্থিতি'))}</View>}
+            {selectedAccount ? <>
+              <View style={{ flexDirection: 'row', backgroundColor: '#F8FAFC', paddingVertical: 9, borderBottomWidth: 1, borderColor: '#E2E8F0' }}><Text style={{ width: tableWidth - detailWidths[5], paddingHorizontal: 9, color: '#475569', fontSize: 13, fontWeight: '700' }}>{label('Opening balance', 'প্রারম্ভিক স্থিতি')}</Text><Text style={{ width: detailWidths[5], textAlign: 'right', paddingHorizontal: 9, color: '#334155', fontSize: 13, fontWeight: '700' }}>{formatSide(selectedAccount.openingBalance)}</Text></View>
+              {selectedAccount.rows.map((row, index) => <View key={`${row.journalNo}-${index}`} style={{ flexDirection: 'row', minHeight: 43, alignItems: 'center', backgroundColor: index % 2 ? '#FFFFFF' : '#FBFDFF', borderBottomWidth: 1, borderColor: '#EEF2F6' }}><Text style={{ width: detailWidths[0], paddingHorizontal: 9, color: '#334155', fontSize: 13 }}>{row.date}</Text><View style={{ width: detailWidths[1], paddingHorizontal: 9 }}><Text style={{ color: '#1D4ED8', fontSize: 13, fontWeight: '700' }}>{row.journalNo}</Text><Text style={{ color: '#64748B', fontSize: 12 }}>{row.reference}</Text></View><Text numberOfLines={2} style={{ width: detailWidths[2], paddingHorizontal: 9, color: '#334155', fontSize: 13 }}>{row.description}</Text><Text style={{ width: detailWidths[3], paddingHorizontal: 9, textAlign: 'right', color: '#0F172A', fontSize: 13 }}>{row.debit ? m(row.debit) : '—'}</Text><Text style={{ width: detailWidths[4], paddingHorizontal: 9, textAlign: 'right', color: '#0F172A', fontSize: 13 }}>{row.credit ? m(row.credit) : '—'}</Text><Text style={{ width: detailWidths[5], paddingHorizontal: 9, textAlign: 'right', color: '#0F172A', fontSize: 13, fontWeight: '700' }}>{formatSide(row.runningBalance)}</Text></View>)}
+              <View style={{ flexDirection: 'row', backgroundColor: '#F8FAFC', paddingVertical: 10, borderTopWidth: 1, borderColor: '#CBD5E1' }}><Text style={{ width: tableWidth - detailWidths[5], paddingHorizontal: 9, color: '#334155', fontSize: 13, fontWeight: '800' }}>{label('Closing balance', 'সমাপনী স্থিতি')}</Text><Text style={{ width: detailWidths[5], textAlign: 'right', paddingHorizontal: 9, color: '#0F172A', fontSize: 13, fontWeight: '800' }}>{formatSide(selectedAccount.closingBalance)}</Text></View>
+            </> : accounts.map((account, index) => {
+              const isExpanded = expanded.has(account.account);
+              return <View key={account.account}>
+                <TouchableOpacity accessibilityRole="button" accessibilityState={{ expanded: isExpanded }} onPress={() => setExpanded(current => { const next = new Set(current); if (next.has(account.account)) next.delete(account.account); else next.add(account.account); return next; })} style={{ flexDirection: 'row', minHeight: 47, alignItems: 'center', backgroundColor: index % 2 ? '#FFFFFF' : '#FBFDFF', borderBottomWidth: 1, borderColor: '#E2E8F0' }}>
+                  <View style={{ width: summaryWidths[0], flexDirection: 'row', alignItems: 'center', paddingHorizontal: 9, gap: 7 }}><Text style={{ color: '#64748B' }}>{isExpanded ? '▾' : '▸'}</Text><Text numberOfLines={1} style={{ color: '#334155', fontSize: 13, fontWeight: '700' }}>{account.code}</Text></View><Text numberOfLines={2} style={{ width: summaryWidths[1], paddingHorizontal: 9, color: '#1D4ED8', fontSize: 13, fontWeight: '700' }}>{reportAccountName(account.account)}</Text>
+                  <Text numberOfLines={1} style={{ width: summaryWidths[2], paddingHorizontal: 9, textAlign: 'right', color: '#475569', fontSize: 13 }}>{formatSide(account.openingBalance)}</Text><Text numberOfLines={1} style={{ width: summaryWidths[3], paddingHorizontal: 9, textAlign: 'right', color: '#0F172A', fontSize: 13 }}>{m(account.periodDebit)}</Text><Text numberOfLines={1} style={{ width: summaryWidths[4], paddingHorizontal: 9, textAlign: 'right', color: '#0F172A', fontSize: 13 }}>{m(account.periodCredit)}</Text><Text numberOfLines={1} style={{ width: summaryWidths[5], paddingHorizontal: 9, textAlign: 'right', color: account.closingBalance < 0 ? '#B91C1C' : '#0F172A', fontSize: 13, fontWeight: '700' }}>{formatSide(account.closingBalance)}</Text>
+                </TouchableOpacity>
+                {isExpanded && <View style={{ backgroundColor: '#F8FAFC', borderBottomWidth: 1, borderColor: '#DCE4EC' }}>
+                  {account.rows.length ? <><View style={{ flexDirection: 'row', backgroundColor: '#F1F5F9', paddingVertical: 7, borderTopWidth: 1, borderColor: '#E2E8F0' }}>{column(detailWidths[0], label('DATE', 'তারিখ'), 'left')}{column(detailWidths[1], label('JOURNAL / REF', 'জার্নাল / রেফারেন্স'), 'left')}{column(detailWidths[2], label('DESCRIPTION', 'বিবরণ'), 'left')}{column(detailWidths[3], label('DEBIT', 'ডেবিট'))}{column(detailWidths[4], label('CREDIT', 'ক্রেডিট'))}{column(detailWidths[5], label('BALANCE', 'স্থিতি'))}</View>{account.rows.slice(0, 100).map((row, rowIndex) => <View key={`${row.journalNo}-${rowIndex}`} style={{ flexDirection: 'row', alignItems: 'center', gap: 0, paddingVertical: 8, borderTopWidth: 1, borderColor: '#E2E8F0' }}><Text style={{ width: detailWidths[0], color: '#334155', fontSize: 13 }}>{row.date}</Text><View style={{ width: detailWidths[1] }}><Text style={{ color: '#1D4ED8', fontSize: 13, fontWeight: '700' }}>{row.journalNo}</Text><Text style={{ color: '#64748B', fontSize: 12 }}>{row.reference}</Text></View><Text numberOfLines={1} style={{ width: detailWidths[2], color: '#475569', fontSize: 13 }}>{row.description}</Text><Text style={{ width: detailWidths[3], textAlign: 'right', color: '#0F172A', fontSize: 13 }}>{row.debit ? m(row.debit) : '—'}</Text><Text style={{ width: detailWidths[4], textAlign: 'right', color: '#0F172A', fontSize: 13 }}>{row.credit ? m(row.credit) : '—'}</Text><Text style={{ width: detailWidths[5], textAlign: 'right', color: '#0F172A', fontSize: 13, fontWeight: '700' }}>{formatSide(row.runningBalance)}</Text></View>)}</> : <Text style={{ color: '#64748B', paddingVertical: 12, fontSize: 13 }}>{label('No postings in this period.', 'এই সময়ে কোনো পোস্টিং নেই।')}</Text>}
+                  <TouchableOpacity onPress={() => setSelected(account.account)} style={{ alignSelf: 'flex-end', paddingVertical: 9 }}><Text style={{ color: '#1D4ED8', fontSize: 13, fontWeight: '700' }}>{label('Open full account ledger ›', 'সম্পূর্ণ খতিয়ান খুলুন ›')}</Text></TouchableOpacity>
+                </View>}
+              </View>;
+            })}
+            {!accounts.length && <Text style={{ color: '#64748B', padding: 22, textAlign: 'center' }}>{label('No accounts match this search.', 'এই অনুসন্ধানে কোনো অ্যাকাউন্ট নেই।')}</Text>}
+            {!selectedAccount && <View style={{ flexDirection: 'row', justifyContent: 'flex-end', gap: 22, padding: 11, backgroundColor: '#F8FAFC', borderTopWidth: 1, borderColor: '#CBD5E1' }}><Text style={{ color: '#334155', fontSize: 13, fontWeight: '800' }}>{label('Debit total', 'মোট ডেবিট')}: {m(shownData?.debitTotal ?? 0)}</Text><Text style={{ color: '#334155', fontSize: 13, fontWeight: '800' }}>{label('Credit total', 'মোট ক্রেডিট')}: {m(shownData?.creditTotal ?? 0)}</Text></View>}
+          </View>
+        </ScrollView>
+      </View>}
+    </ScrollView>
   </View>;
 }
 // Preset Range Calculator
@@ -301,6 +458,7 @@ export function AccountsDashboard({ go, focus, onFocusDone }: AccountsDashboardP
   const [selectedVendorId, setSelectedVendorId] = useState<string | null>(null);
   const [expenseFormItem, setExpenseFormItem] = useState<Expense | null | undefined>(undefined);
   const [reportViewDoc, setReportViewDoc] = useState<ReportDoc | null>(null);
+  const [balanceSheetAsOf, setBalanceSheetAsOf] = useState(td);
   const [generalLedgerData, setGeneralLedgerData] = useState<GeneralLedger | null>(null);
   const [selectedLedgerAccount, setSelectedLedgerAccount] = useState<string | null>(null);
   const [journalData, setJournalData] = useState<JournalEntries | null>(null);
@@ -315,6 +473,9 @@ export function AccountsDashboard({ go, focus, onFocusDone }: AccountsDashboardP
   const [journalTo, setJournalTo] = useState(() => presetRange('thisMonth', today()).to);
   const [ledgerFrom, setLedgerFrom] = useState(() => presetRange('thisMonth', today()).from);
   const [ledgerTo, setLedgerTo] = useState(() => presetRange('thisMonth', today()).to);
+  const [ledgerSearch, setLedgerSearch] = useState('');
+  const [ledgerJournalFilter, setLedgerJournalFilter] = useState<'all' | 'manual' | 'automatic'>('all');
+  const [expandedLedgerAccounts, setExpandedLedgerAccounts] = useState<Set<string>>(new Set());
   const [cashFlowFrom, setCashFlowFrom] = useState(() => presetRange('thisMonth', today()).from);
   const [cashFlowTo, setCashFlowTo] = useState(() => presetRange('thisMonth', today()).to);
   const [balanceAsOf, setBalanceAsOf] = useState(today());
@@ -440,26 +601,26 @@ export function AccountsDashboard({ go, focus, onFocusDone }: AccountsDashboardP
     });
   };
 
-  const profitLossReportDoc = (finance: PeriodFinance, ledger?: GeneralLedger): ReportDoc => {
-    const sale = finance.netSales; const cogs = finance.cogs; const gross = finance.grossProfit; const expense = finance.expense; const profit = finance.netProfit;
-    const accountRows = (type: 'income' | 'expense') => (ledger?.accounts ?? []).flatMap(account => {
-      const accountType = account.rows.find(row => row.accountType)?.accountType;
-      if (accountType !== type) return [];
-      const amount = type === 'income' ? account.periodCredit - account.periodDebit : account.periodDebit - account.periodCredit;
-      return Math.abs(amount) < 0.01 ? [] : [{ label: `${account.code} · ${account.account}`, sub: label('Open general ledger for dated postings', 'তারিখভিত্তিক লেনদেন দেখতে সাধারণ খতিয়ান খুলুন'), right: m(amount), neg: amount < 0 }];
-    });
-    const accountSections: ReportDoc['sections'] = [
-      { title: label('Income by chart of accounts', 'হিসাবের চার্ট অনুযায়ী আয়'), rows: accountRows('income') },
-      { title: label('Expenses by chart of accounts', 'হিসাবের চার্ট অনুযায়ী ব্যয়'), rows: accountRows('expense') },
-    ];
-    return { language: lang, shop: business.name, title: label('Profit & Loss Statement', 'লাভ-ক্ষতির বিবরণী'), period: formatPeriodLabel(finance.start || profitFrom, finance.end || profitTo),
-      meta: [{ label: lang === 'bn' ? 'মজুদে অন্তর্ভুক্ত ল্যান্ডিং খরচ' : 'Landed cost capitalized into inventory', value: m(finance.capitalizedLandedCost) }],
-      sections: [{ title: label('Trading result', 'বাণিজ্যিক ফলাফল'), rows: [
-        { label: label('Net sales', 'নিট বিক্রয়'), right: m(sale) }, { label: label('Cost of goods sold', 'বিক্রিত পণ্যের ক্রয়মূল্য'), right: m(cogs), neg: true },
-        { label: label('Gross profit', 'মোট মুনাফা'), right: m(gross), bold: true }, { label: label('Operating expenses', 'পরিচালন ব্যয়'), right: m(expense), neg: true },
-        { label: label('Other income / (expense)', 'অন্যান্য আয় / (ব্যয়)'), right: m(-(finance.otherIncomeExpense ?? 0)), neg: finance.otherIncomeExpense > 0 },
-        { label: label('Net profit / (loss)', 'নিট মুনাফা / (ক্ষতি)'), right: m(profit), bold: true },
-      ] }, ...accountSections], total: { label: label('Net profit / (loss)', 'নিট মুনাফা / (ক্ষতি)'), value: m(profit), neg: profit < 0 },
+  const profitLossReportDoc = (ledger: GeneralLedger): ReportDoc => {
+    const statement = classifyProfitLossAccounts(ledger);
+    const rows = (accounts: ProfitLossAccountAmount[]) => accounts.map(account => ({
+      label: `${account.code} · ${reportAccountName(account.account)}`,
+      sub: label('Chart of accounts', 'হিসাবের চার্ট'), right: m(account.amount), neg: account.amount < 0,
+    }));
+    const totalRow = (title: string, amount: number, negative = false) => ({ label: title, right: m(amount), neg: negative || amount < 0, bold: true });
+    const profitLabel = label('Net profit / (loss)', 'নিট মুনাফা / (ক্ষতি)');
+    return { language: lang, shop: business.name, title: label('Profit & Loss Statement', 'লাভ-ক্ষতির বিবরণী'), period: formatPeriodLabel(ledger.from, ledger.to),
+      sections: [
+        { title: label('Income accounts', 'আয় হিসাব'), rows: [...rows(statement.income), totalRow(label('Total income', 'মোট আয়'), statement.totalIncome)] },
+        { title: label('Cost of sales accounts', 'বিক্রিত পণ্যের খরচের হিসাব'), rows: [...rows(statement.costOfSales), totalRow(label('Total cost of sales', 'মোট বিক্রয় খরচ'), statement.totalCostOfSales, true)] },
+        { title: label('Operating and other expense accounts', 'পরিচালন ও অন্যান্য ব্যয়ের হিসাব'), rows: [...rows(statement.operatingExpenses), totalRow(label('Total operating and other expenses', 'মোট পরিচালন ও অন্যান্য ব্যয়'), statement.totalOperatingExpenses, true)] },
+        { title: label('Statement summary', 'বিবরণীর সারাংশ'), rows: [
+          totalRow(label('Total income', 'মোট আয়'), statement.totalIncome),
+          totalRow(label('Cost of sales', 'বিক্রয় খরচ'), statement.totalCostOfSales, true),
+          totalRow(label('Operating and other expenses', 'পরিচালন ও অন্যান্য ব্যয়'), statement.totalOperatingExpenses, true),
+          totalRow(profitLabel, statement.netProfit),
+        ] },
+      ], total: { label: profitLabel, value: m(statement.netProfit), neg: statement.netProfit < 0 },
       printedAt: printedAtStamp(lang), printLabel: lang === 'bn' ? 'প্রিন্ট করুন' : 'Print' };
   };
 
@@ -467,31 +628,41 @@ export function AccountsDashboard({ go, focus, onFocusDone }: AccountsDashboardP
     const from = profitFrom || presetRange('thisMonth', today()).from;
     const to = profitTo || presetRange('thisMonth', today()).to;
     try {
-      const [finance, ledger] = await Promise.all([loadFinance('range', from, to), api.generalLedger(from, to)]);
+      const ledger = await api.generalLedger(from, to);
       setGeneralLedgerData(ledger);
       setSelectedLedgerAccount(null);
       setProfitFrom(from); setProfitTo(to);
-      setReportViewDoc(profitLossReportDoc(finance, ledger));
+      setReportViewDoc(profitLossReportDoc(ledger));
     } catch { showEntryError(lang, lang === 'bn' ? 'লাভ-ক্ষতির রিপোর্ট লোড করা যায়নি।' : 'Could not load the profit and loss report.'); }
   };
 
   const applyProfitLossDateFilter = async () => {
     try {
       if (!profitFrom || !profitTo || profitFrom > profitTo) throw new Error('invalid date range');
-      const [finance, ledger] = await Promise.all([loadFinance('range', profitFrom, profitTo), api.generalLedger(profitFrom, profitTo)]);
+      const ledger = await api.generalLedger(profitFrom, profitTo);
       setGeneralLedgerData(ledger);
       setSelectedLedgerAccount(null);
-      setReportViewDoc(profitLossReportDoc(finance, ledger));
+      setReportViewDoc(profitLossReportDoc(ledger));
     } catch {
       showEntryError(lang, lang === 'bn' ? 'YYYY-MM-DD ফরম্যাটে শুরু ও শেষ তারিখ দিন।' : 'Enter valid start and end dates in YYYY-MM-DD format.');
     }
   };
 
-  const printCashStatement = () => setReportViewDoc({ language: lang, shop: business.name, title: label('Cash & Bank Statement', 'নগদ ও ব্যাংক বিবরণী'), period: `${label('Balances as of', 'স্থিতি তারিখ')} ${td}`,
-    sections: [{ title: label('Cash and bank accounts', 'নগদ ও ব্যাংক অ্যাকাউন্ট'), rows: moneyAccounts.map(a => ({ label: a.name, sub: `${a.type.toUpperCase()} · ${label('Opening balance', 'প্রারম্ভিক স্থিতি')} ${m(a.adjustedOpeningBalance ?? a.openingBalance)} · ${fd(a.openingDate)}`, right: m(a.balance), neg: a.balance < 0 })) }],
-    total: { label: label('Total cash and bank', 'মোট নগদ ও ব্যাংক'), value: m(totalLiquidMoney), neg: totalLiquidMoney < 0 },
-    note: label('This statement shows current account balances. Use each account ledger for dated money movements.', 'এই বিবরণীতে বর্তমান অ্যাকাউন্টের স্থিতি দেখানো হয়েছে। তারিখভিত্তিক লেনদেন দেখতে প্রতিটি অ্যাকাউন্টের খতিয়ান দেখুন।'),
-    printedAt: printedAtStamp(lang), printLabel: lang === 'bn' ? 'প্রিন্ট করুন' : 'Print' });
+  const printCashStatement = async () => {
+    try {
+      const [chart, ledger] = await Promise.all([api.chartAccounts(), api.generalLedger('0001-01-01', td)]);
+      setGeneralLedgerData(ledger);
+      setSelectedLedgerAccount(null);
+      setReportViewDoc({ language: lang, shop: business.name, title: label('Cash & Bank Statement', 'নগদ ও ব্যাংক বিবরণী'), period: `${label('Balances as of', 'স্থিতি তারিখ')} ${td}`,
+        sections: [{ title: label('Cash and bank accounts', 'নগদ ও ব্যাংক অ্যাকাউন্ট'), rows: moneyAccounts.map(a => {
+          const mapped = chart.find(account => account.moneyAccountId === a.id);
+          return { label: mapped ? `${mapped.code} · ${reportAccountName(mapped.name)}` : reportAccountName(a.name), sub: `${a.type.toUpperCase()} · ${label('Opening balance', 'প্রারম্ভিক স্থিতি')} ${m(a.adjustedOpeningBalance ?? a.openingBalance)} · ${fd(a.openingDate)}`, right: m(a.balance), neg: a.balance < 0 };
+        }) }],
+        total: { label: label('Total cash and bank', 'মোট নগদ ও ব্যাংক'), value: m(totalLiquidMoney), neg: totalLiquidMoney < 0 },
+        note: label('This statement shows current account balances. Select an account row to open its general ledger.', 'এই বিবরণীতে বর্তমান অ্যাকাউন্টের স্থিতি দেখানো হয়েছে। সাধারণ খতিয়ান খুলতে অ্যাকাউন্টের সারি নির্বাচন করুন।'),
+        printedAt: printedAtStamp(lang), printLabel: lang === 'bn' ? 'প্রিন্ট করুন' : 'Print' });
+    } catch (e) { showEntryError(lang, e instanceof Error ? e.message : label('Could not load the cash and bank statement.', 'নগদ ও ব্যাংক বিবরণী লোড করা যায়নি।')); }
+  };
 
   const printCashFlow = async () => {
     const flow = await api.cashflow(flt.from, flt.to);
@@ -509,35 +680,42 @@ export function AccountsDashboard({ go, focus, onFocusDone }: AccountsDashboardP
       printedAt: printedAtStamp(lang), printLabel: lang === 'bn' ? 'প্রিন্ট / PDF সংরক্ষণ' : 'Print / Save PDF' });
   };
 
-  const printBalanceSheet = async () => {
-    const b = await api.balanceSheet(td);
+  const printBalanceSheet = async (asOf = td) => {
+    setBalanceSheetAsOf(asOf);
+    const [b, ledger] = await Promise.all([api.balanceSheet(asOf), api.generalLedger('0001-01-01', asOf)]);
+    setGeneralLedgerData(ledger);
+    setSelectedLedgerAccount(null);
     setReportViewDoc({ language: lang, shop: business.name, title: label('Balance sheet', 'উদ্বৃত্তপত্র'), period: `${label('As of', 'তারিখ')} ${b.asOf}`,
       sections: [
-        { title: lang === 'bn' ? 'সম্পদ' : 'Assets', rows: [
-          ...(b.accounts ? b.accounts.assets.map(account => ({ label: `${account.code} · ${account.name}`, right: m(account.balance) })) : [
+        { title: label('Assets', 'সম্পদ'), rows: [
+          ...(b.accounts ? b.accounts.assets.map(account => ({ label: account.code ? `${account.code} ${String.fromCharCode(183)} ${reportAccountName(account.name)}` : reportAccountName(account.name), right: m(account.balance), neg: account.balance < 0 })) : [
             ...(b.assets.cash !== null ? [{ label: lang === 'bn' ? 'নগদ' : 'Cash', right: m(b.assets.cash) }] : []),
             ...(b.assets.bank !== null ? [{ label: lang === 'bn' ? 'ব্যাংক' : 'Bank', right: m(b.assets.bank) }] : []),
-            ...(b.assets.wallets !== null ? [{ label: lang === 'bn' ? 'মোবাইল ওয়ালেট' : 'Digital wallets', right: m(b.assets.wallets) }] : []),
             { label: lang === 'bn' ? 'গ্রাহকের পাওনা' : 'Receivables', right: m(b.assets.receivables) },
             { label: lang === 'bn' ? 'মজুদ' : 'Inventory', right: m(b.assets.inventory) },
             ...(b.assets.other ? [{ label: lang === 'bn' ? 'অন্যান্য সম্পদ' : 'Other assets', right: m(b.assets.other) }] : []),
           ]),
-          { label: lang === 'bn' ? 'মোট সম্পদ' : 'Total assets', right: m(b.assets.total), bold: true },
+          { label: label('Total assets', 'মোট সম্পদ'), right: m(b.assets.total), bold: true },
         ] },
-        { title: lang === 'bn' ? 'দায় ও মালিকানা' : 'Liabilities and equity', rows: [
-          ...(b.accounts ? b.accounts.liabilities.map(account => ({ label: `${account.code} · ${account.name}`, right: m(account.balance) })) : [
+        { title: label('Liabilities', 'দায়'), rows: [
+          ...(b.accounts ? b.accounts.liabilities.map(account => ({ label: account.code ? `${account.code} ${String.fromCharCode(183)} ${reportAccountName(account.name)}` : reportAccountName(account.name), right: m(account.balance), neg: account.balance < 0 })) : [
             { label: lang === 'bn' ? 'সরবরাহকারীর দেনা' : 'Payables', right: m(b.liabilities.payables) },
-            ...(b.liabilities.other ? [{ label: lang === 'bn' ? 'অন্যান্য দায়' : 'Other liabilities', right: m(b.liabilities.other) }] : []),
+            ...(b.liabilities.other ? [{ label: lang === 'bn' ? 'অন্যান্য দায়' : 'Other liabilities', right: m(b.liabilities.other) }] : []),
           ]),
-          ...(b.accounts ? b.accounts.equity.map(account => ({ label: account.code ? `${account.code} · ${account.name}` : account.name, right: m(account.balance) })) : [
+          { label: label('Total liabilities', 'মোট দায়'), right: m(b.liabilities.total), bold: true },
+        ] },
+        { title: label('Equity', 'মালিকানা'), rows: [
+          ...(b.accounts ? b.accounts.equity.map(account => ({ label: account.code ? `${account.code} ${String.fromCharCode(183)} ${reportAccountName(account.name)}` : reportAccountName(account.name), right: m(account.balance), neg: account.balance < 0 })) : [
             { label: lang === 'bn' ? 'জার্নালে নথিভুক্ত মালিকানা' : 'Owner equity from journal entries', right: m(b.journalEquity) },
             { label: lang === 'bn' ? 'অবশিষ্ট লাভ ও অন্যান্য মালিকানা' : 'Retained earnings and other equity', right: m(b.otherEquity) },
           ]),
-          { label: lang === 'bn' ? 'মোট মালিকানা' : 'Total equity', right: m(b.equity), bold: true },
-          { label: lang === 'bn' ? 'মোট দায় ও মালিকানা' : 'Total liabilities and equity', right: m(b.totalLiabilitiesAndEquity), bold: true },
+          { label: label('Total equity', 'মোট মালিকানা'), right: m(b.equity), bold: true },
+        ] },
+        { title: label('Liabilities + Equity', 'দায় + মালিকানা'), rows: [
+          { label: label('Total liabilities and equity', 'মোট দায় ও মালিকানা'), right: m(b.totalLiabilitiesAndEquity), bold: true },
         ] },
       ], note: lang === 'bn' ? 'জার্নাল এন্ট্রিতে সরাসরি নথিভুক্ত মালিকানা আলাদা দেখানো হয়েছে; অবশিষ্ট অংশ সমীকরণ মেলাতে লাভ ও অন্যান্য মালিকানা হিসেবে দেখানো হয়।' : 'Journal-posted owner equity is shown separately. The remaining amount includes retained earnings and other equity needed to reconcile the accounting equation.',
-      total: { label: lang === 'bn' ? 'হিসাব সমতা' : 'Accounting equation', value: b.balanced ? (lang === 'bn' ? 'মিলেছে' : 'Balanced') : (lang === 'bn' ? 'মেলেনি' : 'Out of balance') }, printedAt: printedAtStamp(lang), printLabel: lang === 'bn' ? 'প্রিন্ট / PDF সংরক্ষণ' : 'Print / Save PDF' });
+      total: { label: lang === 'bn' ? 'হিসাব সমতা' : 'Accounting equation', value: b.balanced ? (lang === 'bn' ? 'মিলেছে' : 'Balanced') : (lang === 'bn' ? 'মেলেনি' : 'Out of balance'), neg: !b.balanced }, printedAt: printedAtStamp(lang), printLabel: lang === 'bn' ? 'প্রিন্ট / PDF সংরক্ষণ' : 'Print / Save PDF' });
   };
 
   const journalEntriesReportDoc = (j: JournalEntries): ReportDoc => {
@@ -585,12 +763,12 @@ export function AccountsDashboard({ go, focus, onFocusDone }: AccountsDashboardP
 
   const ledgerReportDoc = (g: GeneralLedger, account?: GeneralLedger['accounts'][number]): ReportDoc => {
     const sideAmount = (amount: number) => `${m(Math.abs(amount))} ${amount < 0 ? label('Cr', 'ক্রেডিট') : label('Dr', 'ডেবিট')}`;
-    const sections: ReportDoc['sections'] = account ? [{ title: `${account.code} · ${account.account}`, rows: [
+    const sections: ReportDoc['sections'] = account ? [{ title: `${account.code} · ${reportAccountName(account.account)}`, rows: [
       { label: lang === 'bn' ? 'প্রারম্ভিক স্থিতি' : 'Opening balance', right: sideAmount(account.openingBalance), bold: true },
       ...account.rows.map(r => ({ label: r.journalNo, sub: `${r.date} · ${r.reference} · ${r.description}`, right: `${r.debit ? `${label('Dr', 'ডেবিট')} ${m(r.debit)}` : `${label('Cr', 'ক্রেডিট')} ${m(r.credit)}`} · ${sideAmount(r.runningBalance)}` })),
       { label: lang === 'bn' ? 'সমাপনী স্থিতি' : 'Closing balance', right: sideAmount(account.closingBalance), bold: true },
     ] }] : [{ title: lang === 'bn' ? 'অ্যাকাউন্ট সারাংশ' : 'Account summary', rows: g.accounts.map(a => ({
-      label: `${a.code} · ${a.account}`, sub: `${lang === 'bn' ? 'প্রারম্ভিক' : 'Opening'} ${sideAmount(a.openingBalance)} · ${lang === 'bn' ? 'ডেবিট' : 'Dr'} ${m(a.periodDebit)} · ${lang === 'bn' ? 'ক্রেডিট' : 'Cr'} ${m(a.periodCredit)}`,
+      label: `${a.code} · ${reportAccountName(a.account)}`, sub: `${lang === 'bn' ? 'প্রারম্ভিক' : 'Opening'} ${sideAmount(a.openingBalance)} · ${lang === 'bn' ? 'ডেবিট' : 'Dr'} ${m(a.periodDebit)} · ${lang === 'bn' ? 'ক্রেডিট' : 'Cr'} ${m(a.periodCredit)}`,
       right: sideAmount(a.closingBalance),
     })) }];
     return { language: lang, shop: business.name, title: label('General ledger', 'সাধারণ খতিয়ান'), period: formatPeriodLabel(g.from, g.to), sections,
@@ -598,10 +776,23 @@ export function AccountsDashboard({ go, focus, onFocusDone }: AccountsDashboardP
       printedAt: printedAtStamp(lang), printLabel: lang === 'bn' ? 'প্রিন্ট / PDF সংরক্ষণ' : 'Print / Save PDF' };
   };
 
+  const openChartLedger = async (chartAccount: ChartAccountRow) => {
+    try {
+      const g = await api.generalLedger('0001-01-01', today());
+      const account = g.accounts.find(item => item.code === chartAccount.code);
+      if (!account) throw new Error(label('No ledger account found.', 'খতিয়ানে অ্যাকাউন্ট পাওয়া যায়নি।'));
+      setGeneralLedgerData(g);
+      setLedgerFrom(g.from); setLedgerTo(g.to);
+      setSelectedLedgerAccount(account.account);
+      setChartModalOpen(false);
+      setReportViewDoc(ledgerReportDoc(g, account));
+    } catch (e) { showEntryError(lang, e instanceof Error ? e.message : label('Could not open the general ledger.', 'সাধারণ খতিয়ান খোলা যায়নি।')); }
+  };
+
   const printGeneralLedger = async () => {
     const from = ledgerFrom || presetRange('thisMonth', today()).from;
     const to = ledgerTo || presetRange('thisMonth', today()).to;
-    const g = await api.generalLedger(from, to);
+    const g = await api.generalLedger(from, to, ledgerJournalFilter);
     setGeneralLedgerData(g);
     setSelectedLedgerAccount(null);
     setReportViewDoc(ledgerReportDoc(g));
@@ -610,12 +801,23 @@ export function AccountsDashboard({ go, focus, onFocusDone }: AccountsDashboardP
   const applyGeneralLedgerDateFilter = async () => {
     try {
       if (!ledgerFrom || !ledgerTo || ledgerFrom > ledgerTo) throw new Error('invalid date range');
-      const g = await api.generalLedger(ledgerFrom, ledgerTo);
+      const g = await api.generalLedger(ledgerFrom, ledgerTo, ledgerJournalFilter);
       setGeneralLedgerData(g);
       setSelectedLedgerAccount(null);
       setReportViewDoc(ledgerReportDoc(g));
     } catch {
       showEntryError(lang, lang === 'bn' ? 'YYYY-MM-DD ফরম্যাটে শুরু ও শেষ তারিখ দিন।' : 'Enter valid start and end dates in YYYY-MM-DD format.');
+    }
+  };
+
+  const applyLedgerPreset = async (range: AcctFilter) => {
+    setLedgerFrom(range.from); setLedgerTo(range.to);
+    try {
+      const g = await api.generalLedger(range.from, range.to, ledgerJournalFilter);
+      setGeneralLedgerData(g); setSelectedLedgerAccount(null); setExpandedLedgerAccounts(new Set());
+      setReportViewDoc(ledgerReportDoc(g));
+    } catch (error) {
+      showEntryError(lang, error instanceof Error ? error.message : label('Could not load the general ledger.', 'সাধারণ খতিয়ান লোড করা যায়নি।'));
     }
   };
 
@@ -969,14 +1171,21 @@ export function AccountsDashboard({ go, focus, onFocusDone }: AccountsDashboardP
             { label: label('Net cash flow', 'নিট নগদ প্রবাহ'), right: m(flow.netCashFlow), neg: flow.netCashFlow < 0, bold: true },
           ]);
         } else if (type === 'profitLoss') {
-          const finance = await api.finance('range', from, to);
-          addSection(type, [
-            { label: label('Net sales', 'নিট বিক্রয়'), right: m(finance.netSales) },
-            { label: label('Cost of goods sold', 'বিক্রিত পণ্যের খরচ'), right: m(finance.cogs), neg: true },
-            { label: label('Gross profit', 'মোট মুনাফা'), right: m(finance.grossProfit), bold: true },
-            { label: label('Expenses', 'ব্যয়'), right: m(finance.expense), neg: true },
-            { label: label('Net profit', 'নিট লাভ'), right: m(finance.netProfit), neg: finance.netProfit < 0, bold: true },
-          ]);
+          const ledger = await api.generalLedger(from, to);
+          const statement = classifyProfitLossAccounts(ledger);
+          const accountRows = (accounts: ProfitLossAccountAmount[]) => accounts.map(account => ({ label: `${account.code} · ${reportAccountName(account.account)}`, sub: label('Chart of accounts', 'হিসাবের চার্ট'), right: m(account.amount), neg: account.amount < 0 }));
+          const totalRow = (title: string, amount: number, negative = false) => ({ label: title, right: m(amount), neg: negative || amount < 0, bold: true });
+          sections.push(
+            { title: label('Income accounts', 'আয় হিসাব'), rows: [...accountRows(statement.income), totalRow(label('Total income', 'মোট আয়'), statement.totalIncome)] },
+            { title: label('Cost of sales accounts', 'বিক্রিত পণ্যের খরচের হিসাব'), rows: [...accountRows(statement.costOfSales), totalRow(label('Total cost of sales', 'মোট বিক্রয় খরচ'), statement.totalCostOfSales, true)] },
+            { title: label('Operating and other expense accounts', 'পরিচালন ও অন্যান্য ব্যয়ের হিসাব'), rows: [...accountRows(statement.operatingExpenses), totalRow(label('Total operating and other expenses', 'মোট পরিচালন ও অন্যান্য ব্যয়'), statement.totalOperatingExpenses, true)] },
+            { title: label('Statement summary', 'বিবরণীর সারাংশ'), rows: [
+              totalRow(label('Total income', 'মোট আয়'), statement.totalIncome),
+              totalRow(label('Cost of sales', 'বিক্রয় খরচ'), statement.totalCostOfSales, true),
+              totalRow(label('Operating and other expenses', 'পরিচালন ও অন্যান্য ব্যয়'), statement.totalOperatingExpenses, true),
+              totalRow(label('Net profit / (loss)', 'নিট মুনাফা / (ক্ষতি)'), statement.netProfit),
+            ] },
+          );
         } else if (type === 'journal') {
           const journal = await api.journalEntries(from, to);
           addSection(type, journal.entries.flatMap(entry => entry.lines.map(line => ({ label: `${entry.reference} · ${line.account}`, sub: `${entry.date} · ${line.description}`, right: `${line.debit ? `${label('Dr', 'ডেবিট')} ${m(line.debit)}` : ''}${line.debit && line.credit ? ' · ' : ''}${line.credit ? `${label('Cr', 'ক্রেডিট')} ${m(line.credit)}` : ''}` }))));
@@ -998,8 +1207,8 @@ export function AccountsDashboard({ go, focus, onFocusDone }: AccountsDashboardP
     } finally { setReportGenerating(false); }
   };
 
-  if (reportCenterOpen) return <View style={{ flex: 1, backgroundColor: '#F1F5F9' }}>
-    <View style={{ backgroundColor: '#123D64', paddingHorizontal: 18, paddingVertical: 15, flexDirection: 'row', alignItems: 'center', gap: 12 }}>
+  if (reportCenterOpen) return <View style={{ flex: 1, backgroundColor: 'transparent' }}>
+    <View style={{ backgroundColor: color.primaryDark, paddingHorizontal: 18, paddingVertical: 15, flexDirection: 'row', alignItems: 'center', gap: 12 }}>
       <TouchableOpacity accessibilityRole="button" onPress={() => { setReportCenterOpen(false); setGeneratedReport(null); }} style={{ paddingVertical: 8, paddingRight: 6 }}><Text style={{ color: '#FFFFFF', fontSize: 16, fontWeight: '700' }}>‹ {label('Back', 'ফিরে যান')}</Text></TouchableOpacity>
       <View style={{ flex: 1 }}><Text style={{ color: '#FFFFFF', fontSize: 21, fontWeight: '800' }}>{label('Report center', 'রিপোর্ট কেন্দ্র')}</Text><Text style={{ color: '#D6E7F5', fontSize: 12 }}>{label('Choose multiple reports and apply shared filters.', 'একাধিক রিপোর্ট বেছে নিয়ে সাধারণ ফিল্টার প্রয়োগ করুন।')}</Text></View>
     </View>
@@ -1050,9 +1259,23 @@ export function AccountsDashboard({ go, focus, onFocusDone }: AccountsDashboardP
   });
   const isProfitLossReport = reportViewDoc?.title === 'Profit & Loss Statement' || reportViewDoc?.title === 'লাভ-ক্ষতির বিবরণী';
   const isGeneralLedgerReport = reportViewDoc?.title === 'General ledger' || reportViewDoc?.title === 'সাধারণ খতিয়ান';
+  const isBalanceSheetReport = reportViewDoc?.title === 'Balance sheet' || reportViewDoc?.title === 'উদ্বৃত্তপত্র';
+  const visibleLedgerAccounts = (generalLedgerData?.accounts ?? []).filter(account => {
+    const query = ledgerSearch.trim().toLocaleLowerCase();
+    if (!query) return true;
+    return `${account.code} ${account.account} ${account.rows.map(row => `${row.reference} ${row.journalNo} ${row.description}`).join(' ')}`.toLocaleLowerCase().includes(query);
+  });
+  const ledgerExport = () => {
+    if (!generalLedgerData) return;
+    const selected = selectedLedgerAccount ? generalLedgerData.accounts.find(account => account.account === selectedLedgerAccount) : undefined;
+    const exportData = { ...generalLedgerData, accounts: selected ? [selected] : visibleLedgerAccounts };
+    downloadReportCSV(ledgerReportDoc(exportData, selected), `general_ledger_${exportData.from}_${exportData.to}.csv`);
+  };
+
+  if (reportViewDoc && isGeneralLedgerReport) return <GeneralLedgerReportView key={`${generalLedgerData?.from ?? ''}:${generalLedgerData?.to ?? ''}`} initial={generalLedgerData} onBack={() => setReportViewDoc(null)} />;
 
   if (reportViewDoc) return (<>
-    <View style={{ flex: 1, backgroundColor: '#F1F5F9' }}>
+    <View style={{ flex: 1, backgroundColor: 'transparent' }}>
       <View style={{ backgroundColor: '#FFFFFF', paddingHorizontal: 18, paddingTop: 14, paddingBottom: 14, borderBottomWidth: 1, borderBottomColor: '#E2E8F0' }}>
         <TouchableOpacity onPress={() => setReportViewDoc(null)} accessibilityRole="button" style={{ paddingVertical: 8, alignSelf: 'flex-start' }}>
           <Text style={{ color: '#1D4ED8', fontSize: 15, fontWeight: '700' }}>‹ {lang === 'bn' ? 'রিপোর্টসমূহে ফিরুন' : 'Back to reports'}</Text>
@@ -1063,6 +1286,9 @@ export function AccountsDashboard({ go, focus, onFocusDone }: AccountsDashboardP
             <Text style={{ color: '#64748B', fontSize: 13, marginTop: 3 }}>{reportViewDoc.period}</Text>
           </View>
           <View style={{ flexDirection: 'row', gap: 9 }}>
+            {isGeneralLedgerReport && <TouchableOpacity accessibilityRole="button" onPress={ledgerExport} style={{ backgroundColor: '#ECFDF5', borderWidth: 1, borderColor: '#A7F3D0', borderRadius: 10, paddingHorizontal: 14, paddingVertical: 11 }}>
+              <Text style={{ color: '#047857', fontWeight: '700' }}>{lang === 'bn' ? 'এক্সেল / CSV' : 'Excel / CSV'}</Text>
+            </TouchableOpacity>}
             <TouchableOpacity accessibilityRole="button" onPress={() => { if (!previewReport(reportViewDoc)) Alert.alert(lang === 'bn' ? 'প্রিভিউ খোলা যায়নি' : 'Could not open preview', lang === 'bn' ? 'পপ-আপ অনুমতি দিন এবং আবার চেষ্টা করুন।' : 'Allow the preview window and try again.'); }} style={{ backgroundColor: '#FFFFFF', borderWidth: 1, borderColor: '#1D4ED8', borderRadius: 10, paddingHorizontal: 16, paddingVertical: 11 }}>
               <Text style={{ color: '#1D4ED8', fontWeight: '700' }}>{lang === 'bn' ? 'প্রিভিউ' : 'Preview'}</Text>
             </TouchableOpacity>
@@ -1072,8 +1298,8 @@ export function AccountsDashboard({ go, focus, onFocusDone }: AccountsDashboardP
           </View>
         </View>
       </View>
-      <ScrollView contentContainerStyle={{ width: '100%', maxWidth: 960, alignSelf: 'center', padding: 18, gap: 14 }}>
-        <View style={{ backgroundColor: '#FFFFFF', borderRadius: 16, padding: 22, borderWidth: 1, borderColor: '#E2E8F0' }}>
+      <ScrollView contentContainerStyle={{ width: '100%', maxWidth: isBalanceSheetReport ? 820 : 960, alignSelf: 'center', padding: 18, gap: 14 }}>
+        <View style={{ backgroundColor: '#FFFFFF', borderRadius: 16, padding: isBalanceSheetReport ? 16 : 22, borderWidth: 1, borderColor: '#E2E8F0' }}>
           <Text style={{ color: '#0F172A', textAlign: 'center', fontSize: 19, fontWeight: '800' }}>{reportViewDoc.shop}</Text>
           <Text style={{ color: '#475569', textAlign: 'center', fontSize: 13, marginTop: 5 }}>{reportViewDoc.period}</Text>
           {(reportViewDoc.meta ?? []).map((item, index) => <Text key={`meta-${index}`} style={{ color: '#475569', marginTop: 10 }}>{item.label}: {item.value}</Text>)}
@@ -1161,10 +1387,28 @@ export function AccountsDashboard({ go, focus, onFocusDone }: AccountsDashboardP
             <View style={{ flex: 1, minWidth: 145 }}><DateField label={lang === 'bn' ? 'শেষ তারিখ' : 'To date'} value={profitTo} onChange={setProfitTo} clearable minDate={profitFrom || undefined} /></View>
             <TouchableOpacity accessibilityRole="button" onPress={() => { void applyProfitLossDateFilter(); }} style={{ backgroundColor: '#1D4ED8', borderRadius: 8, paddingHorizontal: 17, paddingVertical: 12 }}><Text style={{ color: '#FFFFFF', fontWeight: '700' }}>{lang === 'bn' ? 'ফিল্টার করুন' : 'Apply filter'}</Text></TouchableOpacity>
           </View>}
-          {isGeneralLedgerReport && <View style={{ flexDirection: 'row', alignItems: 'flex-end', flexWrap: 'wrap', gap: 10, marginTop: 18, padding: 14, borderRadius: 12, backgroundColor: '#F8FAFC', borderWidth: 1, borderColor: '#E2E8F0' }}>
-            <View style={{ flex: 1, minWidth: 145 }}><DateField label={lang === 'bn' ? 'শুরুর তারিখ' : 'From date'} value={ledgerFrom} onChange={setLedgerFrom} clearable /></View>
-            <View style={{ flex: 1, minWidth: 145 }}><DateField label={lang === 'bn' ? 'শেষ তারিখ' : 'To date'} value={ledgerTo} onChange={setLedgerTo} clearable minDate={ledgerFrom || undefined} /></View>
-            <TouchableOpacity accessibilityRole="button" onPress={() => { void applyGeneralLedgerDateFilter(); }} style={{ backgroundColor: '#1D4ED8', borderRadius: 8, paddingHorizontal: 17, paddingVertical: 12 }}><Text style={{ color: '#FFFFFF', fontWeight: '700' }}>{lang === 'bn' ? 'ফিল্টার করুন' : 'Apply filter'}</Text></TouchableOpacity>
+          {isBalanceSheetReport && <View style={{ marginTop: 18, padding: 16, borderRadius: 12, backgroundColor: '#F8FAFC', borderWidth: 1, borderColor: '#E2E8F0', flexDirection: 'row', flexWrap: 'wrap', alignItems: 'flex-end', gap: 12 }}>
+            <View style={{ flex: 1, minWidth: 220, marginBottom: -10 }}><DateField label={label('As of date', 'তারিখ পর্যন্ত')} value={balanceSheetAsOf} onChange={setBalanceSheetAsOf} clearable /></View>
+            <TouchableOpacity accessibilityRole="button" disabled={!balanceSheetAsOf} onPress={() => { void printBalanceSheet(balanceSheetAsOf).catch(() => Alert.alert(label('Could not load Balance Sheet', 'উদ্বৃত্তপত্র লোড করা যায়নি'))); }} style={{ minHeight: 48, justifyContent: 'center', paddingHorizontal: 20, borderRadius: 10, backgroundColor: '#2563EB', opacity: balanceSheetAsOf ? 1 : 0.55 }}><Text style={{ color: '#FFFFFF', fontSize: 15, fontWeight: '700' }}>{label('Apply date', 'তারিখ প্রয়োগ করুন')}</Text></TouchableOpacity>
+          </View>}
+          {isGeneralLedgerReport && <View style={{ marginTop: 18, padding: 14, borderRadius: 12, backgroundColor: '#F8FAFC', borderWidth: 1, borderColor: '#E2E8F0', gap: 12 }}>
+            <View style={{ flexDirection: 'row', alignItems: 'flex-end', flexWrap: 'wrap', gap: 10 }}>
+              <View style={{ flex: 1, minWidth: 145 }}><DateField label={lang === 'bn' ? 'শুরুর তারিখ' : 'From date'} value={ledgerFrom} onChange={setLedgerFrom} clearable /></View>
+              <View style={{ flex: 1, minWidth: 145 }}><DateField label={lang === 'bn' ? 'শেষ তারিখ' : 'To date'} value={ledgerTo} onChange={setLedgerTo} clearable minDate={ledgerFrom || undefined} /></View>
+              <TouchableOpacity accessibilityRole="button" onPress={() => { void applyGeneralLedgerDateFilter(); }} style={{ backgroundColor: '#2563EB', borderRadius: 9, minHeight: 42, justifyContent: 'center', paddingHorizontal: 18 }}><Text style={{ color: '#FFFFFF', fontWeight: '700' }}>{lang === 'bn' ? 'ফিল্টার করুন' : 'Apply filters'}</Text></TouchableOpacity>
+            </View>
+            <View style={{ flexDirection: 'row', flexWrap: 'wrap', alignItems: 'center', gap: 7 }}>
+              {([['last7', 'Last 7 days'], ['thisMonth', 'This month'], ['last3m', 'Last 3 months'], ['thisYear', 'This year']] as const).map(([key, title]) => {
+                const range = presetRange(key, today()); const selected = range.from === ledgerFrom && range.to === ledgerTo;
+                return <TouchableOpacity key={key} accessibilityRole="button" onPress={() => { void applyLedgerPreset(range); }} style={{ paddingHorizontal: 11, paddingVertical: 7, borderRadius: 8, backgroundColor: selected ? '#EAF2FF' : '#FFFFFF', borderWidth: 1, borderColor: selected ? '#93C5FD' : '#CBD5E1' }}><Text style={{ color: selected ? '#1D4ED8' : '#475569', fontSize: 12, fontWeight: '700' }}>{label(title, key === 'last7' ? 'গত ৭ দিন' : key === 'thisMonth' ? 'এই মাস' : key === 'last3m' ? 'গত ৩ মাস' : 'এই বছর')}</Text></TouchableOpacity>;
+              })}
+            </View>
+            <View style={{ flexDirection: 'row', flexWrap: 'wrap', alignItems: 'center', gap: 7 }}>
+              <Text style={{ color: '#64748B', fontSize: 12, fontWeight: '700', marginRight: 3 }}>{label('Journals', 'জার্নাল')}:</Text>
+              {([['all', 'All journals'], ['manual', 'Manual entries'], ['automatic', 'Automatic postings']] as const).map(([key, title]) => <TouchableOpacity key={key} accessibilityRole="button" accessibilityState={{ selected: ledgerJournalFilter === key }} onPress={() => setLedgerJournalFilter(key)} style={{ paddingHorizontal: 10, paddingVertical: 7, borderRadius: 8, backgroundColor: ledgerJournalFilter === key ? '#EAF2FF' : '#FFFFFF', borderWidth: 1, borderColor: ledgerJournalFilter === key ? '#93C5FD' : '#CBD5E1' }}><Text style={{ color: ledgerJournalFilter === key ? '#1D4ED8' : '#475569', fontSize: 12, fontWeight: '700' }}>{label(title, key === 'all' ? 'সব জার্নাল' : key === 'manual' ? 'ম্যানুয়াল এন্ট্রি' : 'স্বয়ংক্রিয় পোস্টিং')}</Text></TouchableOpacity>)}
+              <View style={{ marginLeft: 'auto', paddingHorizontal: 10, paddingVertical: 7, borderRadius: 8, backgroundColor: '#ECFDF5', borderWidth: 1, borderColor: '#A7F3D0' }}><Text style={{ color: '#047857', fontSize: 12, fontWeight: '700' }}>{label('Posted entries only', 'শুধু পোস্ট করা এন্ট্রি')}</Text></View>
+            </View>
+            <TextInput value={ledgerSearch} onChangeText={setLedgerSearch} placeholder={label('Search accounts, references, journal numbers…', 'অ্যাকাউন্ট, রেফারেন্স বা জার্নাল নম্বর খুঁজুন…')} placeholderTextColor="#94A3B8" style={{ minHeight: 42, borderWidth: 1, borderColor: '#CBD5E1', backgroundColor: '#FFFFFF', borderRadius: 9, paddingHorizontal: 12, color: '#0F172A', fontSize: 13 }} />
           </View>}
           {isGeneralLedgerReport && generalLedgerData ? (
             selectedLedgerAccount ? (() => {
@@ -1176,7 +1420,7 @@ export function AccountsDashboard({ go, focus, onFocusDone }: AccountsDashboardP
                 <TouchableOpacity accessibilityRole="button" onPress={() => { setSelectedLedgerAccount(null); setReportViewDoc(ledgerReportDoc(generalLedgerData)); }} style={{ alignSelf: 'flex-start', paddingVertical: 7, paddingHorizontal: 11, borderRadius: 8, backgroundColor: '#EFF6FF', marginBottom: 12 }}>
                   <Text style={{ color: '#1D4ED8', fontWeight: '700' }}>‹ {lang === 'bn' ? 'সকল অ্যাকাউন্ট' : 'All accounts'}</Text>
                 </TouchableOpacity>
-                <Text style={{ color: '#123B5D', fontSize: 17, fontWeight: '800', marginBottom: 4 }}>{account.code} · {account.account}</Text>
+                <Text style={{ color: '#123B5D', fontSize: 17, fontWeight: '800', marginBottom: 4 }}>{account.code} · {reportAccountName(account.account)}</Text>
                 <Text style={{ color: '#64748B', marginBottom: 14 }}>{lang === 'bn' ? 'প্রারম্ভিক স্থিতি' : 'Opening balance'}: {side(account.openingBalance)}</Text>
                 <View style={{ flexDirection: 'row', paddingVertical: 9, borderBottomWidth: 2, borderBottomColor: '#CBD5E1' }}>
                   <Text style={[compactHeader, { flex: 4 }]}>{lang === 'bn' ? 'জার্নাল / তারিখ / বিবরণ' : 'Journal / date / details'}</Text>
@@ -1203,7 +1447,7 @@ export function AccountsDashboard({ go, focus, onFocusDone }: AccountsDashboardP
                 <Text style={{ color: '#475569', fontSize: 11, fontWeight: '800' }}>{label('PERIOD DEBIT / CREDIT · CLOSING BALANCE', 'সময়ের ডেবিট / ক্রেডিট · সমাপনী স্থিতি')}</Text>
               </View>
               {generalLedgerData.accounts.map(account => <TouchableOpacity key={account.account} accessibilityRole="button" onPress={() => { setSelectedLedgerAccount(account.account); setReportViewDoc(ledgerReportDoc(generalLedgerData, account)); }} style={{ backgroundColor: '#FFFFFF', borderBottomWidth: 1, borderBottomColor: '#E2E8F0', paddingHorizontal: 12, paddingVertical: 11, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 12 }}>
-                <View style={{ flex: 1 }}><Text style={{ color: '#1D4ED8', fontSize: 12, fontWeight: '800' }}>{account.code}</Text><Text style={{ color: '#0F172A', fontWeight: '700', marginTop: 2 }}>{account.account}</Text><Text style={{ color: '#64748B', fontSize: 11, marginTop: 3 }}>{lang === 'bn' ? 'ডেবিট' : 'Dr'} {m(account.periodDebit)} · {lang === 'bn' ? 'ক্রেডিট' : 'Cr'} {m(account.periodCredit)}</Text></View>
+                <View style={{ flex: 1 }}><Text style={{ color: '#1D4ED8', fontSize: 12, fontWeight: '800' }}>{account.code}</Text><Text style={{ color: '#0F172A', fontWeight: '700', marginTop: 2 }}>{reportAccountName(account.account)}</Text><Text style={{ color: '#64748B', fontSize: 11, marginTop: 3 }}>{lang === 'bn' ? 'ডেবিট' : 'Dr'} {m(account.periodDebit)} · {lang === 'bn' ? 'ক্রেডিট' : 'Cr'} {m(account.periodCredit)}</Text></View>
                 <View style={{ alignItems: 'flex-end' }}><Text style={{ color: '#0F172A', fontWeight: '800' }}>{m(account.netBalance)} {account.balanceSide}</Text><Text style={{ color: '#1D4ED8', fontSize: 12, fontWeight: '700', marginTop: 5 }}>{lang === 'bn' ? 'খুলুন' : 'View account'} ›</Text></View>
               </TouchableOpacity>)}
               {!generalLedgerData.accounts.length && <Text style={{ color: '#64748B', paddingVertical: 18, textAlign: 'center' }}>{lang === 'bn' ? 'কোনো অ্যাকাউন্ট লেনদেন পাওয়া যায়নি।' : 'No account activity found.'}</Text>}
@@ -1211,35 +1455,33 @@ export function AccountsDashboard({ go, focus, onFocusDone }: AccountsDashboardP
           ) : !isJournalReport && <View style={{ marginTop: 18, borderWidth: 1, borderColor: '#DCE4EC', borderRadius: 8, overflow: 'hidden' }}>
             <View style={{ flexDirection: 'row', justifyContent: 'space-between', paddingHorizontal: 14, paddingVertical: 11, backgroundColor: '#F1F5F9', borderBottomWidth: 1, borderColor: '#DCE4EC' }}>
               <Text style={{ color: '#475569', fontSize: 11, fontWeight: '800' }}>{label('ACCOUNT / DESCRIPTION', 'অ্যাকাউন্ট / বিবরণ')}</Text>
-              <Text style={{ color: '#475569', fontSize: 11, fontWeight: '800' }}>{label('AMOUNT', 'পরিমাণ')}</Text>
+              <Text style={{ color: '#475569', fontSize: 11, fontWeight: '800' }}>{isBalanceSheetReport ? label('BALANCE', 'স্থিতি') : label('AMOUNT', 'পরিমাণ')}</Text>
             </View>
             {reportViewDoc.sections.map((section, sectionIndex) => (
             <View key={`section-${sectionIndex}`}>
-              {!!section.title && <View style={{ paddingHorizontal: 14, paddingVertical: 10, backgroundColor: '#F8FAFC', borderBottomWidth: 1, borderColor: '#E2E8F0' }}><Text style={{ color: '#123B5D', fontSize: 13, fontWeight: '800' }}>{section.title}</Text></View>}
+              {!!section.title && <View style={{ paddingHorizontal: 14, paddingVertical: isBalanceSheetReport ? 8 : 10, backgroundColor: isBalanceSheetReport ? '#E2E8F0' : '#F8FAFC', borderBottomWidth: 1, borderColor: '#E2E8F0', marginTop: isBalanceSheetReport ? 8 : 0 }}><Text style={{ color: '#123B5D', fontSize: isBalanceSheetReport ? 14 : 13, fontWeight: '800' }}>{section.title}</Text></View>}
               {section.rows.map((row, rowIndex) => (
                 (() => {
-                  const linkedAccount = isProfitLossReport && sectionIndex > 0
-                    ? generalLedgerData?.accounts.find(account => row.label.startsWith(`${account.code} · `))
-                    : undefined;
+                  const linkedAccount = generalLedgerData?.accounts.find(account => !!account.code && row.label.startsWith(account.code));
                   const rowContent = <>
-                    <View style={{ flex: 1 }}><Text style={{ color: '#1E293B', fontWeight: row.bold ? '800' : '500' }}>{row.label}</Text>{row.sub ? <Text style={{ color: '#64748B', fontSize: 12, marginTop: 2 }}>{row.sub}</Text> : null}</View>
-                    <View style={{ alignItems: 'flex-end' }}><Text style={{ color: row.neg ? '#DC2626' : '#0F172A', fontWeight: row.bold ? '800' : '600', textAlign: 'right' }}>{row.right}</Text>{linkedAccount ? <Text style={{ color: '#1D4ED8', fontSize: 11, fontWeight: '700', marginTop: 3 }}>{label('View ledger ›', 'খতিয়ান দেখুন ›')}</Text> : null}</View>
+                    <View style={{ flex: 1 }}><Text style={{ color: '#1E293B', fontSize: isBalanceSheetReport ? 14 : 14, fontWeight: row.bold ? '800' : '500' }}>{row.label}</Text>{row.sub ? <Text style={{ color: '#64748B', fontSize: 12, marginTop: 2 }}>{row.sub}</Text> : null}</View>
+                    <View style={{ alignItems: 'flex-end' }}><Text style={{ color: row.neg ? '#DC2626' : '#0F172A', fontSize: 14, fontWeight: row.bold ? '800' : '600', textAlign: 'right' }}>{row.right}</Text>{linkedAccount ? <Text style={{ color: '#1D4ED8', fontSize: 11, fontWeight: '700', marginTop: 3 }}>{label('View ledger ›', 'খতিয়ান দেখুন ›')}</Text> : null}</View>
                   </>;
-                  return linkedAccount ? <TouchableOpacity key={`row-${sectionIndex}-${rowIndex}`} accessibilityRole="button" onPress={() => { setSelectedLedgerAccount(linkedAccount.account); setReportViewDoc(ledgerReportDoc(generalLedgerData!, linkedAccount)); }} style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', gap: 14, paddingHorizontal: 14, paddingVertical: 11, backgroundColor: rowIndex % 2 ? '#FFFFFF' : '#FBFDFF', borderBottomWidth: 1, borderBottomColor: '#EEF2F6' }}>{rowContent}</TouchableOpacity>
-                    : <View key={`row-${sectionIndex}-${rowIndex}`} style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', gap: 14, paddingHorizontal: 14, paddingVertical: 11, backgroundColor: rowIndex % 2 ? '#FFFFFF' : '#FBFDFF', borderBottomWidth: 1, borderBottomColor: '#EEF2F6' }}>{rowContent}</View>;
+                  return linkedAccount ? <TouchableOpacity key={`row-${sectionIndex}-${rowIndex}`} accessibilityRole="button" onPress={() => { setSelectedLedgerAccount(linkedAccount.account); setReportViewDoc(ledgerReportDoc(generalLedgerData!, linkedAccount)); }} style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', gap: 14, paddingHorizontal: 14, paddingVertical: isBalanceSheetReport ? 8 : 11, backgroundColor: rowIndex % 2 ? '#FFFFFF' : '#FBFDFF', borderBottomWidth: 1, borderBottomColor: '#EEF2F6' }}>{rowContent}</TouchableOpacity>
+                    : <View key={`row-${sectionIndex}-${rowIndex}`} style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', gap: 14, paddingHorizontal: 14, paddingVertical: isBalanceSheetReport ? 8 : 11, backgroundColor: rowIndex % 2 ? '#FFFFFF' : '#FBFDFF', borderBottomWidth: 1, borderBottomColor: '#EEF2F6' }}>{rowContent}</View>;
                 })()
               ))}
             </View>
           ))}
           </View>}
-          {reportViewDoc.total && <View style={{ flexDirection: 'row', justifyContent: 'space-between', gap: 14, borderTopWidth: 2, borderTopColor: '#1D4ED8', marginTop: 16, paddingTop: 12 }}><Text style={{ color: '#0F172A', fontWeight: '800', flex: 1 }}>{reportViewDoc.total.label}</Text><Text style={{ color: reportViewDoc.total.neg ? '#DC2626' : '#0F172A', fontWeight: '800' }}>{reportViewDoc.total.value}</Text></View>}
+          {reportViewDoc.total && (!isBalanceSheetReport || reportViewDoc.total.neg) && <View style={{ flexDirection: 'row', justifyContent: 'space-between', gap: 14, borderTopWidth: 2, borderTopColor: reportViewDoc.total.neg ? '#DC2626' : '#1D4ED8', marginTop: 16, paddingTop: 12 }}><Text style={{ color: '#0F172A', fontWeight: '800', flex: 1 }}>{reportViewDoc.total.label}</Text><Text style={{ color: reportViewDoc.total.neg ? '#DC2626' : '#0F172A', fontWeight: '800' }}>{reportViewDoc.total.value}</Text></View>}
           {reportViewDoc.note ? <Text style={{ color: '#64748B', fontSize: 12, marginTop: 14, lineHeight: 18 }}>{reportViewDoc.note}</Text> : null}
           <Text style={{ color: '#94A3B8', fontSize: 11, textAlign: 'right', marginTop: 18 }}>{reportViewDoc.printedAt}</Text>
         </View>
       </ScrollView>
     </View>
     {journalComposer ? <JournalEntryModal initial={journalComposer.initial} onClose={() => setJournalComposer(null)} onSaved={() => { setJournalComposer(null); void applyJournalDateFilter(); }} /> : null}
-    {chartModalOpen ? <ChartOfAccountsModal onClose={() => setChartModalOpen(false)} onSaved={() => { setChartModalOpen(false); void applyJournalDateFilter(); }} /> : null}
+    {chartModalOpen ? <ChartOfAccountsModal onClose={() => setChartModalOpen(false)} onOpenLedger={openChartLedger} onSaved={() => { setChartModalOpen(false); void applyJournalDateFilter(); }} /> : null}
   </>);
 
   return (
@@ -1250,7 +1492,7 @@ export function AccountsDashboard({ go, focus, onFocusDone }: AccountsDashboardP
         <View style={styles.headerGlossSheen} pointerEvents="none" />
         <View style={styles.headerLeft}>
           <View style={styles.titleIconBadge}>
-            <AppIcon name={icons.accounts} size={22} iconColor="#FFFFFF" />
+            <AppIcon name={icons.accounts} size={22} iconColor="#2563EB" />
           </View>
           <View>
             <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
@@ -1266,11 +1508,11 @@ export function AccountsDashboard({ go, focus, onFocusDone }: AccountsDashboardP
         {/* Quick Action Toolbar */}
         <View style={styles.headerRight}>
           <TouchableOpacity style={styles.headerActionBtnWhite} onPress={() => setMoneyEntry('in')} activeOpacity={0.85}>
-            <AppIcon name={icons.moneyIn} size={16} iconColor="#168A64" />
+            <AppIcon name={icons.moneyIn} size={16} iconColor="#FFFFFF" />
             <Text style={styles.headerActionBtnWhiteText}>{lang === 'bn' ? 'জমা' : 'Deposit'}</Text>
           </TouchableOpacity>
           <TouchableOpacity style={styles.headerActionBtnTranslucent} onPress={() => setMoneyEntry('out')} activeOpacity={0.85}>
-            <AppIcon name={icons.moneyOut} size={16} iconColor="#FFFFFF" />
+            <AppIcon name={icons.moneyOut} size={16} iconColor="#2563EB" />
             <Text style={styles.headerActionBtnTranslucentText}>{lang === 'bn' ? 'উত্তোলন' : 'Withdraw'}</Text>
           </TouchableOpacity>
           <TouchableOpacity
@@ -1278,7 +1520,7 @@ export function AccountsDashboard({ go, focus, onFocusDone }: AccountsDashboardP
             onPress={() => setTransferModalOpen(true)}
             activeOpacity={0.85}
           >
-            <AppIcon name={icons.transfer} size={16} iconColor="#FFFFFF" />
+            <AppIcon name={icons.transfer} size={16} iconColor="#2563EB" />
             <Text style={styles.headerActionBtnTranslucentText}>
               {lang === 'bn' ? 'ফান্ড ট্রান্সফার' : 'Transfer'}
             </Text>
@@ -1289,7 +1531,7 @@ export function AccountsDashboard({ go, focus, onFocusDone }: AccountsDashboardP
             onPress={() => setReportCenterOpen(true)}
             activeOpacity={0.85}
           >
-            <AppIcon name={icons.print} size={16} iconColor="#FFFFFF" />
+            <AppIcon name={icons.print} size={16} iconColor="#2563EB" />
             <Text style={styles.headerActionBtnTranslucentText}>
               {lang === 'bn' ? 'রিপোর্ট' : 'Reports'}
             </Text>
@@ -2356,7 +2598,7 @@ export function AccountsDashboard({ go, focus, onFocusDone }: AccountsDashboardP
           onClose={() => setKpiModal(null)}
         />
       )}
-      {chartModalOpen ? <ChartOfAccountsModal onClose={() => setChartModalOpen(false)} onSaved={() => setChartModalOpen(false)} /> : null}
+      {chartModalOpen ? <ChartOfAccountsModal onClose={() => setChartModalOpen(false)} onOpenLedger={openChartLedger} onSaved={() => setChartModalOpen(false)} /> : null}
       {moneyEntry ? <MoneyEntry direction={moneyEntry} onClose={() => setMoneyEntry(null)} onSaved={async () => { await refresh(); setAccountRefresh(v => v + 1); }} /> : null}
       {transferModalOpen ? <MoneyTransferModal onClose={() => { setTransferModalOpen(false); setAccountRefresh(v => v + 1); }} /> : null}
     </ScrollView>
@@ -2365,39 +2607,37 @@ export function AccountsDashboard({ go, focus, onFocusDone }: AccountsDashboardP
 
 // STYLES
 const styles = StyleSheet.create({
-  reportIntroCard: { flexDirection: 'row', alignItems: 'center', gap: 14, padding: 18, borderRadius: 18, backgroundColor: '#EFF6FF', borderWidth: 1, borderColor: '#DBEAFE' },
+  reportIntroCard: { flexDirection: 'row', alignItems: 'center', gap: 14, padding: 18, borderRadius: 14, backgroundColor: '#EFF6FF', borderWidth: 1, borderColor: '#DBEAFE' },
   reportIntroIcon: { width: 46, height: 46, borderRadius: 14, backgroundColor: '#FFFFFF', alignItems: 'center', justifyContent: 'center' },
-  reportIntroTitle: { color: '#0F172A', fontSize: 17, fontWeight: '800' },
+  reportIntroTitle: { color: '#172554', fontSize: 17, fontWeight: '700' },
   reportIntroText: { color: '#475569', fontSize: 13, lineHeight: 19, marginTop: 3 },
   reportCardsGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: 14 },
-  reportCard: { flexGrow: 1, flexBasis: 230, minWidth: 210, padding: 18, borderRadius: 18, backgroundColor: '#FFFFFF', borderWidth: 1, borderColor: '#E2E8F0', shadowColor: '#0F172A', shadowOffset: { width: 0, height: 3 }, shadowOpacity: 0.05, shadowRadius: 8, ...(Platform.OS === 'web' ? ({ cursor: 'pointer' } as any) : {}) },
+  reportCard: { flexGrow: 1, flexBasis: 230, minWidth: 210, minHeight: 164, padding: 20, borderRadius: 16, backgroundColor: '#FFFFFF', borderWidth: 1, borderColor: '#E2E8F0', shadowColor: '#0F172A', shadowOffset: { width: 0, height: 3 }, shadowOpacity: 0.045, shadowRadius: 10, ...(Platform.OS === 'web' ? ({ cursor: 'pointer', transition: 'transform 180ms ease, box-shadow 180ms ease, border-color 180ms ease' } as any) : {}) },
   reportCardTop: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 14 },
   reportCardIcon: { width: 42, height: 42, borderRadius: 13, alignItems: 'center', justifyContent: 'center' },
-  reportCardTitle: { color: '#334155', fontSize: 14, fontWeight: '700' },
-  reportCardValue: { fontSize: 22, fontWeight: '800', marginTop: 9 },
+  reportCardTitle: { color: '#334155', fontSize: 14, fontWeight: '600' },
+  reportCardValue: { fontSize: 24, fontWeight: '700', marginTop: 9 },
   reportCardNote: { color: '#64748B', fontSize: 12, marginTop: 4 },
-  reportCardAction: { flexDirection: 'row', alignItems: 'center', gap: 7, borderTopWidth: 1, borderTopColor: '#F1F5F9', paddingTop: 12, marginTop: 15 },
+  reportCardAction: { flexDirection: 'row', alignItems: 'center', gap: 7, borderTopWidth: 1, borderTopColor: '#E2E8F0', paddingTop: 12, marginTop: 15 },
   reportCardActionText: { color: '#1D4ED8', fontSize: 13, fontWeight: '700' },
   screenBg: {
     flex: 1,
-    backgroundColor: '#F8FAFC',
+    backgroundColor: 'transparent',
   },
   scrollContent: {
-    padding: 18,
+    padding: 24,
     paddingBottom: 60,
   },
 
   // 1. Header Bar
   headerBar: {
-    backgroundColor: '#1c70b9',
-    borderRadius: 16,
+    backgroundColor: '#FFFFFF',
+    borderRadius: 14,
     paddingHorizontal: 18,
     paddingVertical: 14,
     marginBottom: 16,
-    borderTopWidth: 1.5,
-    borderTopColor: '#60b0f4',
-    borderBottomWidth: 3.5,
-    borderBottomColor: '#124c7e',
+    borderWidth: 1,
+    borderColor: '#E2E8F0',
     overflow: 'hidden',
     position: 'relative',
     flexDirection: 'row',
@@ -2406,8 +2646,7 @@ const styles = StyleSheet.create({
     flexWrap: 'wrap',
     gap: 12,
     ...(Platform.OS === 'web' ? {
-      backgroundImage: 'linear-gradient(135deg, #2592ed 0%, #1c70b9 52%, #12518e 100%)',
-      boxShadow: '0 8px 22px rgba(28, 112, 185, 0.38), inset 0 1px 0 rgba(255, 255, 255, 0.45)',
+      boxShadow: '0 4px 14px rgba(15, 23, 42, 0.04)',
     } as any : {
       elevation: 4,
     }),
@@ -2418,7 +2657,7 @@ const styles = StyleSheet.create({
     left: 0,
     right: 0,
     height: 18,
-    backgroundColor: 'rgba(255, 255, 255, 0.18)',
+    backgroundColor: 'transparent',
   },
   headerLeft: {
     flexDirection: 'row',
@@ -2432,30 +2671,26 @@ const styles = StyleSheet.create({
     width: 40,
     height: 40,
     borderRadius: 12,
-    backgroundColor: 'rgba(255, 255, 255, 0.2)',
+    backgroundColor: '#EAF2FF',
     alignItems: 'center',
     justifyContent: 'center',
-    borderTopWidth: 1,
-    borderTopColor: 'rgba(255, 255, 255, 0.45)',
-    borderBottomWidth: 2,
-    borderBottomColor: 'rgba(0, 0, 0, 0.2)',
   },
   headerTitle: {
-    color: '#FFFFFF',
-    fontSize: 20,
-    fontWeight: '800',
+    color: '#172554',
+    fontSize: 24,
+    fontWeight: '700',
     letterSpacing: 0.3,
   },
   liveTag: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: 5,
-    backgroundColor: 'rgba(255, 255, 255, 0.2)',
+    backgroundColor: '#ECFDF5',
     paddingHorizontal: 8,
     paddingVertical: 2,
     borderRadius: 10,
     borderWidth: 1,
-    borderColor: 'rgba(255, 255, 255, 0.35)',
+    borderColor: '#A7F3D0',
   },
   liveDot: {
     width: 6,
@@ -2464,12 +2699,12 @@ const styles = StyleSheet.create({
     backgroundColor: '#86EFAC',
   },
   liveTagText: {
-    color: '#FFFFFF',
+    color: '#047857',
     fontSize: 11,
     fontWeight: '800',
   },
   headerSub: {
-    color: '#DCEBFA',
+    color: '#64748B',
     fontSize: 12.5,
     fontWeight: '500',
     marginTop: 2,
@@ -2485,39 +2720,37 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     gap: 6,
-    backgroundColor: '#FFFFFF',
+    backgroundColor: '#2563EB',
     paddingHorizontal: 12,
     paddingVertical: 8,
     borderRadius: 10,
-    borderTopWidth: 1,
-    borderTopColor: '#FFFFFF',
-    borderBottomWidth: 2,
-    borderBottomColor: 'rgba(0, 0, 0, 0.25)',
-    ...(Platform.OS === 'web' ? ({ cursor: 'pointer' } as any) : {}),
+    minHeight: 40,
+    borderWidth: 1,
+    borderColor: '#2563EB',
+    ...(Platform.OS === 'web' ? ({ cursor: 'pointer', transition: 'background-color 180ms ease, box-shadow 180ms ease' } as any) : {}),
   },
   headerActionBtnWhiteText: {
-    color: '#1c70b9',
+    color: '#FFFFFF',
     fontSize: 13,
-    fontWeight: '800',
+    fontWeight: '600',
   },
   headerActionBtnTranslucent: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: 6,
-    backgroundColor: 'rgba(255, 255, 255, 0.2)',
+    backgroundColor: '#FFFFFF',
     paddingHorizontal: 12,
     paddingVertical: 8,
     borderRadius: 10,
-    borderTopWidth: 1,
-    borderTopColor: 'rgba(255, 255, 255, 0.45)',
-    borderBottomWidth: 2,
-    borderBottomColor: 'rgba(0, 0, 0, 0.25)',
+    minHeight: 40,
+    borderWidth: 1,
+    borderColor: '#CBD5E1',
     ...(Platform.OS === 'web' ? ({ cursor: 'pointer' } as any) : {}),
   },
   headerActionBtnTranslucentText: {
-    color: '#FFFFFF',
+    color: '#334155',
     fontSize: 13,
-    fontWeight: '800',
+    fontWeight: '600',
   },
   periodCard: {
     flexDirection: 'row',
@@ -2542,13 +2775,13 @@ const styles = StyleSheet.create({
     paddingHorizontal: 12,
     paddingVertical: 6,
     borderRadius: 8,
-    backgroundColor: '#F8FAFC',
+    backgroundColor: '#FFFFFF',
     borderWidth: 1,
     borderColor: '#E2E8F0',
   },
   presetChipActive: {
-    backgroundColor: '#ECFDF5',
-    borderColor: '#10B981',
+    backgroundColor: '#EAF2FF',
+    borderColor: '#2563EB',
   },
   presetChipText: {
     fontSize: 12,
@@ -2556,7 +2789,7 @@ const styles = StyleSheet.create({
     color: '#64748B',
   },
   presetChipTextActive: {
-    color: '#065F46',
+    color: '#1D4ED8',
     fontWeight: '700',
   },
   solvencyBannerPill: {
@@ -2654,7 +2887,7 @@ const styles = StyleSheet.create({
     borderRadius: 8,
   },
   tabNavButtonActive: {
-    backgroundColor: '#10B981',
+    backgroundColor: '#2563EB',
   },
   tabNavText: {
     fontSize: 13,

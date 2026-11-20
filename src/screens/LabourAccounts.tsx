@@ -103,7 +103,7 @@ export function LabourAccounts() {
   const selectedLabel = operationCards.find(card => card.id === activeOperation)?.label ?? '';
   const selectedLedgerWorker = data?.labourers.find(worker => worker.id === selectedLedgerWorkerId) ?? null;
   const wageTotal = Math.round((Number(wageBags) || 0) * (Number(wageRate) || 0) * 100) / 100;
-  return <View style={{ flex: 1, backgroundColor: color.bg }}>
+  return <View style={{ flex: 1, backgroundColor: 'transparent' }}>
     <ScrollView contentContainerStyle={{ width: '100%', maxWidth: 1200, alignSelf: 'center', padding: isMobile ? 12 : 20, gap: 14, paddingBottom: 36 }} keyboardShouldPersistTaps="handled">
       <View style={{ flexDirection: 'row', flexWrap: 'wrap', alignItems: 'center', gap: 12 }}>
         {activeOperation ? <TouchableOpacity accessibilityRole="button" onPress={() => { if (selectedLedgerWorkerId) setSelectedLedgerWorkerId(null); else if (showStockOutLabourAccount) setShowStockOutLabourAccount(false); else setActiveOperation(null); setError(''); }} style={{ minHeight: 42, justifyContent: 'center', paddingHorizontal: 14, backgroundColor: '#E2E8F0', borderRadius: 9 }}><Text style={{ color: color.text, fontWeight: '800' }}>{tx('ফিরে যান', 'Back')}</Text></TouchableOpacity> : null}

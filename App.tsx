@@ -1,7 +1,7 @@
 import { Settings } from './src/screens/Settings';
 import { AuthGate } from './src/auth';
-import React, { useState, useEffect } from 'react';
-import { SafeAreaView, View, Text, TextInput, TouchableOpacity, StatusBar, Modal, ScrollView, Platform } from 'react-native';
+import React, { useState, useEffect, useRef } from 'react';
+import { SafeAreaView, View, Text, TextInput, TouchableOpacity, StatusBar, Modal, ScrollView, Platform, Animated, Easing } from 'react-native';
 import { AppProvider, useApp } from './src/store';
 import { Key, tp } from './src/i18n';
 import { color, useMoney, useDateStr } from './src/ui';
@@ -73,6 +73,8 @@ function Shell() {
   const { t, lang, business, ready, loadError, retry } = useApp();
   const m = useMoney();
   const [route, setRouteState] = useState<string>(routeFromHash);
+  const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
+  const routeTransition = useRef(new Animated.Value(0)).current;
   const [notifs, setNotifs] = useState<Reminder[]>([]);
   const [bellOpen, setBellOpen] = useState(false);
   const [focus, setFocus] = useState<{ kind: 'c' | 'v'; id: string } | null>(null);
@@ -140,6 +142,17 @@ function Shell() {
     return tp(lang, r.occasion === 'today' ? 'notifPayToday' : 'notifPayTomorrow', vars);
   };
   const { isDesktop } = useBreakpoint();
+  useEffect(() => {
+    const reducedMotion = Platform.OS === 'web' && typeof window !== 'undefined' && typeof window.matchMedia === 'function' && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+    if (reducedMotion) {
+      routeTransition.setValue(1);
+      return;
+    }
+    routeTransition.setValue(0);
+    const animation = Animated.timing(routeTransition, { toValue: 1, duration: 220, easing: Easing.out(Easing.cubic), useNativeDriver: true });
+    animation.start();
+    return () => animation.stop();
+  }, [route, routeTransition]);
   const headerFs = useFs(20, 19);
   if (!ready) {
     return (
@@ -272,14 +285,11 @@ function Shell() {
     <View style={{ position: 'relative', zIndex: 50 }}>
       <View style={{
         padding: 14,
-        backgroundColor: color.primary,
-        borderBottomWidth: 3,
-        borderBottomColor: '#124c7e',
-        borderTopWidth: 1,
-        borderTopColor: '#5faef2',
+        backgroundColor: '#FFFFFF',
+        borderBottomWidth: 1,
+        borderBottomColor: color.line,
         ...(Platform.OS === 'web' ? {
-          backgroundImage: 'linear-gradient(135deg, #258fe8 0%, #1c70b9 52%, #135591 100%)',
-          boxShadow: '0 4px 14px rgba(28, 112, 185, 0.3), inset 0 1px 0 rgba(255,255,255,0.4)',
+          boxShadow: '0 2px 8px rgba(15, 23, 42, 0.04)',
         } as any : {}),
         flexDirection: 'row',
         alignItems: 'center',
@@ -287,7 +297,7 @@ function Shell() {
         {qOpen ? (
           <View style={{ flex: 1, flexDirection: 'row', alignItems: 'center', gap: 4 }}>
             <TouchableOpacity onPress={closeSearch} style={{ minHeight: 44, minWidth: 44, alignItems: 'center', justifyContent: 'center' }}>
-              <AppIcon name={icons.back} size={22} iconColor="#fff" />
+              <AppIcon name={icons.back} size={22} iconColor={color.primary} />
             </TouchableOpacity>
             <View style={{ flex: 1, flexDirection: 'row', alignItems: 'center', gap: 4, backgroundColor: '#fff', borderRadius: 12, paddingHorizontal: 12, minHeight: 48 }}>
               <AppIcon name={icons.search} size={20} iconColor={color.muted} />
@@ -310,14 +320,14 @@ function Shell() {
           </View>
         ) : (
           <View style={{ flex: 1, flexDirection: 'row', alignItems: 'center' }}>
-            {(route === 'collect' || route === 'pay' || (route in titleKey && !isDesktop)) && <TouchableOpacity onPress={() => setRoute(route === 'collect' || route === 'pay' ? 'accounts' : 'more')} accessibilityRole="button" accessibilityLabel={lang === 'bn' ? 'ফিরে যান' : 'Back'} style={{ marginRight: 12, minHeight: 44, minWidth: 44, alignItems: 'center', justifyContent: 'center' }}><AppIcon name={icons.back} size={22} iconColor="#fff" /></TouchableOpacity>}
-            <Text style={{ color: '#fff', fontSize: headerFs, fontWeight: '700', flex: 1 }} numberOfLines={1}>{titleKey[route] ? t(titleKey[route]) : business.name}</Text>
+            {(route === 'collect' || route === 'pay' || (route in titleKey && !isDesktop)) && <TouchableOpacity onPress={() => setRoute(route === 'collect' || route === 'pay' ? 'accounts' : 'more')} accessibilityRole="button" accessibilityLabel={lang === 'bn' ? 'ফিরে যান' : 'Back'} style={{ marginRight: 12, minHeight: 44, minWidth: 44, alignItems: 'center', justifyContent: 'center' }}><AppIcon name={icons.back} size={22} iconColor={color.primary} /></TouchableOpacity>}
+            <Text style={{ color: color.text, fontSize: headerFs, fontWeight: '700', flex: 1 }} numberOfLines={1}>{titleKey[route] ? t(titleKey[route]) : business.name}</Text>
             <TouchableOpacity onPress={() => setQOpen(true)} style={{ minHeight: 44, minWidth: 44, alignItems: 'center', justifyContent: 'center' }}>
-              <AppIcon name={icons.search} size={24} iconColor="#fff" />
+              <AppIcon name={icons.search} size={24} iconColor={color.primary} />
             </TouchableOpacity>
             <TouchableOpacity onPress={() => setBellOpen(true)} style={{ minHeight: 44, minWidth: 44, alignItems: 'center', justifyContent: 'center' }}>
               <View>
-                <AppIcon name={icons.bell} size={24} iconColor="#fff" />
+                <AppIcon name={icons.bell} size={24} iconColor={color.primary} />
                 {notifs.length ? (
                   <View style={{ position: 'absolute', top: -6, right: -8, backgroundColor: '#C62828', borderRadius: 10, minWidth: 20, minHeight: 20, alignItems: 'center', justifyContent: 'center', paddingHorizontal: 4 }}>
                     <Text style={{ color: '#fff', fontSize: 12, fontWeight: '700' }}>{notifs.length > 9 ? '9+' : String(notifs.length)}</Text>
@@ -335,10 +345,10 @@ function Shell() {
     <Modal visible={bellOpen} transparent animationType="fade" onRequestClose={() => setBellOpen(false)}>
       <TouchableOpacity activeOpacity={1} onPress={() => setBellOpen(false)} style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.45)', alignItems: 'center', justifyContent: 'center', padding: 16 }}>
         <TouchableOpacity activeOpacity={1} onPress={() => {}} style={{ width: '100%', maxWidth: 480, maxHeight: '85%', backgroundColor: color.bg, borderRadius: 16, overflow: 'hidden' }}>
-          <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingLeft: 14, paddingRight: 4, backgroundColor: color.primary }}>
-            <Text style={{ color: '#fff', fontSize: 18, fontWeight: '700' }}>{t('notifications')}</Text>
+          <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingLeft: 14, paddingRight: 4, backgroundColor: '#FFFFFF', borderBottomWidth: 1, borderBottomColor: color.line }}>
+            <Text style={{ color: color.text, fontSize: 18, fontWeight: '700' }}>{t('notifications')}</Text>
             <TouchableOpacity onPress={() => setBellOpen(false)} style={{ minHeight: 48, minWidth: 48, alignItems: 'center', justifyContent: 'center' }}>
-              <AppIcon name={icons.cancel} size={22} iconColor="#fff" />
+              <AppIcon name={icons.cancel} size={22} iconColor={color.primary} />
             </TouchableOpacity>
           </View>
           <ScrollView style={{ padding: 14 }} contentContainerStyle={{ paddingBottom: 20 }} keyboardShouldPersistTaps="handled">
@@ -372,77 +382,75 @@ function Shell() {
   );
   if (isDesktop) {
     return (
-      <SafeAreaView style={{ flex: 1, backgroundColor: color.bg, paddingTop: StatusBar.currentHeight }}>
-        <View style={{ flex: 1, flexDirection: 'row' }}>
-          <View style={{ width: 248, backgroundColor: '#FFFFFF', borderRightWidth: 1.5, borderRightColor: '#D8E7F5', paddingVertical: 14, paddingHorizontal: 12 }}>
-            <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 6, paddingVertical: 10, marginBottom: 8 }}>
-              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10 }}>
+      <SafeAreaView style={{ flex: 1, backgroundColor: color.bg, paddingTop: StatusBar.currentHeight, ...(Platform.OS === 'web' ? ({ backgroundImage: 'url("/assets/ethereal-blue-wave.png")', backgroundSize: 'cover', backgroundPosition: 'center' } as any) : {}) }}>
+        <View style={{ flex: 1, flexDirection: 'row', backgroundColor: 'transparent' }}>
+          <View style={{ width: sidebarCollapsed ? 76 : 248, backgroundColor: '#102F68', borderRightWidth: 1, borderRightColor: 'rgba(255,255,255,0.12)', paddingVertical: 14, paddingHorizontal: sidebarCollapsed ? 8 : 12, ...(Platform.OS === 'web' ? ({ backgroundImage: 'radial-gradient(ellipse 130% 24% at 45% 100%, rgba(37,99,235,0.70) 0%, rgba(37,99,235,0) 72%), radial-gradient(ellipse at 0% 0%, rgba(59,130,246,0.16), transparent 50%), linear-gradient(180deg, #0F2D61 0%, #123A7A 70%, #15499B 100%)', transition: 'width 220ms cubic-bezier(0.2, 0.8, 0.2, 1)' } as any) : {}) }}>
+            <View style={{ flexDirection: 'column', alignItems: sidebarCollapsed ? 'center' : 'stretch', gap: 8, paddingHorizontal: sidebarCollapsed ? 0 : 6, paddingVertical: 10, marginBottom: 8 }}>
+              <View style={{ flexDirection: sidebarCollapsed ? 'column' : 'row', alignItems: 'center', gap: 10, minWidth: 0 }}>
                 <View style={{
                   height: 38,
                   width: 38,
                   borderRadius: 10,
-                  backgroundColor: color.primary,
+                  backgroundColor: 'rgba(255,255,255,0.14)',
                   alignItems: 'center',
                   justifyContent: 'center',
-                  borderBottomWidth: 2.5,
-                  borderBottomColor: '#124c7e',
-                  borderTopWidth: 1,
-                  borderTopColor: '#5faef2',
+                  borderWidth: 1,
+                  borderColor: 'rgba(255,255,255,0.20)',
                   ...(Platform.OS === 'web' ? {
-                    backgroundImage: 'linear-gradient(135deg, #2b91e8 0%, #1c70b9 55%, #145994 100%)',
-                    boxShadow: '0 4px 12px rgba(28, 112, 185, 0.35)',
+                    boxShadow: '0 3px 8px rgba(37, 99, 235, 0.18)',
                   } as any : {}),
                 }}>
-                  <AppIcon name={icons.stock} size={20} iconColor="#fff" />
+                  <AppIcon name={icons.stock} size={20} iconColor="#FFFFFF" />
                 </View>
-                <View>
-                  <Text style={{ fontSize: 16, fontWeight: '800', color: '#0F1E36', letterSpacing: 0.3 }}>{business.name}</Text>
-                  
-                </View>
+                {!sidebarCollapsed && <View style={{ flex: 1, minWidth: 0 }}>
+                  <Text numberOfLines={1} ellipsizeMode="tail" style={{ fontSize: 16, fontWeight: '700', color: '#FFFFFF', letterSpacing: 0.1 }}>{business.name}</Text>
+                </View>}
               </View>
 
-              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+              <View style={{ flexDirection: sidebarCollapsed ? 'column' : 'row', alignItems: 'center', alignSelf: sidebarCollapsed ? 'auto' : 'flex-end', gap: 6 }}>
                 <TouchableOpacity
                   onPress={() => setQOpen(true)}
                   style={{
                     width: 32,
                     height: 32,
                     borderRadius: 8,
-                    backgroundColor: '#F1F5F9',
+                    backgroundColor: 'rgba(255,255,255,0.11)',
                     alignItems: 'center',
                     justifyContent: 'center',
                     borderWidth: 1,
-                    borderColor: '#CBD5E1',
+                    borderColor: 'rgba(255,255,255,0.16)',
                     ...(Platform.OS === 'web' ? ({ cursor: 'pointer' } as any) : {}),
                   }}
                   accessibilityLabel="অনুসন্ধান"
                 >
-                  <AppIcon name={icons.search} size={16} iconColor="#1c70b9" />
+                  <AppIcon name={icons.search} size={16} iconColor="#FFFFFF" />
                 </TouchableOpacity>
-
                 <TouchableOpacity
                   onPress={() => setBellOpen(true)}
                   style={{
                     width: 32,
                     height: 32,
                     borderRadius: 8,
-                    backgroundColor: '#F1F5F9',
+                    backgroundColor: 'rgba(255,255,255,0.11)',
                     alignItems: 'center',
                     justifyContent: 'center',
                     borderWidth: 1,
-                    borderColor: '#CBD5E1',
+                    borderColor: 'rgba(255,255,255,0.16)',
                     ...(Platform.OS === 'web' ? ({ cursor: 'pointer' } as any) : {}),
                   }}
                   accessibilityLabel="নোটিফিকেশন"
                 >
                   <View>
-                    <AppIcon name={icons.bell} size={16} iconColor="#1c70b9" />
+                    <AppIcon name={icons.bell} size={16} iconColor="#FFFFFF" />
                     {notifs.length ? (
                       <View style={{ position: 'absolute', top: -5, right: -6, backgroundColor: '#C62828', borderRadius: 6, minWidth: 14, minHeight: 14, alignItems: 'center', justifyContent: 'center', paddingHorizontal: 2 }}>
                         <Text style={{ color: '#fff', fontSize: 9, fontWeight: '700' }}>{notifs.length > 9 ? '9+' : String(notifs.length)}</Text>
                       </View>
                     ) : null}
                   </View>
+                </TouchableOpacity>
+                <TouchableOpacity onPress={() => setSidebarCollapsed(v => !v)} accessibilityRole="button" accessibilityLabel={sidebarCollapsed ? 'Expand sidebar' : 'Collapse sidebar'} style={{ width: 32, height: 32, borderRadius: 8, backgroundColor: 'rgba(255,255,255,0.14)', alignItems: 'center', justifyContent: 'center', ...(Platform.OS === 'web' ? ({ cursor: 'pointer' } as any) : {}) }}>
+                  <AppIcon name={sidebarCollapsed ? icons.chevR : icons.back} size={16} iconColor="#FFFFFF" />
                 </TouchableOpacity>
               </View>
             </View>
@@ -453,32 +461,27 @@ function Shell() {
                   key={x.r}
                   testID={`nav-${x.r}`}
                   onPress={() => setRoute(x.r)}
+                  accessibilityRole="button"
+                  accessibilityLabel={t(x.k)}
+                  {...(Platform.OS === 'web' ? ({ title: t(x.k) } as any) : {})}
                   style={{
                     flexDirection: 'row',
                     alignItems: 'center',
-                    gap: 10,
+                    justifyContent: sidebarCollapsed ? 'center' : 'flex-start',
+                    gap: sidebarCollapsed ? 0 : 10,
                     minHeight: SIDE_ROW_H,
-                    paddingHorizontal: 10,
+                    paddingHorizontal: sidebarCollapsed ? 0 : 10,
                     paddingVertical: 2,
                     borderRadius: 12,
-                    backgroundColor: on ? '#FFFFFF' : 'transparent',
-                    borderWidth: on ? 1.5 : 0,
-                    borderColor: on ? '#BFDBFE' : 'transparent',
-                    borderLeftWidth: on ? 4 : 0,
-                    borderLeftColor: on ? x.color : 'transparent',
-                    borderBottomWidth: on ? 2.5 : 0,
-                    borderBottomColor: on ? '#93C5FD' : 'transparent',
+                    backgroundColor: on ? '#2563EB' : 'transparent',
+                    borderWidth: 1,
+                    borderColor: on ? 'rgba(255,255,255,0.16)' : 'transparent',
+                    borderLeftWidth: 1,
+                    borderLeftColor: 'transparent',
                     marginVertical: SIDE_ROW_GAP,
                     ...(Platform.OS === 'web' ? {
                       cursor: 'pointer',
-                      transition: 'all 0.25s cubic-bezier(0.34, 1.56, 0.64, 1)',
-                      ...(on ? {
-                        transform: 'translateY(-2px) scale(1.02)',
-                        boxShadow: `0 6px 16px -2px ${x.color}33, 0 2px 6px rgba(0,0,0,0.04), inset 0 1px 0 #FFFFFF`,
-                        backgroundImage: `linear-gradient(135deg, #FFFFFF 0%, ${x.bg} 100%)`,
-                      } : {
-                        transform: 'translateY(0) scale(1)',
-                      }),
+                      transition: 'background-color 180ms ease, border-color 180ms ease',
                     } as any : {}),
                   }}
                 >
@@ -486,36 +489,34 @@ function Shell() {
                     width: 28,
                     height: 28,
                     borderRadius: 8,
-                    backgroundColor: x.bg,
+                    backgroundColor: x.color,
                     alignItems: 'center',
                     justifyContent: 'center',
                     borderWidth: 1,
-                    borderColor: on ? x.color : '#E2E8F0',
+                    borderColor: 'rgba(255,255,255,0.18)',
                     borderBottomWidth: on ? 2 : 1,
-                    borderBottomColor: on ? x.color : '#CBD5E1',
+                    borderBottomColor: 'rgba(0,0,0,0.12)',
                     ...(Platform.OS === 'web' && on ? {
-                      boxShadow: `0 2px 5px ${x.color}40, inset 0 1px 0 #FFFFFF`,
-                      transform: 'scale(1.08)',
-                      transition: 'transform 0.25s cubic-bezier(0.34, 1.56, 0.64, 1)',
+                      boxShadow: '0 2px 6px rgba(23,61,143,0.20)',
+                      transition: 'transform 180ms ease, box-shadow 180ms ease',
                     } as any : {}),
                   }}>
-                    <AppIcon name={x.icon} size={18} iconColor={x.color} />
+                    <AppIcon name={x.icon} size={18} iconColor="#FFFFFF" />
                   </View>
-                  <Text style={{
+                  {!sidebarCollapsed && <Text style={{
                     fontSize: 14,
-                    color: on ? '#0F1E36' : '#475569',
-                    fontWeight: on ? '800' : '600',
-                    letterSpacing: on ? 0.2 : 0,
+                    color: '#FFFFFF',
+                    fontWeight: on ? '700' : '500',
                   }}>
                     {t(x.k)}
-                  </Text>
+                  </Text>}
                 </TouchableOpacity>
               );
             })}
           </View>
-          <View style={{ flex: 1 }}>
+          <View style={{ flex: 1, backgroundColor: 'transparent' }}>
             {qOpen ? header : null}
-            <View style={{ flex: 1 }}>{body}</View>
+            <Animated.View style={{ flex: 1, opacity: routeTransition, transform: [{ translateY: routeTransition.interpolate({ inputRange: [0, 1], outputRange: [7, 0] }) }] }}>{body}</Animated.View>
             {bellList}
       {retView ? <ReturnModal id={retView} onClose={() => setRetView(null)} /> : null}
             {inv ? <InvoiceModal kind={inv.kind} id={inv.id} onClose={() => setInv(null)} onReturn={() => { const v = inv; setInv(null); openReturnFlow(v.kind, v.id); }} /> : null}
@@ -525,9 +526,9 @@ function Shell() {
     );
   }
   return (
-    <SafeAreaView style={{ flex: 1, backgroundColor: color.bg, paddingTop: StatusBar.currentHeight }}>
+    <SafeAreaView style={{ flex: 1, backgroundColor: color.bg, paddingTop: StatusBar.currentHeight, ...(Platform.OS === 'web' ? ({ backgroundImage: 'url("/assets/ethereal-blue-wave.png")', backgroundSize: 'cover', backgroundPosition: 'center' } as any) : {}) }}>
       {header}
-      <View style={{ flex: 1 }}>{body}</View>
+      <Animated.View style={{ flex: 1, opacity: routeTransition, transform: [{ translateY: routeTransition.interpolate({ inputRange: [0, 1], outputRange: [7, 0] }) }] }}>{body}</Animated.View>
       {bellList}
       {retView ? <ReturnModal id={retView} onClose={() => setRetView(null)} /> : null}
       {inv ? <InvoiceModal kind={inv.kind} id={inv.id} onClose={() => setInv(null)} onReturn={() => { const v = inv; setInv(null); openReturnFlow(v.kind, v.id); }} /> : null}
@@ -535,7 +536,7 @@ function Shell() {
         {tabs.map(x => {
           const active = tabOf(route) === x.r;
           return (
-            <TouchableOpacity key={x.r} testID={`nav-${x.r}`} onPress={() => setRoute(x.r)} style={{ flex: 1, alignItems: 'center', paddingVertical: 8, minHeight: 56, gap: 2 }}>
+            <TouchableOpacity key={x.r} testID={`nav-${x.r}`} onPress={() => setRoute(x.r)} style={{ flex: 1, alignItems: 'center', paddingVertical: 8, minHeight: 56, gap: 2, backgroundColor: active ? '#EAF2FF' : '#FFFFFF' }}>
               <AppIcon name={x.icon} size={TAB_ICON_SIZE} iconColor={active ? color.primary : color.muted} />
               <Text style={{ fontSize: 12, color: active ? color.primary : color.muted, fontWeight: active ? '700' : '400' }}>{t(x.k)}</Text>
             </TouchableOpacity>

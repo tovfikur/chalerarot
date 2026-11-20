@@ -10,7 +10,7 @@ import { api, ApiError, type TxnPayment, type SettlementStatus, DetailItem, Recv
 import { unitDetail, fmtTime, buildInvoiceText, buildInvoiceHTML, invoicePaymentAmount, invoicePaymentDescription, InvData, UnitNames } from './invoice';
 import { tp, Key } from './i18n';
 import { toEnDigits, toBnDigits, parseNum, localeDigits } from './bn';
-import { printReport, printedAtStamp, downloadReportCSV, type ReportDoc, type ReportRow } from './report';
+import { printReport, printedAtStamp, downloadReportCSV, downloadReportHTML, type ReportDoc, type ReportRow } from './report';
 import { downloadCSV } from './stockReport';
 import { showEntryError } from './entryDialog';
 import { EntryReportButtons } from './EntryReportButtons';
@@ -1129,7 +1129,7 @@ export function Products() {
 
 // Shared Customers / Vendors screen
 export function Parties({ kind, focus, onFocusDone, onReturn, onEditTransaction }: { kind: 'c' | 'v'; focus?: string | null; onFocusDone?: () => void; onReturn?: (kind: 'sale' | 'purchase', id: string) => void; onEditTransaction?: (kind: 'sale' | 'purchase', id: string) => void }) {
-  const { t, lang, customers, vendors, saveParty, deleteParty, bal, cTx, vTx } = useApp(); const m = useMoney(); const isC = kind === 'c';
+  const { t, lang, business, customers, vendors, saveParty, deleteParty, bal, cTx, vTx } = useApp(); const m = useMoney(); const isC = kind === 'c';
   const fd = useDateStr();
   // Desktop gets the Odoo-style table; mobile/tablet keep the existing cards.
   const { isDesktop } = useBreakpoint();
@@ -1145,6 +1145,12 @@ export function Parties({ kind, focus, onFocusDone, onReturn, onEditTransaction 
   const [txFrom, setTxFrom] = useState('');
   const [txTo, setTxTo] = useState('');
   const [txKind, setTxKind] = useState<'all' | 'invoice' | 'payment' | 'return'>('all');
+  const [receiptPreviewDoc, setReceiptPreviewDoc] = useState<ReportDoc | null>(null);
+  const openPaymentReceipt = (payment: Tx) => {
+    const receiptParty = list.find(p => p.id === payment.partyId);
+    if (!receiptParty) return;
+    setReceiptPreviewDoc(partyPaymentReceiptDoc({ payment, party: receiptParty, isCustomer: isC, lang, shop: business.name, amount: m(payment.amount), dateLabel: fd }));
+  };
   const [v, setV] = useState({ name: '', mobile: '', address: '', opening: '', code: '' });
   const [pq, setPq] = useState('');
   const getPartyCode = useCallback((p: Party) => {
@@ -1426,7 +1432,7 @@ export function Parties({ kind, focus, onFocusDone, onReturn, onEditTransaction 
                 <Text numberOfLines={2} style={{ flex: 1.65, minWidth: 0, color: '#64748B', fontSize: 11, paddingHorizontal: 4 }}>{[x.account, x.method, x.note].filter(Boolean).join(' · ') || (isPayment ? 'Party payment' : 'Invoice transaction')}</Text>
                 <Text numberOfLines={1} style={{ flex: 1, minWidth: 0, color: isPayment ? '#047857' : '#0F172A', fontSize: 12, fontWeight: '800', paddingHorizontal: 4 }}>{m(x.amount)}</Text>
                 <View style={{ flex: 0.75, minWidth: 0, paddingHorizontal: 3 }}>
-                  {!isPayment ? <TouchableOpacity onPress={open} accessibilityRole="button" style={{ minHeight: 40, borderRadius: 8, backgroundColor: '#EFF6FF', borderWidth: 1, borderColor: '#BFDBFE', alignItems: 'center', justifyContent: 'center' }}><Text style={{ color: '#1D4ED8', fontSize: 12, fontWeight: '800' }}>View</Text></TouchableOpacity> : <Text style={{ color: '#94A3B8', fontSize: 12, textAlign: 'center' }}>—</Text>}
+                  {!isPayment ? <TouchableOpacity onPress={open} accessibilityRole="button" style={{ minHeight: 40, borderRadius: 8, backgroundColor: '#EFF6FF', borderWidth: 1, borderColor: '#BFDBFE', alignItems: 'center', justifyContent: 'center' }}><Text style={{ color: '#1D4ED8', fontSize: 12, fontWeight: '800' }}>View</Text></TouchableOpacity> : <TouchableOpacity onPress={() => openPaymentReceipt(x)} accessibilityRole="button" accessibilityLabel="Receipt" style={{ minHeight: 40, borderRadius: 8, backgroundColor: '#EFF6FF', borderWidth: 1, borderColor: '#BFDBFE', alignItems: 'center', justifyContent: 'center' }}><Text style={{ color: '#1D4ED8', fontSize: 12, fontWeight: '800' }}>Receipt</Text></TouchableOpacity>}
                 </View>
               </View>;
             }) : <Text style={{ padding: 18, color: '#64748B', textAlign: 'center' }}>No transactions match these filters.</Text>}
@@ -1436,15 +1442,16 @@ export function Parties({ kind, focus, onFocusDone, onReturn, onEditTransaction 
               const isReturn = x.kind === 'sreturn' || x.kind === 'preturn';
               const ref = isPayment ? x.ref ?? `${isC ? 'REC' : 'PAY'}-${refNo(x.id)}` : x.ref ?? `${isC ? 'INV' : 'PUR'}-${refNo(x.id)}`;
               const open = () => isPayment ? null : isReturn && x.returnId ? setRetId(x.returnId) : setInv({ kind: isC ? 'sale' : 'purchase', id: x.id });
-              return <TouchableOpacity key={x.id} onPress={open} activeOpacity={isPayment ? 1 : 0.75} style={{ padding: 12, borderWidth: 1, borderColor: '#E2E8F0', borderRadius: 10, backgroundColor: '#FFFFFF' }}>
+              return <View key={x.id} style={{ padding: 12, borderWidth: 1, borderColor: '#E2E8F0', borderRadius: 10, backgroundColor: '#FFFFFF' }}><TouchableOpacity onPress={open} disabled={isPayment} activeOpacity={0.75}>
                 <View style={{ flexDirection: 'row', justifyContent: 'space-between', gap: 8 }}><Text style={{ color: '#334155', fontSize: 12 }}>{fd(x.date)} · {lbl(x.kind)}</Text><Text style={{ color: isPayment ? '#047857' : '#0F172A', fontSize: 14, fontWeight: '900' }}>{m(x.amount)}</Text></View>
                 <Text style={{ color: '#0F172A', fontSize: 13, fontWeight: '800', marginTop: 5 }}>{ref}</Text>
                 <Text numberOfLines={1} style={{ color: '#64748B', fontSize: 11, marginTop: 3 }}>{[x.account, x.method, x.note].filter(Boolean).join(' · ') || (isPayment ? 'Party payment' : 'Invoice transaction')}</Text>
-              </TouchableOpacity>;
+              </TouchableOpacity>{isPayment ? <TouchableOpacity onPress={() => openPaymentReceipt(x)} accessibilityRole="button" accessibilityLabel="Receipt" style={{ alignSelf: 'flex-start', marginTop: 9, minHeight: 38, paddingHorizontal: 14, borderRadius: 8, backgroundColor: '#EFF6FF', borderWidth: 1, borderColor: '#BFDBFE', justifyContent: 'center' }}><Text style={{ color: '#1D4ED8', fontSize: 13, fontWeight: '800' }}>Receipt</Text></TouchableOpacity> : null}</View>;
             }) : <Text style={{ padding: 18, color: '#64748B', textAlign: 'center' }}>No transactions match these filters.</Text>}
           </View>}
       </Card>
       {retId ? <ReturnModal id={retId} onClose={() => setRetId(null)} /> : null}
+      {receiptPreviewDoc ? <PartyPaymentReceiptPreview doc={receiptPreviewDoc} onClose={() => setReceiptPreviewDoc(null)} /> : null}
       {payOpen && sel ? <QuickPaymentModal kind={kind} partyId={sel.id} partyName={sel.name} onClose={() => setPayOpen(false)} /> : null}
       {inv ? <InvoiceModal kind={inv.kind} id={inv.id} onClose={() => setInv(null)} onEdit={onEditTransaction ? () => { const v2 = inv; setInv(null); onEditTransaction(v2.kind, v2.id); } : undefined} onReturn={onReturn ? () => { const v = inv; setInv(null); onReturn!(v.kind, v.id); } : undefined} /> : null}
       {confirmDel ? (
@@ -1601,9 +1608,82 @@ type CollectionReceiptData = {
   payments: { paymentNo: string; transactionNo?: string; amount: number; accountName: string }[];
 };
 
+function partyPaymentReceiptDoc({ payment, party, isCustomer, lang, shop, amount, dateLabel }: {
+  payment: Tx; party: Party; isCustomer: boolean; lang: 'bn' | 'en'; shop: string;
+  amount: string; dateLabel: (date?: string) => string;
+}): ReportDoc {
+  const receiptNo = payment.ref || `${isCustomer ? 'REC' : 'PAY'}-${refNo(payment.id)}`;
+  const paymentLabel = isCustomer ? (lang === 'bn' ? 'আদায়' : 'Received') : (lang === 'bn' ? 'পরিশোধ' : 'Paid');
+  return {
+    kind: 'receipt',
+    language: lang,
+    shop,
+    title: lang === 'bn' ? (isCustomer ? 'গ্রাহক আদায়ের রসিদ' : 'সরবরাহকারী পেমেন্ট রসিদ') : (isCustomer ? 'Customer Payment Receipt' : 'Supplier Payment Receipt'),
+    period: `${lang === 'bn' ? 'তারিখ' : 'Date'}: ${dateLabel(payment.date)}`,
+    meta: [
+      { label: lang === 'bn' ? (isCustomer ? 'গ্রাহক' : 'সরবরাহকারী') : (isCustomer ? 'Customer' : 'Supplier'), value: party.name },
+      ...(party.code ? [{ label: lang === 'bn' ? 'কোড' : 'Code', value: party.code }] : []),
+      { label: lang === 'bn' ? (isCustomer ? 'রসিদ নম্বর' : 'পেমেন্ট নম্বর') : (isCustomer ? 'Receipt no.' : 'Payment no.'), value: receiptNo },
+      ...(payment.createdAt ? [{ label: lang === 'bn' ? 'সময়' : 'Time', value: fmtTime(payment.createdAt, lang === 'bn') }] : []),
+      ...(payment.transactionNo ? [{ label: lang === 'bn' ? 'লেনদেন আইডি' : 'Transaction ID', value: payment.transactionNo }] : []),
+      ...(payment.account ? [{ label: lang === 'bn' ? 'অ্যাকাউন্ট' : 'Account', value: payment.account }] : []),
+      ...(payment.method ? [{ label: lang === 'bn' ? 'পদ্ধতি' : 'Method', value: payment.method }] : []),
+    ],
+    sections: [{ title: lang === 'bn' ? 'পেমেন্টের বিবরণ' : 'Payment details', rows: [{ label: paymentLabel, right: amount, bold: true }] }],
+    total: { label: lang === 'bn' ? 'মোট' : 'Total', value: amount },
+    note: payment.note ? `${lang === 'bn' ? 'বিবরণ' : 'Note'}: ${payment.note}` : undefined,
+    printedAt: printedAtStamp(lang),
+    printLabel: lang === 'bn' ? 'প্রিন্ট / PDF সংরক্ষণ' : 'Print / Save PDF',
+    closeLabel: lang === 'bn' ? 'বন্ধ করুন' : 'Close',
+  };
+}
+
+function PartyPaymentReceiptPreview({ doc, onClose }: { doc: ReportDoc; onClose: () => void }) {
+  const { lang } = useApp();
+  const row = doc.sections[0]?.rows[0];
+  const amount = doc.total?.value ?? row?.right ?? '';
+  const number = doc.meta?.find(item => /no\.?$/i.test(item.label))?.value ?? 'receipt';
+  const filename = `receipt_${number.replace(/[^a-zA-Z0-9_-]+/g, '_')}.html`;
+  const download = () => { if (!downloadReportHTML(doc, filename)) Alert.alert(lang === 'bn' ? 'ডাউনলোড করা যায়নি' : 'Could not download receipt'); };
+  const print = () => { if (!printReport(doc)) Alert.alert(lang === 'bn' ? 'প্রিন্ট খোলা যায়নি' : 'Could not open print dialog'); };
+  return <Modal visible transparent animationType="fade" onRequestClose={onClose}>
+    <View style={{ flex: 1, backgroundColor: 'rgba(15,23,42,0.52)', justifyContent: 'center', padding: 16 }}>
+      <View style={{ width: '100%', maxWidth: 480, maxHeight: '92%', alignSelf: 'center', backgroundColor: '#FFFFFF', borderRadius: 14, overflow: 'hidden', borderWidth: 1, borderColor: color.line }}>
+        <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 18, paddingVertical: 14, borderBottomWidth: 1, borderBottomColor: color.line }}>
+          <View><Text style={{ color: color.text, fontSize: 17, fontWeight: '800' }}>{lang === 'bn' ? 'রসিদ প্রিভিউ' : 'Receipt preview'}</Text><Text style={{ color: color.muted, fontSize: 12, marginTop: 2 }}>{doc.title}</Text></View>
+          <TouchableOpacity onPress={onClose} accessibilityRole="button" accessibilityLabel={lang === 'bn' ? 'বন্ধ করুন' : 'Close'} style={{ width: 40, height: 40, alignItems: 'center', justifyContent: 'center', borderRadius: 10, backgroundColor: '#F1F5F9' }}><AppIcon name={icons.cancel} size={20} iconColor={color.muted} /></TouchableOpacity>
+        </View>
+        <ScrollView contentContainerStyle={{ padding: 18 }}>
+          <View style={{ alignItems: 'center', paddingBottom: 16, borderBottomWidth: 1, borderBottomColor: color.line }}>
+            <View style={{ width: 44, height: 44, borderRadius: 13, backgroundColor: color.primaryLight, alignItems: 'center', justifyContent: 'center', marginBottom: 10 }}><AppIcon name={icons.accounts} size={22} iconColor={color.primary} /></View>
+            <Text style={{ color: color.text, fontSize: 20, fontWeight: '800', textAlign: 'center' }}>{doc.shop}</Text>
+            <Text style={{ color: color.primaryDark, fontSize: 15, fontWeight: '700', marginTop: 3, textAlign: 'center' }}>{doc.title}</Text>
+            <Text style={{ color: color.muted, fontSize: 13, marginTop: 5 }}>{doc.period}</Text>
+          </View>
+          <View style={{ paddingVertical: 12, gap: 9 }}>
+            {doc.meta?.map(item => <View key={`${item.label}-${item.value}`} style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-start', gap: 12 }}><Text style={{ flex: 1, color: color.muted, fontSize: 13 }}>{item.label}</Text><Text style={{ flex: 1.4, color: color.text, fontSize: 13, fontWeight: '700', textAlign: 'right' }}>{item.value}</Text></View>)}
+          </View>
+          <View style={{ marginTop: 6, paddingVertical: 10, paddingHorizontal: 4, borderTopWidth: 1, borderBottomWidth: 1, borderColor: '#CBD5E1', flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', gap: 12 }}>
+            <Text style={{ color: color.text, fontSize: 15, fontWeight: '700', flex: 1 }}>{doc.total?.label ?? row?.label}</Text>
+            <Text style={{ color: color.text, fontSize: 17, fontWeight: '900' }}>{amount}</Text>
+          </View>
+          {doc.note ? <Text style={{ color: color.muted, fontSize: 13, marginTop: 14 }}>{doc.note}</Text> : null}
+          <Text style={{ textAlign: 'center', color: color.text, fontSize: 15, marginTop: 16 }}>{lang === 'bn' ? 'ধন্যবাদ' : 'Thank you'}</Text>
+          <Text style={{ textAlign: 'right', color: color.muted, fontSize: 11, marginTop: 16 }}>{doc.printedAt}</Text>
+        </ScrollView>
+        <View style={{ flexDirection: 'row', gap: 10, padding: 14, borderTopWidth: 1, borderTopColor: color.line }}>
+          <View style={{ flex: 1 }}><Btn kind="ghost" icon={icons.download} label={lang === 'bn' ? 'রসিদ ডাউনলোড' : 'Download receipt'} onPress={download} /></View>
+          <View style={{ flex: 1 }}><Btn icon={icons.print} label={lang === 'bn' ? 'প্রিন্ট / PDF' : 'Print / Save PDF'} onPress={print} /></View>
+        </View>
+      </View>
+    </View>
+  </Modal>;
+}
+
 export function Money({ kind, done }: { kind: 'c' | 'v'; done: () => void }) {
   const { t, lang, business, moneyBalances, bal, customers, vendors, cTx, vTx, moneyAccounts, partyPaymentSplit } = useApp();
   const isC = kind === 'c';
+  const { isMobile } = useBreakpoint();
   const m = useMoney(), fd = useDateStr();
   const parties = isC ? customers : vendors;
   const codeOf = (p: Party) => p.code?.trim() ?? '';
@@ -1626,6 +1706,12 @@ export function Money({ kind, done }: { kind: 'c' | 'v'; done: () => void }) {
   const [message, setMessage] = useState('');
   const [busy, setBusy] = useState(false);
   const [selectedCollection, setSelectedCollection] = useState<Tx | null>(null);
+  const [receiptPreviewDoc, setReceiptPreviewDoc] = useState<ReportDoc | null>(null);
+  const openPaymentReceipt = (payment: Tx) => {
+    const txParty = parties.find(p => p.id === payment.partyId);
+    if (!txParty) return;
+    setReceiptPreviewDoc(partyPaymentReceiptDoc({ payment, party: txParty, isCustomer: isC, lang, shop: business.name, amount: m(payment.amount), dateLabel: fd }));
+  };
   const codeRef = useRef<TextInput>(null), cashRef = useRef<TextInput>(null), bankRef = useRef<TextInput>(null), noteRef = useRef<TextInput>(null);
   const party = parties.find(p => p.id === partyId);
   const reportPayments = (isC ? cTx : vTx).filter(x => x.kind === 'payment'
@@ -1850,20 +1936,32 @@ export function Money({ kind, done }: { kind: 'c' | 'v'; done: () => void }) {
     <Card>
       <SectionHead icon={isC ? icons.collect : icons.pay}>{lang === 'bn' ? (isC ? 'সাম্প্রতিক কালেকশন' : 'সাম্প্রতিক পেমেন্ট') : (isC ? 'Recent collections' : 'Recent payments')}</SectionHead>
       <Muted>{lang === 'bn' ? `${reportPayments.length}টি ফিল্টার মিলে গেছে` : `${reportPayments.length} matching transactions`}</Muted>
-      {reportPayments.length ? reportPayments.map(tx => {
-        const txParty = parties.find(p => p.id === tx.partyId);
-        const content = <>
-          <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 12 }}>
-            <Text style={{ flex: 1, color: color.text, fontWeight: '800' }}>{tx.transactionNo ? `${tx.transactionNo} · ` : ''}{tx.ref || (isC ? t('collect') : t('pay'))} · {txParty?.name ?? ''}</Text>
-            <Text style={{ color: isC ? '#047857' : '#B45309', fontWeight: '800' }}>{m(tx.amount)}</Text>
+      {reportPayments.length ? <ScrollView horizontal showsHorizontalScrollIndicator style={{ width: '100%' }} contentContainerStyle={{ minWidth: isMobile ? 850 : '100%' }}>
+        <View style={{ width: isMobile ? 850 : '100%', minWidth: 850, alignSelf: 'center' }}>
+          <View style={{ flexDirection: 'row', alignItems: 'center', minHeight: 42, paddingHorizontal: 10, backgroundColor: '#F1F5F9', borderRadius: 8, marginTop: 10 }}>
+            <Text style={{ width: 105, color: '#475569', fontSize: 12, fontWeight: '800' }}>{lang === 'bn' ? 'তারিখ' : 'Date'}</Text>
+            <Text style={{ width: 155, color: '#475569', fontSize: 12, fontWeight: '800' }}>{lang === 'bn' ? 'লেনদেন আইডি' : 'Transaction ID'}</Text>
+            <Text style={{ flex: 1, color: '#475569', fontSize: 12, fontWeight: '800' }}>{isC ? t('customer') : t('vendor')}</Text>
+            <Text style={{ width: 135, color: '#475569', fontSize: 12, fontWeight: '800', textAlign: 'right' }}>{lang === 'bn' ? 'পরিমাণ' : 'Amount'}</Text>
+            <Text style={{ width: 155, color: '#475569', fontSize: 12, fontWeight: '800', textAlign: 'right' }}>{lang === 'bn' ? 'বর্তমান ব্যালেন্স' : 'Current balance'}</Text>
+            <Text style={{ width: 100, color: '#475569', fontSize: 12, fontWeight: '800', textAlign: 'center' }}>{lang === 'bn' ? 'অ্যাকশন' : 'Action'}</Text>
           </View>
-          <Text style={{ color: color.muted, fontSize: 12, marginTop: 3 }}>{fd(tx.date)}{tx.account ? ` · ${tx.account}` : ''}</Text>
-          {tx.note ? <Text style={{ color: color.muted, fontSize: 12, marginTop: 2 }}>{tx.note}</Text> : null}
-          <Text style={{ color: '#087E8B', fontSize: 12, fontWeight: '700', marginTop: 4 }}>{lang === 'bn' ? 'বিস্তারিত ও প্রিন্ট অপশন দেখতে চাপ দিন' : 'Tap to view details and print option'}</Text>
-        </>;
-        return <TouchableOpacity key={tx.id} accessibilityRole="button" onPress={() => setSelectedCollection(tx)} style={{ paddingVertical: 10, borderBottomWidth: 1, borderBottomColor: color.line }}>{content}</TouchableOpacity>;
-      }) : <Empty />}
+          {reportPayments.map(tx => {
+            const txParty = parties.find(p => p.id === tx.partyId);
+            const currentBalance = txParty ? bal(kind, txParty.id).balance : 0;
+            return <View key={tx.id} style={{ flexDirection: 'row', alignItems: 'center', minHeight: 58, paddingHorizontal: 10, borderBottomWidth: 1, borderBottomColor: color.line, backgroundColor: '#FFFFFF' }}>
+              <Text style={{ width: 105, color: color.muted, fontSize: 12 }}>{fd(tx.date)}</Text>
+              <TouchableOpacity onPress={() => setSelectedCollection(tx)} accessibilityRole="button" style={{ width: 155, paddingRight: 8 }}><Text numberOfLines={1} style={{ color: color.primaryDark, fontSize: 12, fontWeight: '800' }}>{tx.transactionNo || tx.ref || tx.id}</Text></TouchableOpacity>
+              <TouchableOpacity onPress={() => setSelectedCollection(tx)} accessibilityRole="button" style={{ flex: 1, minWidth: 0, paddingRight: 8 }}><Text numberOfLines={1} style={{ color: color.text, fontSize: 13, fontWeight: '700' }}>{txParty?.name ?? '—'}</Text></TouchableOpacity>
+              <Text style={{ width: 135, color: isC ? '#047857' : '#B45309', fontSize: 13, fontWeight: '800', textAlign: 'right' }}>{m(tx.amount)}</Text>
+              <Text style={{ width: 155, color: currentBalance > 0 ? color.red : '#047857', fontSize: 13, fontWeight: '700', textAlign: 'right' }}>{m(currentBalance)}</Text>
+              <View style={{ width: 100, alignItems: 'center' }}><TouchableOpacity onPress={() => openPaymentReceipt(tx)} accessibilityRole="button" accessibilityLabel="Receipt" style={{ minHeight: 34, paddingHorizontal: 12, borderRadius: 8, backgroundColor: '#EFF6FF', borderWidth: 1, borderColor: '#BFDBFE', justifyContent: 'center', alignItems: 'center' }}><Text style={{ color: '#1D4ED8', fontSize: 12, fontWeight: '800' }}>{lang === 'bn' ? 'রসিদ' : 'Receipt'}</Text></TouchableOpacity></View>
+            </View>;
+          })}
+        </View>
+      </ScrollView> : <Empty />}
     </Card>
+    {receiptPreviewDoc ? <PartyPaymentReceiptPreview doc={receiptPreviewDoc} onClose={() => setReceiptPreviewDoc(null)} /> : null}
   </Screen>;
 }
 
@@ -2672,14 +2770,22 @@ export { BankCashDashboard as BankCash } from "./screens/BankCashDashboard";
 
 type JournalDraftLine = { accountId: string; description: string; debit: string; credit: string };
 export function JournalEntryModal({ onClose, onSaved, initial }: { onClose: () => void; onSaved?: () => void; initial?: SavedJournalEntry }) {
-  const { lang } = useApp();
+  const { lang, moneyAccounts } = useApp();
   const [accounts, setAccounts] = useState<ChartAccountRow[]>([]);
   const [date, setDate] = useState(initial?.date ?? today());
   const [memo, setMemo] = useState(initial?.memo ?? '');
   const [busy, setBusy] = useState(false);
   const [lines, setLines] = useState<JournalDraftLine[]>(initial?.lines.map(l => ({ accountId: l.accountId, description: l.description, debit: l.debit ? String(l.debit) : '', credit: l.credit ? String(l.credit) : '' })) ?? [{ accountId: '', description: '', debit: '', credit: '' }, { accountId: '', description: '', debit: '', credit: '' }]);
   const label = (en: string, bn: string) => lang === 'bn' ? bn : en;
-  useEffect(() => { api.chartAccounts().then(rows => { setAccounts(rows.filter(a => a.active)); setLines(current => current.map(l => ({ ...l, accountId: l.accountId || rows.find(a => a.active)?.id || '' }))); }).catch(e => Alert.alert('Chart of accounts', e.message)); }, []);
+  useEffect(() => { api.chartAccounts().then(rows => {
+    const usableRows = rows.filter(account => {
+      if (!account.active || !account.moneyAccountId) return account.active;
+      const linked = moneyAccounts.find(moneyAccount => moneyAccount.id === account.moneyAccountId);
+      return !!linked && (linked.type === 'cash' || linked.type === 'bank');
+    });
+    setAccounts(usableRows);
+    setLines(current => current.map(line => ({ ...line, accountId: line.accountId || usableRows[0]?.id || '' })));
+  }).catch(e => Alert.alert('Chart of accounts', e.message)); }, [moneyAccounts]);
   const setLine = (index: number, update: Partial<JournalDraftLine>) => setLines(current => current.map((line, i) => i === index ? { ...line, ...update } : line));
   const save = async (status: 'draft' | 'posted' = initial ? 'draft' : 'posted') => {
     if (!date.match(/^\d{4}-\d{2}-\d{2}$/) || !memo.trim()) return showEntryError(lang, label('Date and memo are required.', 'তারিখ ও বিবরণ আবশ্যক।'), label('Enter a valid date and add a memo, then save again.', 'সঠিক তারিখ দিন এবং বিবরণ লিখে আবার সংরক্ষণ করুন।'));
@@ -2705,17 +2811,95 @@ export function JournalEntryModal({ onClose, onSaved, initial }: { onClose: () =
   </View></View></Modal>;
 }
 
-export function ChartOfAccountsModal({ onClose, onSaved }: { onClose: () => void; onSaved?: () => void }) {
-  const { lang } = useApp(); const [rows, setRows] = useState<ChartAccountRow[]>([]); const [code, setCode] = useState(''); const [name, setName] = useState(''); const [type, setType] = useState<ChartAccountRow['type']>('asset');
+export function ChartOfAccountsModal({ onClose, onSaved, onOpenLedger }: { onClose: () => void; onSaved?: () => void; onOpenLedger?: (account: ChartAccountRow) => void }) {
+  const { lang, moneyAccounts } = useApp(); const [rows, setRows] = useState<ChartAccountRow[]>([]); const [code, setCode] = useState(''); const [name, setName] = useState(''); const [type, setType] = useState<ChartAccountRow['type']>('asset');
   const [editId, setEditId] = useState<string | null>(null);
+  const [ledger, setLedger] = useState<import('./api').GeneralLedger | null>(null);
+  const [viewAccount, setViewAccount] = useState<ChartAccountRow | null>(null);
   const label = (en: string, bn: string) => lang === 'bn' ? bn : en;
-  const reload = () => api.chartAccounts().then(setRows).catch(e => Alert.alert('Chart of accounts', e.message));
+  const m = useMoney(); const fd = useDateStr(); const { isMobile } = useBreakpoint();
+  const reload = () => Promise.allSettled([api.chartAccounts(), api.generalLedger('0001-01-01', today())]).then(([accountsResult, ledgerResult]) => {
+    if (accountsResult.status === 'fulfilled') setRows(accountsResult.value); else Alert.alert('Chart of accounts', accountsResult.reason instanceof Error ? accountsResult.reason.message : 'Could not load accounts.');
+    if (ledgerResult.status === 'fulfilled') setLedger(ledgerResult.value); else Alert.alert('General ledger', ledgerResult.reason instanceof Error ? ledgerResult.reason.message : 'Could not load balances.');
+  });
   useEffect(() => { void reload(); }, []);
-  const create = async () => { if (!code.trim() || !name.trim()) return showEntryError(lang, label('Enter both an account code and account name.', 'অ্যাকাউন্ট কোড ও অ্যাকাউন্টের নাম লিখুন।')); try { if (editId) { const row = rows.find(x => x.id === editId)!; await api.updateChartAccount(editId, { ...row, code, name, type, active: row.active }); } else await api.createChartAccount({ code, name, type }); setCode(''); setName(''); setEditId(null); reload(); onSaved?.(); } catch (e) { showEntryError(lang, e instanceof Error ? e.message : label('Could not save account.', 'অ্যাকাউন্ট সংরক্ষণ করা যায়নি।')); } };
+  const openLedger = (account: ChartAccountRow) => { if (onOpenLedger) onOpenLedger(account); else setViewAccount(account); };
+  const create = async () => { if (!/^\d{4}$/.test(code.trim())) return showEntryError(lang, label('Use exactly four digits for the account code.', 'অ্যাকাউন্ট কোডে ঠিক চারটি সংখ্যা লিখুন।')); if (!name.trim()) return showEntryError(lang, label('Enter an account name.', 'অ্যাকাউন্টের নাম লিখুন।')); try { if (editId) { const row = rows.find(x => x.id === editId)!; await api.updateChartAccount(editId, { ...row, code, name, type, active: row.active }); } else await api.createChartAccount({ code, name, type }); setCode(''); setName(''); setEditId(null); void reload(); onSaved?.(); } catch (e) { showEntryError(lang, e instanceof Error ? e.message : label('Could not save account.', 'অ্যাকাউন্ট সংরক্ষণ করা যায়নি।')); } };
   const typesList: ChartAccountRow['type'][] = ['asset','liability','equity','income','expense'];
-  return <Modal visible transparent animationType="slide" onRequestClose={onClose}><View style={{ flex: 1, backgroundColor: '#0F172A88', justifyContent: 'center', padding: 14 }}><View style={{ maxHeight: '94%', backgroundColor: '#F8FAFC', borderRadius: 18, padding: 16 }}><View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}><Text style={{ fontSize: 20, fontWeight: '800', color: '#123D64' }}>{label('Chart of accounts', 'হিসাবের চার্ট')}</Text><TouchableOpacity onPress={onClose}><Text style={{ fontSize: 24 }}>×</Text></TouchableOpacity></View>
-    <Field label={label('Code', 'কোড')} value={code} onChange={setCode} required /><Field label={label('Account name', 'অ্যাকাউন্টের নাম')} value={name} onChange={setName} required /><View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 6, marginVertical: 8 }}>{typesList.map(x => <TouchableOpacity key={x} onPress={() => setType(x)} style={{ padding: 8, borderRadius: 16, backgroundColor: type === x ? '#2563EB' : '#E2E8F0' }}><Text style={{ color: type === x ? '#fff' : '#334155' }}>{x}</Text></TouchableOpacity>)}</View><Btn label={label(editId ? 'Save changes' : 'Add account', editId ? 'পরিবর্তন সংরক্ষণ' : 'অ্যাকাউন্ট যোগ করুন')} onPress={() => { void create(); }} />
-    <ScrollView style={{ marginTop: 12 }}>{rows.map(a => <View key={a.id} style={{ flexDirection: 'row', alignItems: 'center', paddingVertical: 9, borderBottomWidth: 1, borderBottomColor: '#E2E8F0', gap: 8 }}><Text style={{ flex: 1, color: a.active ? '#0F172A' : '#94A3B8' }}>{a.code} · {a.name} · {a.type}</Text><TouchableOpacity onPress={() => { setEditId(a.id); setCode(a.code); setName(a.name); setType(a.type); }}><Text style={{ color: '#1D4ED8', fontWeight: '700' }}>{label('Edit', 'সম্পাদনা')}</Text></TouchableOpacity><TouchableOpacity onPress={() => { void api.updateChartAccount(a.id, { ...a, active: !a.active }).then(reload).catch(e => Alert.alert('Account', e.message)); }}><Text style={{ color: '#2563EB', fontWeight: '700' }}>{a.active ? label('Archive', 'আর্কাইভ') : label('Restore', 'ফিরিয়ে আনুন')}</Text></TouchableOpacity></View>)}</ScrollView>
+  const visibleRows = rows.filter(account => {
+    if (!account.moneyAccountId) return true;
+    const linked = moneyAccounts.find(moneyAccount => moneyAccount.id === account.moneyAccountId);
+    return !!linked && (linked.type === 'cash' || linked.type === 'bank');
+  });
+  const typeNames: Record<ChartAccountRow['type'], [string, string]> = {
+    asset: ['Assets', 'সম্পদ'], liability: ['Liabilities', 'দায়'], equity: ['Equity', 'মালিকানা'], income: ['Income', 'আয়'], expense: ['Expenses', 'ব্যয়'],
+  };
+  const suggestCode = (accountType: ChartAccountRow['type']) => {
+    const ranges: Record<ChartAccountRow['type'], [number, number]> = { asset: [1300, 1999], liability: [2100, 2999], equity: [3100, 3999], income: [4200, 4999], expense: [6200, 6999] };
+    const [first, last] = ranges[accountType]; const used = new Set(rows.map(account => account.code));
+    for (let value = first; value <= last; value++) if (!used.has(String(value))) return String(value);
+    for (let value = 1000; value <= 9999; value++) if (!used.has(String(value))) return String(value);
+    return '';
+  };
+  useEffect(() => { if (!editId && !code && rows.length) setCode(suggestCode(type)); }, [rows, type, editId, code]);
+  const typeColors: Record<ChartAccountRow['type'], { text: string; bg: string; border: string }> = {
+    asset: { text: '#1D4ED8', bg: '#EFF6FF', border: '#BFDBFE' }, liability: { text: '#B45309', bg: '#FFF7ED', border: '#FED7AA' },
+    equity: { text: '#7C3AED', bg: '#F5F3FF', border: '#DDD6FE' }, income: { text: '#047857', bg: '#ECFDF5', border: '#A7F3D0' }, expense: { text: '#BE123C', bg: '#FFF1F2', border: '#FECDD3' },
+  };
+  const accountLedger = viewAccount ? ledger?.accounts.find(account => account.code === viewAccount.code) : undefined;
+  return <Modal visible transparent animationType="slide" onRequestClose={() => viewAccount ? setViewAccount(null) : onClose()}><View style={{ flex: 1, backgroundColor: '#0F172A88', justifyContent: 'center', padding: 14 }}><View style={{ width: '100%', maxWidth: 920, maxHeight: '94%', alignSelf: 'center', backgroundColor: '#F8FAFC', borderRadius: 18, padding: 16 }}>
+    <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', gap: 10 }}>
+      <View style={{ flex: 1, flexDirection: 'row', alignItems: 'center', gap: 9 }}>
+        {viewAccount ? <TouchableOpacity onPress={() => setViewAccount(null)} accessibilityRole="button" style={{ padding: 7, borderRadius: 8, backgroundColor: '#EAF2FF' }}><AppIcon name={icons.back} size={18} iconColor="#1D4ED8" /></TouchableOpacity> : null}
+        <Text style={{ fontSize: 20, fontWeight: '800', color: '#123D64' }}>{viewAccount ? `${viewAccount.code} · ${viewAccount.name}` : label('Chart of accounts', 'হিসাবের চার্ট')}</Text>
+      </View>
+      <TouchableOpacity onPress={onClose} accessibilityRole="button"><Text style={{ fontSize: 24, color: '#64748B' }}>×</Text></TouchableOpacity>
+    </View>
+    {viewAccount && !ledger ? <View style={{ minHeight: 120, alignItems: 'center', justifyContent: 'center' }}><ActivityIndicator color="#2563EB" /><Text style={{ color: '#64748B', marginTop: 8 }}>{label('Loading general ledger…', 'সাধারণ খতিয়ান লোড হচ্ছে…')}</Text></View> : viewAccount && accountLedger ? <ScrollView style={{ marginTop: 12 }}>
+      <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 10, marginBottom: 12 }}>
+        {[{ title: label('Opening balance', 'প্রারম্ভিক স্থিতি'), value: `${m(Math.abs(accountLedger.openingBalance))} ${accountLedger.openingBalance < 0 ? 'Cr' : 'Dr'}` }, { title: label('Period debits', 'সময়ের ডেবিট'), value: m(accountLedger.periodDebit) }, { title: label('Period credits', 'সময়ের ক্রেডিট'), value: m(accountLedger.periodCredit) }, { title: label('Current balance', 'বর্তমান স্থিতি'), value: `${m(accountLedger.netBalance)} ${accountLedger.balanceSide}` }].map(item => <View key={item.title} style={{ flex: 1, minWidth: 145, padding: 11, borderRadius: 10, backgroundColor: '#FFFFFF', borderWidth: 1, borderColor: '#E2E8F0' }}><Text style={{ color: '#64748B', fontSize: 11 }}>{item.title}</Text><Text style={{ color: '#0F172A', fontSize: 14, fontWeight: '800', marginTop: 4 }}>{item.value}</Text></View>)}
+      </View>
+      <View style={{ borderWidth: 1, borderColor: '#DCE4EC', borderRadius: 9, overflow: 'hidden', backgroundColor: '#FFFFFF' }}>
+        <View style={{ flexDirection: 'row', padding: 9, backgroundColor: '#EAF2FF' }}><Text style={{ flex: 1, color: '#334155', fontWeight: '800', fontSize: 11 }}>{label('DATE / REFERENCE / DESCRIPTION', 'তারিখ / রেফারেন্স / বিবরণ')}</Text><Text style={{ width: 110, textAlign: 'right', color: '#334155', fontWeight: '800', fontSize: 11 }}>{label('DEBIT', 'ডেবিট')}</Text><Text style={{ width: 110, textAlign: 'right', color: '#334155', fontWeight: '800', fontSize: 11 }}>{label('CREDIT', 'ক্রেডিট')}</Text><Text style={{ width: 130, textAlign: 'right', color: '#334155', fontWeight: '800', fontSize: 11 }}>{label('BALANCE', 'স্থিতি')}</Text></View>
+        {accountLedger.rows.map((row, index) => <View key={`${row.journalNo}-${index}`} style={{ flexDirection: 'row', alignItems: 'center', padding: 9, borderTopWidth: 1, borderTopColor: '#E2E8F0' }}><View style={{ flex: 1, minWidth: 120 }}><Text style={{ color: '#1D4ED8', fontSize: 11, fontWeight: '800' }}>{fd(row.date)} · {row.journalNo}</Text><Text style={{ color: '#334155', fontSize: 12, marginTop: 2 }}>{row.reference} · {row.description}</Text></View><Text style={{ width: 110, textAlign: 'right', color: '#0F172A', fontSize: 12 }}>{row.debit ? m(row.debit) : '—'}</Text><Text style={{ width: 110, textAlign: 'right', color: '#0F172A', fontSize: 12 }}>{row.credit ? m(row.credit) : '—'}</Text><Text style={{ width: 130, textAlign: 'right', color: '#0F172A', fontSize: 12, fontWeight: '700' }}>{m(Math.abs(row.runningBalance))} {row.runningBalance < 0 ? 'Cr' : 'Dr'}</Text></View>)}
+        {!accountLedger.rows.length ? <Text style={{ color: '#64748B', padding: 18, textAlign: 'center' }}>{label('No postings for this period.', 'এই সময়ে কোনো পোস্টিং নেই।')}</Text> : null}
+      </View>
+    </ScrollView> : viewAccount ? <Text style={{ color: '#64748B', paddingVertical: 22, textAlign: 'center' }}>{label('No ledger account found.', 'খতিয়ানে অ্যাকাউন্ট পাওয়া যায়নি।')}</Text> : <>
+      <Field label={label('Account code (4 digits)', 'অ্যাকাউন্ট কোড (৪ সংখ্যা)')} value={code} onChange={value => setCode(value.replace(/\D/g, '').slice(0, 4))} num required /><Field label={label('Account name', 'অ্যাকাউন্টের নাম')} value={name} onChange={setName} required />
+      <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 6, marginVertical: 8 }}>{typesList.map(x => <TouchableOpacity key={x} onPress={() => { setType(x); if (!editId) setCode(suggestCode(x)); }} style={{ padding: 8, borderRadius: 16, backgroundColor: type === x ? typeColors[x].bg : '#E2E8F0', borderWidth: 1, borderColor: type === x ? typeColors[x].border : '#E2E8F0' }}><Text style={{ color: type === x ? typeColors[x].text : '#334155', fontWeight: '700' }}>{label(...typeNames[x])}</Text></TouchableOpacity>)}</View>
+      <Btn label={label(editId ? 'Save changes' : 'Add account', editId ? 'পরিবর্তন সংরক্ষণ' : 'অ্যাকাউন্ট যোগ করুন')} onPress={() => { void create(); }} />
+      <ScrollView horizontal showsHorizontalScrollIndicator style={{ marginTop: 12 }} contentContainerStyle={{ minWidth: isMobile ? 620 : '100%' }}>
+        <View style={{ width: isMobile ? 620 : '100%', minWidth: 620 }}>
+          <View style={{ flexDirection: 'row', alignItems: 'center', paddingHorizontal: 10, minHeight: 38, backgroundColor: '#E2E8F0', borderRadius: 7 }}><Text style={{ flex: 1, color: '#475569', fontSize: 11, fontWeight: '900' }}>{label('ACCOUNT', 'অ্যাকাউন্ট')}</Text><Text style={{ width: 92, color: '#475569', fontSize: 11, fontWeight: '900' }}>{label('TYPE', 'ধরন')}</Text><Text style={{ width: 138, textAlign: 'right', color: '#475569', fontSize: 11, fontWeight: '900' }}>{label('CURRENT BALANCE', 'বর্তমান স্থিতি')}</Text><Text style={{ width: 116, textAlign: 'center', color: '#475569', fontSize: 11, fontWeight: '900' }}>{label('ACTIONS', 'অ্যাকশন')}</Text></View>
+          <ScrollView style={{ marginTop: 5 }}>{typesList.map(accountType => {
+            const groupRows = visibleRows.filter(account => account.type === accountType).sort((a, b) => {
+              const aBalance = ledger?.accounts.find(account => account.code === a.code)?.netBalance ?? 0;
+              const bBalance = ledger?.accounts.find(account => account.code === b.code)?.netBalance ?? 0;
+              const aHasBalance = aBalance >= 0.01, bHasBalance = bBalance >= 0.01;
+              return Number(bHasBalance) - Number(aHasBalance) || bBalance - aBalance || a.code.localeCompare(b.code);
+            });
+            if (!groupRows.length) return null;
+            const tone = typeColors[accountType];
+            return <View key={accountType} style={{ marginBottom: 10, borderWidth: 1, borderColor: tone.border, borderRadius: 9, overflow: 'hidden', backgroundColor: '#FFFFFF' }}>
+              <View style={{ minHeight: 38, paddingHorizontal: 10, backgroundColor: tone.bg, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }}><Text style={{ color: tone.text, fontSize: 12, fontWeight: '900' }}>{label(...typeNames[accountType])}</Text><Text style={{ color: tone.text, fontSize: 11, fontWeight: '800' }}>{groupRows.length}</Text></View>
+              {groupRows.map(a => {
+                const linkedMoney = a.moneyAccountId ? moneyAccounts.find(account => account.id === a.moneyAccountId) : undefined;
+                const ledgerAccount = ledger?.accounts.find(account => account.code === a.code);
+                const balance = !ledger ? '…' : ledgerAccount ? `${m(ledgerAccount.netBalance)} ${ledgerAccount.balanceSide}` : `${m(0)} Dr`;
+                const normalSide = a.type === 'asset' || a.type === 'expense' ? 'Dr' : 'Cr';
+                const unusualBalance = !!ledgerAccount && ledgerAccount.netBalance > 0 && ledgerAccount.balanceSide !== normalSide;
+                return <View key={a.id} style={{ flexDirection: 'row', alignItems: 'center', minHeight: 54, paddingHorizontal: 10, paddingVertical: 7, borderTopWidth: 1, borderTopColor: '#E2E8F0', gap: 8 }}>
+                  <View style={{ flex: 1, minWidth: 0 }}><Text numberOfLines={1} style={{ color: a.active ? '#0F172A' : '#94A3B8', fontSize: 12, fontWeight: '800' }}>{a.code} · {a.name}</Text><Text numberOfLines={1} style={{ color: '#64748B', fontSize: 10, marginTop: 3 }}>{a.system ? label('System default', 'ডিফল্ট সিস্টেম') : label('Custom account', 'নিজস্ব অ্যাকাউন্ট')}{linkedMoney ? ` · ${label('Linked to', 'সংযুক্ত')}: ${linkedMoney.name}` : ''}{!a.active ? ` · ${label('Archived', 'আর্কাইভ করা')}` : ''}</Text></View>
+                  <Text style={{ width: 92, color: tone.text, fontSize: 11, fontWeight: '800' }}>{label(...typeNames[a.type])}</Text>
+                  <TouchableOpacity onPress={() => openLedger(a)} accessibilityRole="button" accessibilityLabel={`${label('Open general ledger for', 'সাধারণ খতিয়ান খুলুন')}: ${a.name}`} style={{ width: 138, alignItems: 'flex-end', paddingVertical: 7 }}><Text style={{ color: unusualBalance ? '#DC2626' : '#1D4ED8', fontSize: 12, fontWeight: '800', textDecorationLine: 'underline' }}>{balance}</Text></TouchableOpacity>
+                  <View style={{ width: 116, flexDirection: 'row', justifyContent: 'center', gap: 9 }}><TouchableOpacity onPress={() => { setEditId(a.id); setCode(a.code); setName(a.name); setType(a.type); }}><Text style={{ color: '#1D4ED8', fontWeight: '700', fontSize: 12 }}>{label('Edit', 'সম্পাদনা')}</Text></TouchableOpacity>{!a.system && <TouchableOpacity onPress={() => { void api.updateChartAccount(a.id, { ...a, active: !a.active }).then(reload).catch(e => Alert.alert('Account', e.message)); }}><Text style={{ color: '#2563EB', fontWeight: '700', fontSize: 12 }}>{a.active ? label('Archive', 'আর্কাইভ') : label('Restore', 'ফিরিয়ে আনুন')}</Text></TouchableOpacity>}</View>
+                </View>;
+              })}
+            </View>;
+          })}</ScrollView>
+        </View>
+      </ScrollView>
+    </>}
   </View></View></Modal>;
 }
 

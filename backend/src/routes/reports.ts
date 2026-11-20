@@ -6,9 +6,15 @@ import { todayStr } from '../units';
 import { lifetimeFinance, periodFinance } from '../finance';
 import { buildSettlement } from '../settlement';
 import { seedChart } from './accounting';
+import { accountBalances as getAccountBalances } from '../money';
 
 const sum = (a: { amount: number }[]) => a.reduce((s, x) => s + x.amount, 0);
 const round2 = (n: number) => Math.round(n * 100) / 100;
+const validIsoDate = (value: unknown): value is string => {
+  if (typeof value !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(value)) return false;
+  const parsed = new Date(`${value}T00:00:00.000Z`);
+  return Number.isFinite(parsed.getTime()) && parsed.toISOString().slice(0, 10) === value;
+};
 const cleanPartyPaymentNote = (note?: string | null) => note
   ?.replace(/\[\[TRANSPORT_PAYMENT\]\]\s*/g, '')
   .replace(/\[\[TRANSPORT_CONTRA_PURCHASE:[^\]]+\]\]/g, '')
@@ -22,11 +28,9 @@ const moneyAccountLedgerName = (account?: { name: string; type: string } | null)
 };
 
 const ledgerAccountCode = (name: string) => {
-  if (name.startsWith('Cash:')) return '1010';
-  if (name.startsWith('Bank:')) return '1020';
-  if (name.startsWith('bKash:')) return '1030';
-  if (name.startsWith('Nagad:')) return '1040';
-  if (name.startsWith('Rocket:')) return '1050';
+  if (name.startsWith('Cash:')) return '1090';
+  if (name.startsWith('Bank:')) return '1091';
+  if (name.startsWith('bKash:') || name.startsWith('Nagad:') || name.startsWith('Rocket:')) return '1091';
   if (name === 'Accounts receivable') return '1100';
   if (name === 'Supplier advances') return '1110';
   if (name === 'Labour Advances') return '1120';
@@ -50,7 +54,11 @@ export const reports = Router();
 // layered into the same ledger below.
 reports.get('/balance-sheet', async (req: Request, res: Response) => {
   await reconcileAutomaticJournalEntries();
-  const asOf = typeof req.query.asOf === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(req.query.asOf) ? req.query.asOf : todayStr();
+  const requestedAsOf = typeof req.query.asOf === 'string' ? req.query.asOf : undefined;
+  if (requestedAsOf && !validIsoDate(requestedAsOf)) {
+    return res.status(400).json({ error: 'A valid as-of date is required' });
+  }
+  const asOf = requestedAsOf ?? todayStr();
   const [accounts, movements, stock, customers, sales, cPays, sReturns, vendors, purchases, vPays, pReturns, landedExpenses, labourAdvances] = await Promise.all([
     db.moneyAccount.findMany({ select: { id: true, openingBalance: true, openingDate: true, type: true } }),
     db.moneyMovement.findMany({ where: { active: true, date: { lte: asOf } }, select: { moneyAccountId: true, method: true, direction: true, amount: true } }),
@@ -98,10 +106,13 @@ reports.get('/balance-sheet', async (req: Request, res: Response) => {
   // House expense cash movements are already reflected in MoneyMovement; only
   // manual journals need to adjust the derived cash and party balances here.
   const delta = (fn: (code: string, name: string, type: string, moneyType?: string) => boolean) => savedJournalLines.filter(line => line.entry.sourceType === 'manual' && fn(line.account.code, line.account.name, line.account.type, line.account.moneyAccount?.type)).reduce((total, line) => total + line.debit - line.credit, 0);
-  const cash = (accountBalance('cash') ?? 0) + delta((code, _name, _type, moneyType) => moneyType === 'cash' || (!moneyType && code === '1010'));
-  const bank = (accountBalance('bank') ?? 0) + delta((code, _name, _type, moneyType) => moneyType === 'bank' || (!moneyType && code === '1020'));
-  const walletBalances = ['bkash', 'nagad', 'rocket'].map((type, index) => (accountBalance(type) ?? 0) + delta((code, _name, _accountType, moneyType) => moneyType === type || (!moneyType && code === String(1030 + index * 10))));
-  const wallets = walletBalances.length ? walletBalances.reduce((total, balance) => total + balance, 0) : null;
+  const cash = (accountBalance('cash') ?? 0) + delta((code, _name, _type, moneyType) => moneyType === 'cash' || (!moneyType && code === '1090'));
+  const bank = (accountBalance('bank') ?? 0) + delta((code, _name, _type, moneyType) => moneyType === 'bank' || (!moneyType && code === '1091'));
+  const walletBalances = ['bkash', 'nagad', 'rocket'].map((type, index) => (accountBalance(type) ?? 0) + delta((code, _name, _accountType, moneyType) => moneyType === type || (!moneyType && code === String(1092 + index))));
+  const wallets = walletBalances.length ? walletBalances.reduce((total, balance) => total + balance, 0) : 0;
+  // Legacy mobile-wallet balances remain in the books, but are presented in
+  // the consolidated bank total now that the software supports cash and bank only.
+  const bankAndLegacyMoney = (bank ?? 0) + wallets;
   const customerBalances = customers.map(c => c.openingDue
     + sales.filter(x => x.customerId === c.id).reduce((s, x) => s + x.total, 0)
     - cPays.filter(x => x.customerId === c.id && !x.returnId).reduce((s, x) => s + x.amount, 0)
@@ -124,13 +135,16 @@ reports.get('/balance-sheet', async (req: Request, res: Response) => {
   const payables = vendorPayableBase + Math.max(0, -payableAdjustment);
   const inventory = stock.reduce((t, x) => t + x.value, 0) + delta(code => code === '1200');
   const payablesFinal = payables;
-  const otherAssets = delta((code, _name, type, moneyType) => type === 'asset' && !moneyType && !['1010', '1020', '1030', '1040', '1050', '1100', '1110', '1120', '1200'].includes(code)) + labourAdvanceBalance;
+  const otherAssets = delta((code, _name, type, moneyType) => type === 'asset' && !moneyType && !['1090', '1091', '1092', '1093', '1094', '1100', '1110', '1120', '1200'].includes(code)) + labourAdvanceBalance;
   const otherLiabilities = -delta((code, _name, type) => type === 'liability' && code !== '2000') + landingCostPayable;
-  const assets = (cash ?? 0) + (bank ?? 0) + (wallets ?? 0) + receivables + supplierAdvances + inventory + otherAssets;
+  const assets = (cash ?? 0) + bankAndLegacyMoney + receivables + supplierAdvances + inventory + otherAssets;
   const totalLiabilities = payablesFinal + customerCredits + otherLiabilities;
   const equity = assets - totalLiabilities;
-  const journalRows = await buildJournalRows('0001-01-01', asOf);
-  const chart = await db.chartAccount.findMany();
+  const [journalRows, moneyBalancesAsOf, chart] = await Promise.all([
+    buildJournalRows('0001-01-01', asOf),
+    getAccountBalances(db, undefined, asOf),
+    db.chartAccount.findMany(),
+  ]);
   const equityAccountIds = new Set(chart.filter(account => account.type === 'equity').map(account => account.id));
   const journalEquity = +journalRows.filter(row => equityAccountIds.has(row.accountId ?? '')).reduce((total, row) => total + row.credit - row.debit, 0).toFixed(2);
   const otherEquity = +(equity - journalEquity).toFixed(2);
@@ -138,7 +152,7 @@ reports.get('/balance-sheet', async (req: Request, res: Response) => {
   const byName = new Map(chart.map(account => [account.name, account]));
   const byCode = new Map(chart.map(account => [account.code, account]));
   const accountTotals = new Map<string, { code: string; name: string; type: string; balance: number }>();
-  for (const row of journalRows.filter(item => item.sourceType === 'manual' || item.sourceType === 'houseExpense')) {
+  for (const row of journalRows.filter(item => item.sourceType === 'manual' || item.sourceType === 'houseExpense' || (item.sourceType === 'automatic' && item.accountType === 'equity'))) {
     const account = byId.get(row.accountId ?? '') ?? byName.get(row.account) ?? byCode.get(ledgerAccountCode(row.account));
     if (!account || !['asset', 'liability', 'equity'].includes(account.type)) continue;
     const key = account.id;
@@ -151,12 +165,19 @@ reports.get('/balance-sheet', async (req: Request, res: Response) => {
   const dynamicBalance = (code: string, name: string, type: string, balance: number) => ({ code, name: byCode.get(code)?.name ?? name, type, balance: +balance.toFixed(2) });
   const accountBreakdown = {
     assets: [
-      ...rowsOfType('asset').filter(row => !['1010', '1020', '1030', '1040', '1050', '1100', '1110', '1120', '1200'].includes(row.code) && !managedMoneyCodes.has(row.code)),
-      ...(cash !== null ? [dynamicBalance('1010', 'Cash', 'asset', cash)] : []),
-      ...(bank !== null ? [dynamicBalance('1020', 'Bank', 'asset', bank)] : []),
-      ...(walletBalances[0] ? [dynamicBalance('1030', 'bKash', 'asset', walletBalances[0])] : []),
-      ...(walletBalances[1] ? [dynamicBalance('1040', 'Nagad', 'asset', walletBalances[1])] : []),
-      ...(walletBalances[2] ? [dynamicBalance('1050', 'Rocket', 'asset', walletBalances[2])] : []),
+      ...rowsOfType('asset').filter(row => !['1090', '1091', '1092', '1093', '1094', '1100', '1110', '1120', '1200'].includes(row.code) && !managedMoneyCodes.has(row.code)),
+      ...(['cash', 'bank'] as const).flatMap(type => {
+        const typeBalances = moneyBalancesAsOf.filter(account => account.type === type);
+        const total = type === 'cash' ? cash ?? 0 : bankAndLegacyMoney;
+        const typeLabel = type === 'cash' ? 'Cash' : 'Bank';
+        const details = typeBalances.flatMap(account => {
+          const linked = chart.find(chartAccount => chartAccount.moneyAccountId === account.id);
+          return Math.abs(account.balance) >= 0.01 ? [{ code: linked?.code ?? account.id, name: linked?.name ?? `${typeLabel}: ${account.name}`, type: 'asset', balance: account.balance }] : [];
+        });
+        const residual = +((total - typeBalances.reduce((sum, account) => sum + account.balance, 0)).toFixed(2));
+        const residualCode = type === 'cash' ? '1090' : '1091';
+        return [...details, ...(Math.abs(residual) >= 0.01 ? [dynamicBalance(residualCode, typeLabel, 'asset', residual)] : [])];
+      }),
       ...(receivables ? [dynamicBalance('1100', 'Accounts receivable', 'asset', receivables)] : []),
       ...(supplierAdvances ? [dynamicBalance('1110', 'Supplier advances', 'asset', supplierAdvances)] : []),
       ...(labourAdvanceBalance ? [dynamicBalance('1120', 'Labour Advances', 'asset', labourAdvanceBalance)] : []),
@@ -179,12 +200,14 @@ reports.get('/balance-sheet', async (req: Request, res: Response) => {
   const credits = journalRows.reduce((total, row) => total + row.credit, 0);
   const detailAssets = accountBreakdown.assets.reduce((total, row) => total + row.balance, 0);
   const detailLiabilities = accountBreakdown.liabilities.reduce((total, row) => total + row.balance, 0);
+  const detailEquity = accountBreakdown.equity.reduce((total, row) => total + row.balance, 0);
   const totalLiabilitiesAndEquity = totalLiabilities + equity;
   const balanced = Math.abs(debits - credits) < 0.01
     && Math.abs(detailAssets - assets) < 0.01
     && Math.abs(detailLiabilities - totalLiabilities) < 0.01
+    && Math.abs(detailEquity - equity) < 0.01
     && Math.abs(assets - totalLiabilitiesAndEquity) < 0.01;
-  res.json({ asOf, assets: { cash, bank, wallets, receivables, supplierAdvances, inventory, other: otherAssets, total: assets }, liabilities: { payables: payablesFinal, customerCredits, other: otherLiabilities, total: totalLiabilities }, equity, journalEquity, otherEquity, accounts: accountBreakdown, totalLiabilitiesAndEquity, balanced });
+  res.json({ asOf, assets: { cash, bank: bankAndLegacyMoney, wallets: null, receivables, supplierAdvances, inventory, other: otherAssets, total: assets }, liabilities: { payables: payablesFinal, customerCredits, other: otherLiabilities, total: totalLiabilities }, equity, journalEquity, otherEquity, accounts: accountBreakdown, totalLiabilitiesAndEquity, balanced });
 });
 
 type AdvancePostings = {
@@ -602,7 +625,7 @@ async function buildJournalRows(from: string, to: string) {
 reports.get('/journal-entries', async (req: Request, res: Response) => {
   const from = typeof req.query.from === 'string' ? req.query.from : '0001-01-01';
   const to = typeof req.query.to === 'string' ? req.query.to : todayStr();
-  if (!/^\d{4}-\d{2}-\d{2}$/.test(from) || !/^\d{4}-\d{2}-\d{2}$/.test(to) || from > to) return res.status(400).json({ error: 'Valid from and to dates are required' });
+  if (!validIsoDate(from) || !validIsoDate(to) || from > to) return res.status(400).json({ error: 'Valid from and to dates are required' });
   await reconcileAutomaticJournalEntries();
   if (req.query.includeStatuses === 'true') {
     const saved = await db.journalEntry.findMany({ where: { date: { gte: from, lte: to } }, include: { lines: { include: { account: true } } }, orderBy: [{ date: 'desc' }, { entryNo: 'desc' }] });
@@ -625,14 +648,19 @@ reports.get('/journal-entries', async (req: Request, res: Response) => {
 reports.get('/general-ledger', async (req: Request, res: Response) => {
   const from = typeof req.query.from === 'string' ? req.query.from : '0001-01-01';
   const to = typeof req.query.to === 'string' ? req.query.to : todayStr();
-  if (!/^\d{4}-\d{2}-\d{2}$/.test(from) || !/^\d{4}-\d{2}-\d{2}$/.test(to) || from > to) return res.status(400).json({ error: 'Valid from and to dates are required' });
+  const source = typeof req.query.source === 'string' && ['all', 'manual', 'automatic'].includes(req.query.source) ? req.query.source as 'all' | 'manual' | 'automatic' : 'all';
+  if (!validIsoDate(from) || !validIsoDate(to) || from > to) return res.status(400).json({ error: 'Valid from and to dates are required' });
   await reconcileAutomaticJournalEntries();
-  const [allRows, chartAccounts] = await Promise.all([
+  const [allRows, chartAccounts, unpostedCount] = await Promise.all([
     buildJournalRows('0001-01-01', to),
     db.chartAccount.findMany({ orderBy: [{ code: 'asc' }] }),
+    db.journalEntry.count({ where: { active: true, status: 'draft', date: { lte: to } } }),
   ]);
   const accounts = new Map<string, { account: string; code: string; openingBalance: number; periodDebit: number; periodCredit: number; closingBalance: number; netBalance: number; balanceSide: 'Dr' | 'Cr'; rows: (typeof allRows[number] & { runningBalance: number })[] }>();
-  for (const row of allRows) {
+  const filteredRows = source === 'all' ? allRows : source === 'manual'
+    ? allRows.filter(row => row.sourceType === 'manual')
+    : allRows.filter(row => row.sourceType !== 'manual');
+  for (const row of filteredRows) {
     const chart = chartAccounts.find(candidate => candidate.id === row.accountId || candidate.name === row.account)
       ?? chartAccounts.find(candidate => candidate.code === ledgerAccountCode(row.account));
     const accountName = chart?.name ?? row.account;
@@ -645,13 +673,18 @@ reports.get('/general-ledger', async (req: Request, res: Response) => {
     if (row.date < from) account.openingBalance += row.debit - row.credit;
     else { account.rows.push({ ...row, account: accountName, accountId: chart?.id ?? row.accountId, runningBalance: +account.closingBalance.toFixed(2) }); account.periodDebit += row.debit; account.periodCredit += row.credit; }
   }
+  for (const chartAccount of chartAccounts) {
+    if (!accounts.has(chartAccount.name)) accounts.set(chartAccount.name, {
+      account: chartAccount.name, code: chartAccount.code, openingBalance: 0, periodDebit: 0, periodCredit: 0,
+      closingBalance: 0, netBalance: 0, balanceSide: 'Dr', rows: [],
+    });
+  }
   for (const account of accounts.values()) { account.netBalance = +Math.abs(account.closingBalance).toFixed(2); account.balanceSide = account.closingBalance < 0 ? 'Cr' : 'Dr'; }
   const list = [...accounts.values()]
-    .filter(account => Math.abs(account.openingBalance) >= 0.01 || account.periodDebit >= 0.01 || account.periodCredit >= 0.01)
     .sort((a, b) => a.code.localeCompare(b.code) || a.account.localeCompare(b.account));
   const debitTotal = +list.reduce((n, a) => n + a.periodDebit, 0).toFixed(2);
   const creditTotal = +list.reduce((n, a) => n + a.periodCredit, 0).toFixed(2);
-  res.json({ from, to, accounts: list, debitTotal, creditTotal, balanced: Math.abs(debitTotal - creditTotal) < 0.01 });
+  res.json({ from, to, source, unpostedCount, accounts: list, debitTotal, creditTotal, balanced: Math.abs(debitTotal - creditTotal) < 0.01 });
 });
 
 // GET /api/dashboard
@@ -693,6 +726,9 @@ reports.get('/finance', async (req: Request, res: Response) => {
   const date = typeof req.query.date === 'string' ? req.query.date : undefined;
   const from = typeof req.query.from === 'string' ? req.query.from : undefined;
   const to = typeof req.query.to === 'string' ? req.query.to : undefined;
+  if ((date && !validIsoDate(date)) || (from && !validIsoDate(from)) || (to && !validIsoDate(to)) || (mode === 'range' && (!from || !to || from > to))) {
+    return res.status(400).json({ error: 'Valid report dates are required' });
+  }
   res.json(await periodFinance(mode, from ?? date, to));
 });
 
@@ -701,7 +737,7 @@ reports.get('/finance', async (req: Request, res: Response) => {
 reports.get('/cashflow', async (req: Request, res: Response) => {
   const from = typeof req.query.from === 'string' ? req.query.from : undefined;
   const to = typeof req.query.to === 'string' ? req.query.to : undefined;
-  if (!from || !to || !/^\d{4}-\d{2}-\d{2}$/.test(from) || !/^\d{4}-\d{2}-\d{2}$/.test(to) || from > to) {
+  if (!validIsoDate(from) || !validIsoDate(to) || from > to) {
     return res.status(400).json({ error: 'Valid from and to dates are required' });
   }
   const [accounts, movements, landedCostRows, cashJournalLines] = await Promise.all([

@@ -39,9 +39,9 @@ export function BankCashDashboard() {
   const [bankReportFrom, setBankReportFrom] = useState('');
   const [bankReportTo, setBankReportTo] = useState('');
   const [bankReportBusy, setBankReportBusy] = useState(false);
-  const active = moneyAccounts.filter(a => a.active);
-  const shown = moneyAccounts.filter(a => archived ? !a.active : a.active);
-  const total = active.reduce((sum, a) => sum + a.balance, 0);
+  const bankAndCash = moneyAccounts.filter(a => a.type === 'cash' || a.type === 'bank');
+  const shown = bankAndCash.filter(a => archived ? !a.active : a.active);
+  const total = moneyAccounts.filter(a => a.active).reduce((sum, a) => sum + a.balance, 0);
   useEffect(() => {
     let current = true;
     setLoading(true); setError('');
@@ -57,14 +57,16 @@ export function BankCashDashboard() {
   const accountTypeName = (type: string) => ({ cash: label('নগদ', 'Cash'), bank: label('ব্যাংক', 'Bank') }[type] ?? type);
   // One row per internal transfer; other movements each retain their own row.
   const seen = new Set<string>();
-  const recent = rows.filter(row => row.sourceType !== 'openingAdjust').filter(row => { if (!row.transferId) return true; if (seen.has(row.transferId)) return false; seen.add(row.transferId); return true; }).slice(0, 12);
+  const recent = rows.filter(row => row.sourceType !== 'openingAdjust')
+    .filter(row => row.moneyAccount ? row.moneyAccount.type === 'cash' || row.moneyAccount.type === 'bank' : row.method === 'cash' || row.method === 'bank')
+    .filter(row => { if (!row.transferId) return true; if (seen.has(row.transferId)) return false; seen.add(row.transferId); return true; }).slice(0, 12);
   const buildBankLedgerReport = async (): Promise<{ doc: ReportDoc; csvRows: string[][] } | null> => {
     if (bankReportFrom && bankReportTo && bankReportFrom > bankReportTo) {
       showEntryError(lang, label('Start date must be on or before the end date.', 'শুরুর তারিখ শেষ তারিখের আগে বা সমান হতে হবে।'));
       return null;
     }
     const end = bankReportTo || today();
-    const accounts = moneyAccounts.filter(account => !bankReportAccountId || account.id === bankReportAccountId);
+    const accounts = bankAndCash.filter(account => !bankReportAccountId || account.id === bankReportAccountId);
     if (!accounts.length) {
       showEntryError(lang, label('No account is available for this report.', 'এই রিপোর্টের জন্য কোনো অ্যাকাউন্ট নেই।'));
       return null;
@@ -171,7 +173,7 @@ export function BankCashDashboard() {
     </View>
     <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
       <Title>{label('অ্যাকাউন্টসমূহ', 'Accounts')}</Title>
-      {moneyAccounts.some(a => !a.active) ? <Btn kind="ghost" label={archived ? t('activeAccountsTab') : t('inactiveAccountsTab')} onPress={() => setArchived(!archived)} /> : null}
+      {bankAndCash.some(a => !a.active) ? <Btn kind="ghost" label={archived ? t('activeAccountsTab') : t('inactiveAccountsTab')} onPress={() => setArchived(!archived)} /> : null}
     </View>
     <RGrid mobile={1} tablet={2} desktop={3}>
       {shown.map(a => <TouchableOpacity key={a.id} testID={`account-card-${a.id}`} accessibilityRole="button" accessibilityLabel={a.name} onPress={() => openAccount(a.id)} style={{ backgroundColor: '#fff', borderRadius: 18, padding: 20, minHeight: 150, marginBottom: 12, borderWidth: 1, borderColor: '#DCE6EF' }}>
@@ -214,7 +216,7 @@ export function BankCashDashboard() {
               <Text style={{ color: '#475569', fontSize: 13, fontWeight: '700', marginBottom: 7 }}>{label('Account', 'অ্যাকাউন্ট')}</Text>
               <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 7 }}>
                 <TouchableOpacity onPress={() => setBankReportAccountId(null)} style={{ borderRadius: 18, borderWidth: 1, borderColor: bankReportAccountId === null ? '#1D4ED8' : '#CBD5E1', backgroundColor: bankReportAccountId === null ? '#EFF6FF' : '#FFFFFF', paddingHorizontal: 12, paddingVertical: 8 }}><Text style={{ color: bankReportAccountId === null ? '#1D4ED8' : '#334155', fontWeight: '700' }}>{label('All accounts', 'সকল অ্যাকাউন্ট')}</Text></TouchableOpacity>
-                {moneyAccounts.map(account => <TouchableOpacity key={account.id} onPress={() => setBankReportAccountId(account.id)} style={{ borderRadius: 18, borderWidth: 1, borderColor: bankReportAccountId === account.id ? '#1D4ED8' : '#CBD5E1', backgroundColor: bankReportAccountId === account.id ? '#EFF6FF' : '#FFFFFF', paddingHorizontal: 12, paddingVertical: 8 }}><Text style={{ color: bankReportAccountId === account.id ? '#1D4ED8' : '#334155', fontWeight: '700' }}>{account.name}</Text></TouchableOpacity>)}
+                {bankAndCash.map(account => <TouchableOpacity key={account.id} onPress={() => setBankReportAccountId(account.id)} style={{ borderRadius: 18, borderWidth: 1, borderColor: bankReportAccountId === account.id ? '#1D4ED8' : '#CBD5E1', backgroundColor: bankReportAccountId === account.id ? '#EFF6FF' : '#FFFFFF', paddingHorizontal: 12, paddingVertical: 8 }}><Text style={{ color: bankReportAccountId === account.id ? '#1D4ED8' : '#334155', fontWeight: '700' }}>{account.name}</Text></TouchableOpacity>)}
               </View>
               <Text style={{ color: '#64748B', fontSize: 12, marginTop: 8 }}>{label('The report includes each account’s opening balance, transactions with debit and credit amounts, a running balance, and closing balance.', 'রিপোর্টে প্রতিটি অ্যাকাউন্টের প্রারম্ভিক ব্যালেন্স, ডেবিট-ক্রেডিটসহ লেনদেন, প্রতিটি লাইনের চলতি ব্যালেন্স এবং সমাপনী ব্যালেন্স থাকবে।')}</Text>
             </Card>

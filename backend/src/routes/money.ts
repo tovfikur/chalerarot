@@ -37,6 +37,7 @@ money.post('/entries', async (req: Request, res: Response) => {
       await lockAccount(t, accountId);
       const account = await t.moneyAccount.findUnique({ where: { id: accountId } });
       if (!account?.active) throw Object.assign(new Error('Account is unavailable'), { status: 400 });
+      if (!isAccountType(account.type)) throw Object.assign(new Error('Only cash and bank accounts can be used for new transactions.'), { status: 400 });
       const sourceType = direction === 'in' ? 'deposit' : 'withdrawal';
       const existing = await t.moneyMovement.findUnique({ where: { sourceType_sourceId: { sourceType, sourceId: requestId } } });
       if (existing) {
@@ -72,8 +73,9 @@ money.put('/entries/:id', async (req: Request, res: Response) => {
   }
   try {
     const updated = await db.$transaction(async t => {
-      const current = await t.moneyMovement.findUnique({ where: { id: req.params.id } });
+      const current = await t.moneyMovement.findUnique({ where: { id: req.params.id }, include: { moneyAccount: { select: { type: true } } } });
       if (!current?.active) throw Object.assign(new Error('Transaction not found'), { status: 404 });
+      if (current.moneyAccount && !isAccountType(current.moneyAccount.type)) throw Object.assign(new Error('Legacy mobile wallet transactions are read-only.'), { status: 409 });
       if (!['deposit', 'withdrawal'].includes(current.sourceType)) {
         throw Object.assign(new Error('Edit this transaction in its source module.'), { status: 409, code: 'SOURCE_TRANSACTION' });
       }
@@ -196,6 +198,7 @@ money.post('/accounts', async (req: Request, res: Response) => {
 money.put('/accounts/:id', async (req: Request, res: Response) => {
   const cur = await db.moneyAccount.findUnique({ where: { id: req.params.id } });
   if (!cur) return res.status(404).json({ error: 'Money account not found' });
+  if (!isAccountType(cur.type)) return fail(res, 'Legacy mobile wallet accounts are read-only.', 'LEGACY_ACCOUNT_READ_ONLY', 409);
   const b = (req.body ?? {}) as Record<string, unknown>;
   const data: Record<string, unknown> = {};
   if (b.name !== undefined) {
@@ -292,6 +295,7 @@ money.delete('/accounts/:id', async (req: Request, res: Response) => {
 money.put('/accounts/:id/opening', async (req: Request, res: Response) => {
   const cur = await db.moneyAccount.findUnique({ where: { id: req.params.id } });
   if (!cur) return res.status(404).json({ error: 'Money account not found' });
+  if (!isAccountType(cur.type)) return fail(res, 'Legacy mobile wallet accounts are read-only.', 'LEGACY_ACCOUNT_READ_ONLY', 409);
   const value = round2(num((req.body ?? {}).openingBalance, NaN));
   if (!Number.isFinite(value)) return fail(res, 'Invalid amount', 'ACCOUNT_OPENING');
   const day = (req.body ?? {}).date;
@@ -356,6 +360,7 @@ money.post('/transfers', async (req: Request, res: Response) => {
       const from = await t.moneyAccount.findUnique({ where: { id: fromId } });
       const to = await t.moneyAccount.findUnique({ where: { id: toId } });
       if (!from || !to) throw Object.assign(new Error('Money account not found'), { status: 400 });
+      if (!isAccountType(from.type) || !isAccountType(to.type)) throw Object.assign(new Error('Transfers are available between cash and bank accounts only.'), { status: 400 });
       if (!from.active || !to.active) throw Object.assign(new Error('This money account is inactive'), { status: 400 });
       // Serialize same-account work so two transfers cannot both pass the check.
       await lockAccounts(t, [from.id, to.id]);

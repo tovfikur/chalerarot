@@ -18,6 +18,7 @@ export type ReportRow = {
 export type ReportSection = { title?: string; columns?: string[]; rows: ReportRow[] };
 
 export type ReportDoc = {
+  kind?: 'report' | 'receipt';
   language?: 'bn' | 'en';
   shop: string;
   title: string;
@@ -61,6 +62,23 @@ export function downloadReportCSV(d: ReportDoc, filename: string): boolean {
   } catch { return false; }
 }
 
+/** Download a self-contained, printable HTML copy of a report or receipt. */
+export function downloadReportHTML(d: ReportDoc, filename: string): boolean {
+  if (typeof document === 'undefined') return false;
+  try {
+    const blob = new Blob([buildReportHTML(d, false)], { type: 'text/html;charset=utf-8' });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = filename.toLowerCase().endsWith('.html') ? filename : `${filename}.html`;
+    document.body.appendChild(link);
+    link.click();
+    link.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 1000);
+    return true;
+  } catch { return false; }
+}
+
 const esc = (s: string) => String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
 
 export function reportText(d: ReportDoc): string {
@@ -93,45 +111,60 @@ export function buildReportHTML(d: ReportDoc, autoPrint: boolean): string {
 <meta name="viewport" content="width=device-width, initial-scale=1" />
 <title>${esc(d.title)}</title>
 <style>
-  body { font-family: system-ui, -apple-system, "Segoe UI", sans-serif; margin: 0; padding: 16px; color: #1C2B22; background: #fff; }
-  .sheet { max-width: 720px; margin: 0 auto; }
+  body { font-family: system-ui, -apple-system, "Segoe UI", sans-serif; margin: 0; padding: 20px; color: #172554; background: #F5F8FF; }
+  .sheet { max-width: 780px; margin: 24px auto; padding: 28px; border: 1px solid #D7E2F4; border-radius: 16px; background: #fff; box-shadow: 0 8px 24px rgba(15,23,42,.06); }
+  .sheet.receipt { max-width: 440px; padding: 16px 18px; border: 0; border-radius: 0; box-shadow: none; }
+  .receipt h1 { font-size: 21px; margin-bottom: 3px; }
+  .receipt h2 { font-size: 16px; margin-bottom: 12px; }
+  .receipt .period { display: none; }
+  .receipt .meta { display: flex; justify-content: space-between; gap: 12px; padding: 2px 0; font-size: 14px; }
+  .receipt .meta strong { text-align: right; }
+  .receipt h3 { border-top: 1px dashed #94A3B8; padding-top: 10px; margin-top: 12px; color: #111827; font-size: 16px; }
+  .receipt td { padding: 6px 5px; }
+  .receipt .total { margin-top: 8px; border-top: 1px solid #64748B; border-bottom: 1px solid #CBD5E1; padding: 7px 2px; font-size: 17px; }
   h1 { font-size: 20px; text-align: center; margin: 0 0 2px; }
-  h2 { font-size: 16px; text-align: center; margin: 0 0 2px; color: #1B7F4B; }
-  .period { text-align: center; color: #6B7A70; font-size: 14px; margin-bottom: 12px; }
-  h3 { font-size: 15px; margin: 14px 0 4px; color: #1B7F4B; }
+  h2 { font-size: 16px; text-align: center; margin: 0 0 2px; color: #1D4ED8; }
+  .period { text-align: center; color: #526583; font-size: 14px; margin-bottom: 16px; }
+  h3 { font-size: 15px; margin: 14px 0 4px; color: #1D4ED8; }
   table { width: 100%; border-collapse: collapse; }
-  td { padding: 5px 0; border-bottom: 1px solid #E3E8E4; font-size: 14px; vertical-align: top; }
-  th { text-align: left; padding: 6px 4px; border-bottom: 2px solid #CBD5E1; font-size: 12px; }
+  td { padding: 8px 6px; border-bottom: 1px solid #E2E8F0; font-size: 14px; vertical-align: top; }
+  th { text-align: left; padding: 8px 6px; border-bottom: 2px solid #CBD5E1; font-size: 12px; }
   th:not(:first-child) { text-align: right; }
   td.r { text-align: right; white-space: nowrap; font-weight: 600; padding-left: 10px; }
   td.r.neg { color: #C62828; }
-  td .s { font-size: 12px; color: #6B7A70; font-weight: 400; }
+  td .s { font-size: 12px; color: #526583; font-weight: 400; }
   tr.b td { font-weight: 700; }
-  .meta { font-size: 13px; color: #444; }
-  .total { margin-top: 12px; border-top: 2px solid #1B7F4B; padding-top: 8px; display: flex; justify-content: space-between; font-size: 16px; font-weight: 700; }
+  .meta { font-size: 13px; color: #334155; padding: 3px 0; }
+  .total { margin-top: 14px; border-top: 2px solid #2563EB; padding-top: 10px; display: flex; justify-content: space-between; font-size: 16px; font-weight: 700; }
   .total.neg { color: #C62828; }
-  .note { margin-top: 10px; font-size: 13px; color: #6B7A70; }
-  .foot { margin-top: 14px; font-size: 12px; color: #6B7A70; text-align: right; }
+  .note { margin-top: 10px; font-size: 13px; color: #526583; }
+  .signatures { display: flex; justify-content: space-between; gap: 32px; margin-top: 44px; }
+  .signatures span { width: 42%; border-top: 1px solid #94A3B8; padding-top: 6px; text-align: center; color: #526583; font-size: 12px; }
+  .foot { margin-top: 14px; font-size: 12px; color: #526583; text-align: right; }
   .bar { position: fixed; top: 8px; right: 8px; display: flex; gap: 8px; z-index: 9; }
-  .bar button { font: inherit; font-size: 14px; padding: 8px 14px; border-radius: 8px; border: 1px solid #1B7F4B; background: #1B7F4B; color: #fff; cursor: pointer; }
-  .bar button.ghost { background: #fff; color: #1B7F4B; }
+  .bar button { font: inherit; font-size: 14px; padding: 8px 14px; border-radius: 8px; border: 1px solid #1D4ED8; background: #1D4ED8; color: #fff; cursor: pointer; }
+  .bar button.ghost { background: #fff; color: #1D4ED8; }
+  .receipt .amount, .receipt .signatures { display: none; }
+  .receipt-thanks { text-align: center; margin-top: 14px; padding-top: 10px; border-top: 1px dashed #94A3B8; font-size: 15px; }
   @media print {
-    body { padding: 0; }
+    body { padding: 0; background: #fff; }
     .bar { display: none !important; }
-    .sheet { max-width: none; }
+    .sheet { max-width: none; margin: 0; padding: 8px; border: 0; border-radius: 0; box-shadow: none; }
+    .sheet.receipt { max-width: 440px; padding: 0; }
   }
 </style></head><body>
 <div class="bar">
   <button onclick="window.print()">${esc(d.printLabel)}</button>
   ${d.closeLabel ? `<button class="ghost" onclick="window.close()">${esc(d.closeLabel)}</button>` : ''}
 </div>
-<div class="sheet">
+<div class="sheet ${d.kind === 'receipt' ? 'receipt' : ''}">
   <h1>${esc(d.shop)}</h1>
   <h2>${esc(d.title)}</h2>
   <div class="period">${esc(d.period)}</div>
-  ${(d.meta ?? []).map(m => `<div class="meta">${esc(m.label)}: ${esc(m.value)}</div>`).join('')}
+  ${(d.meta ?? []).map(m => d.kind === 'receipt' ? `<div class="meta"><span>${esc(m.label)}</span><strong>${esc(m.value)}</strong></div>` : `<div class="meta">${esc(m.label)}: ${esc(m.value)}</div>`).join('')}
   ${sections}
   ${d.total ? `<div class="total ${d.total.neg ? 'neg' : ''}"><span>${esc(d.total.label)}</span><span>${esc(d.total.value)}</span></div>` : ''}
+  ${d.kind === 'receipt' ? `<div class="receipt-thanks">${d.language === 'bn' ? 'ধন্যবাদ' : 'Thank you'}</div>` : ''}
   ${d.note ? `<div class="note">${esc(d.note)}</div>` : ''}
   <div class="foot">${esc(d.printedAt)}</div>
 </div>

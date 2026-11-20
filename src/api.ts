@@ -48,7 +48,7 @@ export type ActivityRow = {
 export type ActivityQuery = { group?: string; q?: string; userId?: string; from?: string; to?: string; take?: number; skip?: number };
 let authExpired: (() => void) | undefined;
 export const onAuthExpired = (callback?: () => void) => { authExpired = callback; };
-export type MoneyMovementRow = { id: string; transactionNo: string; moneyAccountId: string; direction: string; amount: number; date: string; sourceType: string; transferId?: string | null; note?: string | null; moneyAccount?: { name: string; type: string } };
+export type MoneyMovementRow = { id: string; transactionNo: string; moneyAccountId: string | null; method?: string; direction: string; amount: number; date: string; sourceType: string; transferId?: string | null; note?: string | null; moneyAccount?: { name: string; type: string } | null };
 export type HouseExpenseRow = { id: string; transactionNo: string; date: string; amount: number; accountId: string; accountName: string; description: string; note: string };
 export type BusinessSettings = { name: string; address: string; phone: string; currency: string; fiscalStartMonth: number; language: 'bn' | 'en'; allowNegativeStock: boolean };
 export type BulkImportRes = {
@@ -127,7 +127,7 @@ export type LabourAccountsData = {
   }>;
 };
 
-export const MONEY_METHODS: MoneyMethod[] = ['cash', 'bkash', 'nagad', 'bank'];
+export const MONEY_METHODS: MoneyMethod[] = ['cash', 'bank'];
 
 export type MoneyBalance = {
   method: MoneyMethod; opening: number; balance: number; todayIn: number; todayOut: number;
@@ -182,8 +182,8 @@ export type CashFlowStatement = {
 export type BalanceSheet = { asOf: string; assets: { cash: number | null; bank: number | null; wallets: number | null; receivables: number; supplierAdvances?: number; inventory: number; other?: number; total: number }; liabilities: { payables: number; customerCredits?: number; other?: number; total: number }; equity: number; journalEquity: number; otherEquity: number; accounts?: { assets: { code: string; name: string; type: string; balance: number }[]; liabilities: { code: string; name: string; type: string; balance: number }[]; equity: { code: string; name: string; type: string; balance: number }[] }; totalLiabilitiesAndEquity: number; balanced: boolean };
 export type JournalLine = { date: string; reference: string; account: string; accountId?: string; accountCode?: string; accountType?: string; description: string; debit: number; credit: number; journalNo: string; sequence: number; entryId?: string; editable?: boolean };
 export type JournalEntries = { from: string; to: string; entries: { date: string; reference: string; lines: JournalLine[]; debitTotal: number; creditTotal: number; entryId?: string; editable?: boolean; sourceType?: string; sourceId?: string; sourceRef?: string; status?: 'draft' | 'posted' | 'cancelled' }[]; debitTotal: number; creditTotal: number; balanced: boolean };
-export type GeneralLedger = { from: string; to: string; accounts: { account: string; code: string; openingBalance: number; periodDebit: number; periodCredit: number; closingBalance: number; netBalance: number; balanceSide: 'Dr' | 'Cr'; rows: (JournalLine & { runningBalance: number })[] }[]; debitTotal: number; creditTotal: number; balanced: boolean };
-export type ChartAccountRow = { id: string; code: string; name: string; type: 'asset' | 'liability' | 'equity' | 'income' | 'expense'; active: boolean; system: boolean };
+export type GeneralLedger = { from: string; to: string; source?: 'all' | 'manual' | 'automatic'; unpostedCount?: number; accounts: { account: string; code: string; openingBalance: number; periodDebit: number; periodCredit: number; closingBalance: number; netBalance: number; balanceSide: 'Dr' | 'Cr'; rows: (JournalLine & { runningBalance: number })[] }[]; debitTotal: number; creditTotal: number; balanced: boolean };
+export type ChartAccountRow = { id: string; code: string; name: string; type: 'asset' | 'liability' | 'equity' | 'income' | 'expense'; active: boolean; system: boolean; moneyAccountId?: string | null };
 export type JournalEntryLine = { id?: string; accountId: string; account?: ChartAccountRow; description: string; debit: number; credit: number };
 export type SavedJournalEntry = { id: string; entryNo: string; date: string; memo: string; sourceType: string; sourceId?: string | null; sourceRef?: string | null; active: boolean; status?: 'draft' | 'posted' | 'cancelled'; lines: JournalEntryLine[] };
 export type JournalWrite = { date: string; memo: string; sourceType?: 'manual'; status?: 'draft' | 'posted'; lines: JournalEntryLine[] };
@@ -304,7 +304,7 @@ export const api = {
     req<PeriodFinance>(`/finance?mode=${mode}${from ? `&from=${from}` : ''}${to ? `&to=${to}` : ''}`),
   cashflow: (from: string, to: string) => req<CashFlowStatement>(`/cashflow?from=${from}&to=${to}`),
   balanceSheet: (asOf: string) => req<BalanceSheet>(`/balance-sheet?asOf=${asOf}`),
-  generalLedger: (from: string, to: string) => req<GeneralLedger>(`/general-ledger?from=${from}&to=${to}`),
+  generalLedger: (from: string, to: string, source: 'all' | 'manual' | 'automatic' = 'all') => req<GeneralLedger>(`/general-ledger?from=${encodeURIComponent(from)}&to=${encodeURIComponent(to)}&source=${source}`),
   journalEntries: (from: string, to: string, includeStatuses = false) => req<JournalEntries>(`/journal-entries?from=${encodeURIComponent(from)}&to=${encodeURIComponent(to)}${includeStatuses ? '&includeStatuses=true' : ''}`),
   chartAccounts: () => req<ChartAccountRow[]>('/chart-of-accounts'),
   createChartAccount: (body: { code: string; name: string; type: ChartAccountRow['type'] }) => req<ChartAccountRow>('/chart-of-accounts', { method: 'POST', body: JSON.stringify(body) }),

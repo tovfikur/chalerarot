@@ -495,7 +495,7 @@ export function StockDashboard() {
         <View style={styles.headerGlossSheen} pointerEvents="none" />
         <View style={styles.headerLeft}>
           <View style={styles.titleIconBadge}>
-            <AppIcon name={icons.stock} size={22} iconColor="#fff" />
+            <AppIcon name={icons.stock} size={22} iconColor="#2563EB" />
           </View>
           <View>
             <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
@@ -513,7 +513,7 @@ export function StockDashboard() {
             activeOpacity={0.85}
           >
             <AppIcon name={icons.upload} size={18} iconColor="#FFFFFF" />
-            <Text style={styles.headerAddBtnText}>{label('বাল্ক পণ্য আপলোড', 'Bulk upload')}</Text>
+            <Text style={styles.headerBulkBtnText}>{label('বাল্ক পণ্য আপলোড', 'Bulk upload')}</Text>
           </TouchableOpacity>
 
           <TouchableOpacity
@@ -522,7 +522,7 @@ export function StockDashboard() {
             style={styles.headerAddBtn}
             activeOpacity={0.85}
           >
-            <AppIcon name={icons.plus} size={18} iconColor="#FFFFFF" />
+            <AppIcon name={icons.plus} size={18} iconColor="#2563EB" />
             <Text style={styles.headerAddBtnText}>{label('নতুন পণ্য', 'New product')}</Text>
           </TouchableOpacity>
         </View>
@@ -1540,30 +1540,27 @@ export function StockDashboard() {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#F0F6FC',
+    backgroundColor: 'transparent',
   },
   contentContainer: {
-    padding: 18,
+    padding: 24,
     paddingBottom: 40,
   },
   headerBar: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    backgroundColor: '#1c70b9',
-    borderRadius: 16,
+    backgroundColor: '#FFFFFF',
+    borderRadius: 14,
     paddingHorizontal: 18,
     paddingVertical: 14,
     marginBottom: 16,
     position: 'relative',
     overflow: 'hidden',
-    borderTopWidth: 1.5,
-    borderTopColor: '#60b0f4',
-    borderBottomWidth: 3.5,
-    borderBottomColor: '#124c7e',
+    borderWidth: 1,
+    borderColor: '#E2E8F0',
     ...(Platform.OS === 'web' ? {
-      backgroundImage: 'linear-gradient(135deg, #2592ed 0%, #1c70b9 52%, #12518e 100%)',
-      boxShadow: '0 8px 22px rgba(28, 112, 185, 0.38), inset 0 1px 0 rgba(255, 255, 255, 0.45)',
+      boxShadow: '0 4px 14px rgba(15, 23, 42, 0.04)',
     } as any : {}),
   },
   headerGlossSheen: {
@@ -1572,7 +1569,7 @@ const styles = StyleSheet.create({
     left: 0,
     right: 0,
     height: 18,
-    backgroundColor: 'rgba(255, 255, 255, 0.18)',
+    backgroundColor: 'transparent',
   },
   headerLeft: {
     flexDirection: 'row',
@@ -1584,30 +1581,26 @@ const styles = StyleSheet.create({
     width: 40,
     height: 40,
     borderRadius: 12,
-    backgroundColor: 'rgba(255, 255, 255, 0.2)',
+    backgroundColor: '#EAF2FF',
     alignItems: 'center',
     justifyContent: 'center',
-    borderTopWidth: 1,
-    borderTopColor: 'rgba(255, 255, 255, 0.45)',
-    borderBottomWidth: 2,
-    borderBottomColor: 'rgba(0, 0, 0, 0.2)',
   },
   headerTitle: {
-    color: '#fff',
+    color: '#172554',
     fontSize: 20,
-    fontWeight: '800',
+    fontWeight: '700',
     letterSpacing: 0.3,
   },
   liveTag: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: 5,
-    backgroundColor: 'rgba(255, 255, 255, 0.2)',
+    backgroundColor: '#ECFDF5',
     paddingHorizontal: 8,
     paddingVertical: 2,
     borderRadius: 10,
     borderWidth: 1,
-    borderColor: 'rgba(255, 255, 255, 0.35)',
+    borderColor: '#A7F3D0',
   },
   liveDot: {
     width: 6,
@@ -1616,12 +1609,12 @@ const styles = StyleSheet.create({
     backgroundColor: '#86EFAC',
   },
   liveTagText: {
-    color: '#FFFFFF',
+    color: '#047857',
     fontSize: 11,
     fontWeight: '800',
   },
   headerSub: {
-    color: '#DCEBFA',
+    color: '#64748B',
     fontSize: 12.5,
     fontWeight: '500',
     marginTop: 2,
@@ -1650,17 +1643,20 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     gap: 6,
-    backgroundColor: 'rgba(255, 255, 255, 0.2)',
+    backgroundColor: '#FFFFFF',
     paddingHorizontal: 14,
     paddingVertical: 9,
     borderRadius: 10,
-    borderTopWidth: 1,
-    borderTopColor: 'rgba(255, 255, 255, 0.45)',
-    borderBottomWidth: 2,
-    borderBottomColor: 'rgba(0, 0, 0, 0.25)',
-    ...(Platform.OS === 'web' ? ({ cursor: 'pointer' } as any) : {}),
+    borderWidth: 1,
+    borderColor: '#BFDBFE',
+    ...(Platform.OS === 'web' ? ({ cursor: 'pointer', transition: 'background-color 180ms ease, border-color 180ms ease, box-shadow 180ms ease' } as any) : {}),
   },
   headerAddBtnText: {
+    color: '#1E40AF',
+    fontSize: 13,
+    fontWeight: '800',
+  },
+  headerBulkBtnText: {
     color: '#FFFFFF',
     fontSize: 13,
     fontWeight: '800',

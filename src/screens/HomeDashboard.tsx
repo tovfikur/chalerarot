@@ -115,7 +115,7 @@ export function HomeDashboard({
         <View style={styles.headerInfo}>
           <View style={{ flexDirection: 'row', alignItems: 'center', gap: 12 }}>
             <View style={styles.appLogoCircle}>
-              <AppIcon name={icons.stock} size={22} iconColor="#FFFFFF" />
+              <AppIcon name={icons.stock} size={22} iconColor="#2563EB" />
             </View>
             <View>
               <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10 }}>
@@ -139,7 +139,7 @@ export function HomeDashboard({
             style={[styles.tactileHeroBtn, styles.btnSaleHero]}
           >
             <View style={[styles.heroBtnIconWrap, { backgroundColor: '#E0F2FE' }]}>
-              <AppIcon name={icons.sale} size={18} iconColor="#1c70b9" />
+              <AppIcon name={icons.sale} size={18} iconColor={color.primary} />
             </View>
             <View>
               <Text style={[styles.heroBtnText, { color: '#1c70b9' }]}>{lang === 'bn' ? 'নতুন বিক্রয়' : 'New Sale'}</Text>
@@ -152,8 +152,8 @@ export function HomeDashboard({
             onPress={() => go?.('purchase')}
             style={[styles.tactileHeroBtn, styles.btnPurchaseHero]}
           >
-            <View style={[styles.heroBtnIconWrap, { backgroundColor: 'rgba(255,255,255,0.2)' }]}>
-              <AppIcon name={icons.purchase} size={18} iconColor="#FFFFFF" />
+            <View style={[styles.heroBtnIconWrap, { backgroundColor: '#DCEBFF' }]}>
+              <AppIcon name={icons.purchase} size={18} iconColor={color.primary} />
             </View>
             <View>
               <Text style={styles.heroBtnText}>{lang === 'bn' ? 'চাল ক্রয়' : 'Purchase'}</Text>
@@ -166,8 +166,8 @@ export function HomeDashboard({
             onPress={() => go?.('accounts')}
             style={[styles.tactileHeroBtn, styles.btnAccountsHero]}
           >
-            <View style={[styles.heroBtnIconWrap, { backgroundColor: 'rgba(255,255,255,0.2)' }]}>
-              <AppIcon name={icons.accounts} size={18} iconColor="#FFFFFF" />
+            <View style={[styles.heroBtnIconWrap, { backgroundColor: '#DCEBFF' }]}>
+              <AppIcon name={icons.accounts} size={18} iconColor={color.primary} />
             </View>
             <View>
               <Text style={styles.heroBtnText}>{lang === 'bn' ? 'হিসাব খাতা' : 'Accounts'}</Text>
@@ -544,10 +544,10 @@ export function HomeDashboard({
 const styles = StyleSheet.create({
   scrollWrapper: {
     flex: 1,
-    backgroundColor: '#F0F6FC',
+    backgroundColor: 'transparent',
   },
   container: {
-    padding: 18,
+    padding: 24,
     width: '100%',
     paddingBottom: 48,
   },
@@ -562,17 +562,14 @@ const styles = StyleSheet.create({
     marginBottom: 16,
     paddingHorizontal: 18,
     paddingVertical: 14,
-    borderRadius: 16,
-    backgroundColor: '#1c70b9',
-    borderTopWidth: 1.5,
-    borderTopColor: '#60b0f4',
-    borderBottomWidth: 3.5,
-    borderBottomColor: '#124c7e',
+    borderRadius: 14,
+    backgroundColor: '#FFFFFF',
+    borderWidth: 1,
+    borderColor: '#E2E8F0',
     overflow: 'hidden',
     position: 'relative',
     ...(Platform.OS === 'web' ? {
-      backgroundImage: 'linear-gradient(135deg, #2592ed 0%, #1c70b9 52%, #12518e 100%)',
-      boxShadow: '0 8px 22px rgba(28, 112, 185, 0.38), inset 0 1px 0 rgba(255, 255, 255, 0.45)',
+      boxShadow: '0 4px 14px rgba(15, 23, 42, 0.04)',
     } as any : { elevation: 4 }),
   },
   headerGlossSheen: {
@@ -581,7 +578,7 @@ const styles = StyleSheet.create({
     left: 0,
     right: 0,
     height: 18,
-    backgroundColor: 'rgba(255, 255, 255, 0.18)',
+    backgroundColor: 'transparent',
   },
   headerInfo: {
     gap: 6,
@@ -591,23 +588,19 @@ const styles = StyleSheet.create({
     width: 40,
     height: 40,
     borderRadius: 12,
-    backgroundColor: 'rgba(255, 255, 255, 0.2)',
+    backgroundColor: '#EAF2FF',
     alignItems: 'center',
     justifyContent: 'center',
-    borderTopWidth: 1,
-    borderTopColor: 'rgba(255, 255, 255, 0.45)',
-    borderBottomWidth: 2,
-    borderBottomColor: 'rgba(0, 0, 0, 0.2)',
   },
   headerTitle: {
     fontSize: 22,
     fontWeight: '800',
-    color: '#FFFFFF',
+    color: '#172554',
     letterSpacing: 0.3,
   },
   headerSubtitle: {
     fontSize: 12.5,
-    color: '#DCEBFA',
+    color: '#64748B',
     fontWeight: '500',
     marginTop: 2,
   },
@@ -615,12 +608,12 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     gap: 5,
-    backgroundColor: 'rgba(255, 255, 255, 0.2)',
+    backgroundColor: '#ECFDF5',
     paddingHorizontal: 8,
     paddingVertical: 2,
     borderRadius: 10,
     borderWidth: 1,
-    borderColor: 'rgba(255, 255, 255, 0.35)',
+    borderColor: '#A7F3D0',
   },
   liveDot: {
     width: 6,
@@ -631,7 +624,7 @@ const styles = StyleSheet.create({
   liveText: {
     fontSize: 11,
     fontWeight: '800',
-    color: '#FFFFFF',
+    color: '#047857',
   },
   actionGroup: {
     flexDirection: 'row',
@@ -646,11 +639,11 @@ const styles = StyleSheet.create({
     gap: 10,
     paddingHorizontal: 14,
     paddingVertical: 8,
+    minHeight: 46,
     borderRadius: 10,
-    borderTopWidth: 1,
-    borderBottomWidth: 2,
-    borderBottomColor: 'rgba(0, 0, 0, 0.25)',
-    ...(Platform.OS === 'web' ? ({ cursor: 'pointer' } as any) : {}),
+    borderWidth: 1,
+    borderColor: '#D7E2F4',
+    ...(Platform.OS === 'web' ? ({ cursor: 'pointer', transition: 'background-color 180ms ease, border-color 180ms ease, box-shadow 180ms ease, transform 180ms ease' } as any) : {}),
   },
   heroBtnIconWrap: {
     width: 28,
@@ -662,30 +655,27 @@ const styles = StyleSheet.create({
   heroBtnText: {
     fontSize: 13,
     fontWeight: '800',
-    color: '#FFFFFF',
+    color: '#334155',
   },
   heroBtnSub: {
     fontSize: 11,
     fontWeight: '600',
-    color: '#DCEBFA',
+    color: '#64748B',
   },
   btnSaleHero: {
     backgroundColor: '#FFFFFF',
-    borderTopColor: '#FFFFFF',
-    borderBottomColor: 'rgba(0, 0, 0, 0.25)',
+    borderColor: '#D7E2F4',
     ...(Platform.OS === 'web' ? {
-      boxShadow: '0 4px 12px rgba(0, 0, 0, 0.15)',
+      boxShadow: '0 3px 10px rgba(37, 99, 235, 0.13)',
     } as any : {}),
   },
   btnPurchaseHero: {
-    backgroundColor: 'rgba(255, 255, 255, 0.2)',
-    borderTopColor: 'rgba(255, 255, 255, 0.45)',
-    borderBottomColor: 'rgba(0, 0, 0, 0.25)',
+    backgroundColor: '#F3F7FF',
+    borderColor: '#D7E2F4',
   },
   btnAccountsHero: {
-    backgroundColor: 'rgba(255, 255, 255, 0.2)',
-    borderTopColor: 'rgba(255, 255, 255, 0.45)',
-    borderBottomColor: 'rgba(0, 0, 0, 0.25)',
+    backgroundColor: '#F3F7FF',
+    borderColor: '#D7E2F4',
   },
 
   /* 2. KPI CARDS */
@@ -701,14 +691,11 @@ const styles = StyleSheet.create({
     backgroundColor: '#FFFFFF',
     borderRadius: 16,
     padding: 18,
-    borderWidth: 1.5,
-    borderColor: '#D2E3F3',
-    borderBottomWidth: 3.5,
-    borderBottomColor: '#B6D7F6',
+    borderWidth: 1,
+    borderColor: '#E2E8F0',
     gap: 8,
     ...(Platform.OS === 'web' ? {
-      backgroundImage: 'linear-gradient(180deg, #FFFFFF 0%, #F9FBFE 100%)',
-      boxShadow: '0 6px 18px rgba(28, 112, 185, 0.07)',
+      boxShadow: '0 4px 14px rgba(15, 23, 42, 0.04)',
       cursor: 'pointer',
       transition: 'transform 0.2s ease, box-shadow 0.2s ease',
     } as any : { elevation: 2 }),
