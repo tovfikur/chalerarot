@@ -13,9 +13,9 @@ export type Line = { productId: string; qty: number; rate: number };
 export type SaleLineIn = { productId: string; unit: string; enteredQty: number; rate: number; unitCost?: number };
 export type PurchaseLineIn = { productId: string; unit: string; enteredQty: number; rate: number; otherCost?: number; otherCostPerBag?: number; unitCost?: number };
 export type StockTx = { id: string; productId: string; productName?: string; type: 'OPENING' | 'PURCHASE' | 'SALE' | 'ADJUSTMENT' | string; qty: number; bags: number; unitCost: number; bagUnitPrice: number; amount: number; date: string; transactionNo?: string; note?: string };
-export type SaleRec = { id: string; date: string; profit: number; total: number; customerId?: string; invoiceNo?: string; paid: number; due: number; status: SettlementStatus; cogs: number; createdAt?: string; items?: { productId: string; productName: string; productCode?: string }[] };
+export type SaleRec = { id: string; date: string; profit: number; total: number; customerId?: string; invoiceNo?: string; paid: number; due: number; status: SettlementStatus; cogs: number; createdAt?: string; items?: { productId: string; productName: string; productCode?: string; unit: string; enteredQty: number; qtyKg: number; rate: number }[] };
 /** Completed purchase, straight from the bootstrap payload (no extra request). */
-export type PurchaseRec = { id: string; vendorId: string; date: string; total: number; paid: number; due: number; status: SettlementStatus; invoiceNo?: string; items?: { productId: string; productName: string; productCode?: string }[] };
+export type PurchaseRec = { id: string; vendorId: string; date: string; total: number; paid: number; due: number; status: SettlementStatus; invoiceNo?: string; items?: { productId: string; productName: string; productCode?: string; unit: string; enteredQty: number; qtyKg: number; rate: number }[] };
 
 export const today = () => {
   const parts = new Intl.DateTimeFormat('en-CA', {
@@ -70,7 +70,7 @@ const C = createContext<Ctx>(null as any);
 export const useApp = () => useContext(C);
 
 export function AppProvider({ children }: { children: ReactNode }) {
-  const [business, setBusiness] = useState<import('./api').BusinessSettings>({ name: 'চালের আড়ত', address: '', phone: '', currency: 'BDT', fiscalStartMonth: 7, language: 'bn', allowNegativeStock: false });
+  const [business, setBusiness] = useState<import('./api').BusinessSettings>({ name: 'চালের আড়ত', address: '', phone: '', currency: 'BDT', fiscalStartMonth: 7, language: 'bn', allowNegativeStock: false, bagTransportRates: { '25': 3, '50': 6 } });
   const saveBusiness = async (value: import('./api').BusinessSettings) => {
     const saved = await api.saveSettings(value);
     setBusiness(saved);

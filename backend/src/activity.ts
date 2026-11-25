@@ -31,6 +31,7 @@ function classify(method: string, path: string): Classification | null {
   if (path === '/api/labour-accounts/costs' && method === 'POST') return { entity: 'labourCost', action: 'create' };
   if (/^\/api\/labour-accounts\/[^/]+\/payments$/.test(path) && method === 'POST') return { entity: 'labourPayment', action: 'create' };
   if (/^\/api\/labour-accounts\/[^/]+\/advances$/.test(path) && method === 'POST') return { entity: 'labourAdvance', action: 'create' };
+  if (path === '/api/labour-accounts/advances' && method === 'POST') return { entity: 'landingAdvance', action: 'create' };
 
   if (path === '/api/products' && method === 'POST') return { entity: 'product', action: 'create' };
   if (path === '/api/products/bulk' && method === 'POST') return { entity: 'product', action: 'bulk' };
@@ -202,6 +203,11 @@ async function build(req: Request, responseBody: any, actor: any) {
       put('accountName', await accountName(body.accountId));
       put('note', body.note);
     }
+  } else if (entity === 'landingAdvance') {
+    put('landingType', body.landingType);
+    put('amount', body.amount);
+    put('accountName', await accountName(body.accountId));
+    put('note', body.note);
   } else if (entity === 'return') {
     put('kind', body.kind);
     const party = await returnParty(body.kind, body.kind === 'sale' ? body.saleId : body.purchaseId);

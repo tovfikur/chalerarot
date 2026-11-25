@@ -42,6 +42,15 @@ export const useMoney = () => {
   // Sign goes in front of the currency symbol: -৳1,255 (not ৳-1,255).
   return (n: number) => { const v = Math.round(n); return (v < 0 ? '-' : '') + ({ BDT: '৳', USD: '$', INR: '₹', EUR: '€', GBP: '£' }[business.currency] ?? business.currency) + fmtNum(Math.abs(v), lang === 'bn'); };
 };
+/** Formats unit prices without rounding away cents used in line calculations. */
+export const useMoneyExact = () => {
+  const { lang, business } = useApp();
+  return (n: number) => {
+    if (!Number.isFinite(n)) return '-';
+    const symbol = ({ BDT: '৳', USD: '$', INR: '₹', EUR: '€', GBP: '£' } as Record<string, string>)[business.currency] ?? business.currency;
+    return `${n < 0 ? '-' : ''}${symbol}${fmtNum(Math.abs(n), lang === 'bn')}`;
+  };
+};
 // Quantities/weights/stock (keeps decimals, e.g. 25.5 → ২৫.৫).
 export const useNum = () => { const { lang } = useApp(); const bn = lang === 'bn'; return (n: number) => fmtNum(n, bn); };
 // Display dates only (YYYY-MM-DD → digit-localized). Stored value unchanged.

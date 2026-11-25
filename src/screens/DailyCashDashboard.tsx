@@ -83,6 +83,7 @@ export function DailyCashDashboard({ embedded = false }: { embedded?: boolean })
         else if (movement.sourceType === 'withdrawal') category = 'cashWithdraw';
         else if (movement.sourceType === 'transferIn' || movement.sourceType === 'transferOut') category = 'transfer';
         else if (movement.sourceType === 'labourAdvance' || movement.sourceType === 'labourPayment') category = 'labour';
+        else if (movement.sourceType === 'landingAdvance') category = movement.note?.toLowerCase().includes('transport') ? 'transport' : 'labour';
         else if (movement.sourceType === 'expense') {
           const expense = identifyExpense(movement.sourceId);
           const landingType = movement.sourceId.split(':')[1];

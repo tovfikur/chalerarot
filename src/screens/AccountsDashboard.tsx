@@ -17,6 +17,7 @@ import {
   Party,
   Product,
   SaleRec,
+  PurchaseRec,
   Expense,
   type PeriodFinance,
   type MoneyAccountRow,
@@ -24,6 +25,7 @@ import {
 } from '../store';
 import {
   useMoney,
+  useMoneyExact,
   useNum,
   useDateStr,
   toBnDigits,
@@ -42,7 +44,9 @@ import { useBreakpoint } from '../responsive';
 import { SearchableSelect, matchParty, matchProduct } from '../search';
 import { printReport, previewReport, printedAtStamp, downloadReportCSV, type ReportDoc, type ReportRow } from '../report';
 import { api } from '../api';
+import { partyBalanceSnapshot, partyBalanceTimeline } from '../partyBalance';
 import { showEntryError } from '../entryDialog';
+import { LabourAccounts } from './LabourAccounts';
 import { EntryReportButtons } from '../EntryReportButtons';
 import type { ChartAccountRow, GeneralLedger, JournalEntries, SavedJournalEntry, HouseExpenseRow, MoneyMovementRow, StockMovementReportRow } from '../api';
 import type { Key } from '../i18n';
@@ -307,10 +311,11 @@ const presetRange = (id: 'today' | 'last7' | 'thisMonth' | 'last3m' | 'thisYear'
   return { from: td, to: td };
 };
 const expenseTranslationKey = (category: string) => `ex${category.charAt(0).toUpperCase()}${category.slice(1)}` as Key;
-type AccountReportType = 'sales' | 'purchases' | 'collections' | 'supplierPayments' | 'deposits' | 'withdrawals' | 'expenses' | 'houseExpenses' | 'inventory' | 'stockMovements' | 'returns' | 'customerBalances' | 'supplierBalances' | 'customers' | 'suppliers' | 'transfers' | 'cashflow' | 'profitLoss' | 'journal';
+type AccountReportType = 'sales' | 'purchases' | 'collections' | 'supplierPayments' | 'partnerLedger' | 'deposits' | 'withdrawals' | 'expenses' | 'houseExpenses' | 'inventory' | 'stockMovements' | 'returns' | 'customerBalances' | 'supplierBalances' | 'customers' | 'suppliers' | 'transfers' | 'cashflow' | 'profitLoss' | 'journal';
 const ACCOUNT_REPORT_TYPES: { id: AccountReportType; en: string; bn: string }[] = [
   { id: 'sales', en: 'Sales', bn: 'বিক্রয়' }, { id: 'purchases', en: 'Purchases', bn: 'ক্রয়' },
   { id: 'collections', en: 'Customer collections', bn: 'গ্রাহক আদায়' }, { id: 'supplierPayments', en: 'Supplier payments', bn: 'সরবরাহকারী পরিশোধ' },
+  { id: 'partnerLedger', en: 'Partner ledger', bn: 'পার্টনার লেজার' },
   { id: 'deposits', en: 'Deposits', bn: 'জমা' }, { id: 'withdrawals', en: 'Withdrawals', bn: 'উত্তোলন' },
   { id: 'expenses', en: 'Expenses', bn: 'ব্যয়' }, { id: 'houseExpenses', en: 'House expenses', bn: 'বাসার খরচ' },
   { id: 'inventory', en: 'Current inventory', bn: 'বর্তমান মজুদ' }, { id: 'stockMovements', en: 'Inventory movements', bn: 'মজুদ লেনদেন' }, { id: 'returns', en: 'Sales and purchase returns', bn: 'বিক্রয় ও ক্রয় ফেরত' },
@@ -347,6 +352,7 @@ export function AccountsDashboard({ go, focus, onFocusDone }: AccountsDashboardP
   const label = (en: string, bn: string) => lang === 'bn' ? bn : en;
 
   const m = useMoney();
+  const mr = useMoneyExact();
   const n = useNum();
   const fd = useDateStr();
   const expenseCategoryLabel = useCallback((category: string, customName?: string) =>
@@ -359,7 +365,7 @@ export function AccountsDashboard({ go, focus, onFocusDone }: AccountsDashboardP
 
   // Active navigation tab
   // 'overview' | 'due' | 'pay' | 'expense' | 'houseExpense'
-  const [activeTab, setActiveTab] = useState<'overview' | 'reports' | 'due' | 'pay' | 'expense' | 'houseExpense' | 'dailyCash' | 'collection' | 'supplierPayment'>('overview');
+  const [activeTab, setActiveTab] = useState<'overview' | 'reports' | 'due' | 'pay' | 'expense' | 'houseExpense' | 'dailyCash' | 'collection' | 'supplierPayment' | 'transportPayment' | 'stockInPayment' | 'stockOutPayment'>('overview');
 
   // Filter state
   const [fltPreset, setFltPreset] = useState<'today' | 'last7' | 'thisMonth' | 'last3m' | 'thisYear' | 'custom'>('today');
@@ -384,6 +390,7 @@ export function AccountsDashboard({ go, focus, onFocusDone }: AccountsDashboardP
   const [reportDataLoading, setReportDataLoading] = useState(false);
   const [reportGenerating, setReportGenerating] = useState(false);
   const [generatedReport, setGeneratedReport] = useState<ReportDoc | null>(null);
+  const partnerLedgerSelected = selectedReportTypes.includes('partnerLedger');
 
   // Focus effect for navigation from outside
   useEffect(() => {
@@ -1098,6 +1105,10 @@ export function AccountsDashboard({ go, focus, onFocusDone }: AccountsDashboardP
   const generateMultiReport = async () => {
     if (reportDataLoading) return;
     if (!selectedReportTypes.length) { showEntryError(lang, label('Select at least one report type.', 'অন্তত একটি রিপোর্টের ধরন নির্বাচন করুন।')); return; }
+    if (selectedReportTypes.includes('partnerLedger')) {
+      if (!reportFrom || !reportTo) { showEntryError(lang, label('Partner ledger requires both a start date and an end date.', 'পার্টনার লেজারের জন্য শুরুর ও শেষ তারিখ দুটিই দিন।')); return; }
+      if (Boolean(reportCustomerId) === Boolean(reportSupplierId)) { showEntryError(lang, label('Partner ledger requires exactly one customer or supplier.', 'পার্টনার লেজারের জন্য একজন গ্রাহক অথবা একজন সরবরাহকারী নির্বাচন করুন।')); return; }
+    }
     if (reportFrom && reportTo && reportFrom > reportTo) { showEntryError(lang, label('The start date must be before the end date.', 'শুরুর তারিখ শেষ তারিখের আগে হতে হবে।')); return; }
     setReportGenerating(true);
     try {
@@ -1109,27 +1120,93 @@ export function AccountsDashboard({ go, focus, onFocusDone }: AccountsDashboardP
       const selectedSupplier = vendors.find(vendor => vendor.id === reportSupplierId);
       const selectedProduct = products.find(product => product.id === reportProductId);
       const sections: ReportDoc['sections'] = [];
+      const tradeColumns = [
+        label('Customer code', 'গ্রাহক কোড'), label('Customer', 'গ্রাহক'), label('Memo / Invoice', 'মেমো / ইনভয়েস'), label('Date', 'তারিখ'),
+        label('Short Code', 'শর্ট কোড'), label('Product Name', 'পণ্যের নাম'), label('Quantity', 'পরিমাণ'), label('Rate', 'দর'),
+        label('Total', 'মোট'), label('Total KG', 'মোট কেজি'), label('Paid', 'পরিশোধিত'), label('Due', 'বাকি'), label('Status', 'অবস্থা'),
+      ];
+      const tradeRows = (records: (SaleRec | PurchaseRec)[], partyFor: (row: SaleRec | PurchaseRec) => Party | undefined): ReportRow[] => records.flatMap(row => {
+        const party = partyFor(row);
+        const itemLines = row.items?.length ? row.items : [{ productId: '', productName: '', productCode: '', unit: '', enteredQty: 0, qtyKg: 0, rate: 0 }];
+        return itemLines.map((item, index) => ({
+          label: row.invoiceNo ?? row.id,
+          right: m(item.qtyKg * item.rate),
+          neg: index === 0 && row.due > 0,
+          cells: [party?.code ?? '', party?.name ?? '', row.invoiceNo ?? row.id, fd(row.date), item.productCode ?? '', item.productName, `${n(item.enteredQty)}${item.unit ? ` ${item.unit}` : ''}`, mr(item.rate), m(item.qtyKg * item.rate), n(item.qtyKg), index === 0 ? m(row.paid) : '', index === 0 ? m(row.due) : '', index === 0 ? row.status === 'paid' ? label('Paid', 'পরিশোধিত') : row.status === 'partial' ? label('Partial', 'আংশিক') : label('Due', 'বাকি') : ''],
+        }));
+      });
+      const periodPartnerBalances: { title: string; partyName: string; opening: number; closing: number }[] = [];
+      let partnerLedgerOpening: number | undefined;
+      let partnerLedgerClosing: number | undefined;
       const addSection = (type: AccountReportType, rows: ReportRow[]) => {
         const option = ACCOUNT_REPORT_TYPES.find(item => item.id === type)!;
         sections.push({ title: lang === 'bn' ? option.bn : option.en, rows });
       };
       for (const type of selectedReportTypes) {
-        if (type === 'sales') {
-          const rows = sales.filter(row => inRange(row.date) && (!reportCustomerId || row.customerId === reportCustomerId) && productMatches(row.items))
-            .map(row => { const party = customers.find(customer => customer.id === row.customerId); return { label: row.invoiceNo ?? row.id, sub: [row.date, party?.code, party?.name, row.items?.map(item => item.productName).join(', ')].filter(Boolean).join(' · '), right: m(row.total), neg: row.due > 0 }; });
+        if (type === 'partnerLedger') {
+          const customerKind = Boolean(reportCustomerId);
+          const party = customerKind ? selectedCustomer : selectedSupplier;
+          if (!party) throw new Error(label('Select a customer or supplier for the partner ledger.', 'পার্টনার লেজারের জন্য গ্রাহক বা সরবরাহকারী নির্বাচন করুন।'));
+          const source = customerKind ? cTx : vTx;
+          const timeline = partyBalanceTimeline(source, party.id, party.opening);
+          const beforeRange = timeline.filter(row => row.transaction.date < from);
+          partnerLedgerOpening = beforeRange.length ? beforeRange[beforeRange.length - 1].currentDue : party.opening;
+          const entries = timeline.filter(row => row.transaction.date >= from && row.transaction.date <= to);
+          partnerLedgerClosing = entries.length ? entries[entries.length - 1].currentDue : partnerLedgerOpening;
+          const rows: ReportRow[] = [
+            { label: label('Opening balance', 'প্রারম্ভিক ব্যালেন্স'), sub: `${label('Balance before', 'এর আগের ব্যালেন্স')} ${from}`, right: m(partnerLedgerOpening), bold: true },
+            ...entries.map(({ transaction, previousDue, currentDue }) => {
+              const movement = transaction.kind === 'sale' || transaction.kind === 'purchase' ? transaction.amount : -transaction.amount;
+              const description = customerKind
+                ? transaction.kind === 'sale' ? label('Sales invoice', 'বিক্রয় ইনভয়েস') : transaction.kind === 'sreturn' ? label('Sales return', 'বিক্রয় ফেরত') : label('Collection', 'গ্রাহক আদায়')
+                : transaction.kind === 'purchase' ? label('Purchase invoice', 'ক্রয় ইনভয়েস') : transaction.kind === 'preturn' ? label('Purchase return', 'ক্রয় ফেরত') : label('Supplier payment', 'সরবরাহকারী পেমেন্ট');
+              return {
+                label: transaction.ref ?? transaction.transactionNo ?? transaction.id,
+                sub: [transaction.date, description, `${label('Previous due', 'আগের বাকি')}: ${m(previousDue)}`, `${label('Amount', 'পরিমাণ')}: ${m(transaction.amount)}`, `${label(customerKind ? 'Current due' : 'Current payable', customerKind ? 'বর্তমান বাকি' : 'বর্তমান পাওনা')}: ${m(currentDue)}`, transaction.account, transaction.note].filter(Boolean).join(' · '),
+                right: m(Math.abs(movement)), neg: movement < 0,
+              };
+            }),
+            { label: label('Closing balance', 'সমাপনী ব্যালেন্স'), sub: label('Balance at end of selected period', 'নির্বাচিত সময়ের শেষের ব্যালেন্স'), right: m(partnerLedgerClosing), bold: true },
+          ];
           addSection(type, rows);
+        } else if (type === 'sales') {
+          const records = sales.filter(row => inRange(row.date) && (!reportCustomerId || row.customerId === reportCustomerId) && productMatches(row.items));
+          sections.push({ title: lang === 'bn' ? ACCOUNT_REPORT_TYPES.find(item => item.id === type)!.bn : ACCOUNT_REPORT_TYPES.find(item => item.id === type)!.en, columns: tradeColumns, rightAlignColumns: [7, 8, 9, 10, 11], rows: tradeRows(records, row => customers.find(customer => customer.id === (row as SaleRec).customerId)) });
         } else if (type === 'purchases') {
-          const rows = purchases.filter(row => inRange(row.date) && (!reportSupplierId || row.vendorId === reportSupplierId) && productMatches(row.items))
-            .map(row => { const party = vendors.find(vendor => vendor.id === row.vendorId); return { label: row.invoiceNo ?? row.id, sub: [row.date, party?.code, party?.name, row.items?.map(item => item.productName).join(', ')].filter(Boolean).join(' · '), right: m(row.total), neg: row.due > 0 }; });
-          addSection(type, rows);
+          const records = purchases.filter(row => inRange(row.date) && (!reportSupplierId || row.vendorId === reportSupplierId) && productMatches(row.items));
+          sections.push({ title: lang === 'bn' ? ACCOUNT_REPORT_TYPES.find(item => item.id === type)!.bn : ACCOUNT_REPORT_TYPES.find(item => item.id === type)!.en, columns: tradeColumns.map((column, index) => index === 0 ? label('Supplier code', 'সরবরাহকারী কোড') : index === 1 ? label('Supplier', 'সরবরাহকারী') : column), rightAlignColumns: [7, 8, 9, 10, 11], rows: tradeRows(records, row => vendors.find(vendor => vendor.id === (row as PurchaseRec).vendorId)) });
         } else if (type === 'collections' || type === 'supplierPayments') {
           const customerKind = type === 'collections';
           const rowsSource = customerKind ? cTx : vTx;
           const partyList = customerKind ? customers : vendors;
           const partyFilter = customerKind ? reportCustomerId : reportSupplierId;
+          const selectedParty = partyFilter ? partyList.find(party => party.id === partyFilter) : undefined;
+          if (selectedParty) {
+            const timeline = partyBalanceTimeline(rowsSource, selectedParty.id, selectedParty.opening);
+            const beforeRange = timeline.filter(item => item.transaction.date < from);
+            const periodTimeline = timeline.filter(item => item.transaction.date >= from && item.transaction.date <= to);
+            periodPartnerBalances.push({
+              title: customerKind ? label('Customer balance', 'গ্রাহক ব্যালেন্স') : label('Supplier balance', 'সরবরাহকারী ব্যালেন্স'),
+              partyName: `${selectedParty.code ?? ''} ${selectedParty.name}`.trim(),
+              opening: beforeRange.length ? beforeRange[beforeRange.length - 1].currentDue : selectedParty.opening,
+              closing: periodTimeline.length ? periodTimeline[periodTimeline.length - 1].currentDue : beforeRange.length ? beforeRange[beforeRange.length - 1].currentDue : selectedParty.opening,
+            });
+          }
           const rows = rowsSource.filter(row => row.kind === 'payment' && inRange(row.date) && (!partyFilter || row.partyId === partyFilter))
-            .map(row => { const party = partyList.find(item => item.id === row.partyId); return { label: row.transactionNo ?? row.ref ?? row.id, sub: [row.date, party?.code, party?.name, row.note, row.method].filter(Boolean).join(' · '), right: m(row.amount) }; });
-          addSection(type, rows);
+            .map(row => {
+              const party = partyList.find(item => item.id === row.partyId);
+              const snapshot = party ? partyBalanceSnapshot(rowsSource, party.id, row.id, party.opening) : undefined;
+              return {
+                label: row.transactionNo ?? row.ref ?? row.id,
+                right: m(row.amount),
+                cells: [fd(row.date), row.transactionNo ?? row.ref ?? row.id, `${party?.code ? `${party.code} ` : ''}${party?.name ?? ''}`, m(snapshot?.previousDue ?? 0), m(row.amount), m(snapshot?.currentDue ?? 0)],
+              };
+            });
+          sections.push({
+            title: lang === 'bn' ? ACCOUNT_REPORT_TYPES.find(item => item.id === type)!.bn : ACCOUNT_REPORT_TYPES.find(item => item.id === type)!.en,
+            columns: [label('Date', 'তারিখ'), label('Transaction ID', 'লেনদেন আইডি'), label('Name', 'নাম'), label('Previous balance', 'আগের ব্যালেন্স'), label('Amount', 'পরিমাণ'), label('Current balance', 'বর্তমান ব্যালেন্স')],
+            rightAlignColumns: [3, 4, 5], rows,
+          });
         } else if (type === 'deposits' || type === 'withdrawals') {
           const sourceType = type === 'deposits' ? 'deposit' : 'withdrawal';
           addSection(type, reportMoneyRows.filter(row => row.sourceType === sourceType && inRange(row.date)).map(row => ({ label: row.transactionNo, sub: [row.date, row.moneyAccount?.name, row.note].filter(Boolean).join(' · '), right: m(row.amount), neg: type === 'withdrawals' })));
@@ -1198,8 +1275,15 @@ export function AccountsDashboard({ go, focus, onFocusDone }: AccountsDashboardP
         selectedCustomer ? { label: label('Customer', 'গ্রাহক'), value: `${selectedCustomer.code ?? ''} ${selectedCustomer.name}`.trim() } : null,
         selectedSupplier ? { label: label('Supplier', 'সরবরাহকারী'), value: `${selectedSupplier.code ?? ''} ${selectedSupplier.name}`.trim() } : null,
         selectedProduct ? { label: label('Product', 'পণ্য'), value: `${selectedProduct.code ?? ''} ${selectedProduct.name}`.trim() } : null,
+        partnerLedgerOpening !== undefined ? { label: label('Partner ledger opening balance', 'পার্টনার লেজারের প্রারম্ভিক ব্যালেন্স'), value: m(partnerLedgerOpening) } : null,
+        ...periodPartnerBalances.flatMap(item => [
+          { label: `${item.title} · ${label('Partner', 'পার্টনার')}`, value: item.partyName },
+          { label: `${item.title} · ${label('Previous balance', 'পূর্বের ব্যালেন্স')}`, value: m(item.opening) },
+          { label: `${item.title} · ${label('Current balance', 'বর্তমান ব্যালেন্স')}`, value: m(item.closing) },
+        ]),
       ].filter((item): item is { label: string; value: string } => Boolean(item));
       const doc: ReportDoc = { language: lang, shop: business.name, title: customReportTitle.trim() || label('Combined business reports', 'সমন্বিত ব্যবসায়িক প্রতিবেদন'), period, meta, sections,
+        total: partnerLedgerClosing === undefined ? undefined : { label: label('Partner ledger closing balance', 'পার্টনার লেজারের সমাপনী ব্যালেন্স'), value: m(partnerLedgerClosing) },
         printedAt: printedAtStamp(lang), printLabel: label('Print / Save PDF', 'প্রিন্ট / PDF সংরক্ষণ') };
       setGeneratedReport(doc);
     } catch (error) {
@@ -1217,12 +1301,15 @@ export function AccountsDashboard({ go, focus, onFocusDone }: AccountsDashboardP
         <Text style={{ color: '#123D64', fontSize: 16, fontWeight: '800', marginBottom: 10 }}>{label('Customize report', 'রিপোর্ট কাস্টমাইজ করুন')}</Text>
         <Field label={label('Report title (optional)', 'রিপোর্টের শিরোনাম (ঐচ্ছিক)')} value={customReportTitle} onChange={value => { setCustomReportTitle(value); setGeneratedReport(null); }} />
         <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 10 }}>
-          <View style={{ flex: 1, minWidth: 190 }}><DateField label={label('From date', 'শুরুর তারিখ')} value={reportFrom} onChange={value => { setReportFrom(value); setGeneratedReport(null); }} clearable /></View>
-          <View style={{ flex: 1, minWidth: 190 }}><DateField label={label('To date', 'শেষ তারিখ')} value={reportTo} onChange={value => { setReportTo(value); setGeneratedReport(null); }} clearable minDate={reportFrom || undefined} /></View>
+          <View style={{ flex: 1, minWidth: 190 }}><DateField label={label('From date', 'শুরুর তারিখ')} value={reportFrom} onChange={value => { setReportFrom(value); setGeneratedReport(null); }} clearable required={partnerLedgerSelected} /></View>
+          <View style={{ flex: 1, minWidth: 190 }}><DateField label={label('To date', 'শেষ তারিখ')} value={reportTo} onChange={value => { setReportTo(value); setGeneratedReport(null); }} clearable minDate={reportFrom || undefined} required={partnerLedgerSelected} /></View>
         </View>
         <Text style={{ color: '#475569', fontSize: 12, fontWeight: '700', marginBottom: 5 }}>{label('Optional filters (apply where relevant)', 'ঐচ্ছিক ফিল্টার (প্রযোজ্য রিপোর্টে প্রয়োগ হবে)')}</Text>
-        <SearchableSelect items={customers} value={reportCustomerId} onPick={id => { setReportCustomerId(id); setGeneratedReport(null); }} placeholder={label('Select customer', 'গ্রাহক নির্বাচন করুন')} match={matchParty} subOf={item => item.code ? `${label('Code', 'কোড')}: ${item.code}` : item.mobile} />
-        <SearchableSelect items={vendors} value={reportSupplierId} onPick={id => { setReportSupplierId(id); setGeneratedReport(null); }} placeholder={label('Select supplier', 'সরবরাহকারী নির্বাচন করুন')} match={matchParty} subOf={item => item.code ? `${label('Code', 'কোড')}: ${item.code}` : item.mobile} />
+        {partnerLedgerSelected ? <View style={{ flexDirection: 'row', flexWrap: 'wrap', alignItems: 'center', gap: 8, marginVertical: 6 }}><RequiredLabel text={label('Partner ledger: select exactly one customer or supplier and a date range', 'পার্টনার লেজার: একজন গ্রাহক অথবা সরবরাহকারী এবং তারিখের সীমা নির্বাচন করুন')} required /><Btn kind="ghost" label={label('This month', 'এই মাস')} onPress={() => { const range = presetRange('thisMonth', today()); setReportFrom(range.from); setReportTo(range.to); setGeneratedReport(null); }} /></View> : null}
+        {partnerLedgerSelected ? <RequiredLabel text={label('Customer', 'গ্রাহক')} required /> : null}
+        <SearchableSelect items={customers} value={reportCustomerId} onPick={id => { setReportCustomerId(id); if (id && partnerLedgerSelected) setReportSupplierId(undefined); setGeneratedReport(null); }} placeholder={label(partnerLedgerSelected ? 'Select customer (required)' : 'Select customer', partnerLedgerSelected ? 'গ্রাহক নির্বাচন (বাধ্যতামূলক)' : 'গ্রাহক নির্বাচন করুন')} match={matchParty} subOf={item => item.code ? `${label('Code', 'কোড')}: ${item.code}` : item.mobile} />
+        {partnerLedgerSelected ? <RequiredLabel text={label('Supplier', 'সরবরাহকারী')} required /> : null}
+        <SearchableSelect items={vendors} value={reportSupplierId} onPick={id => { setReportSupplierId(id); if (id && partnerLedgerSelected) setReportCustomerId(undefined); setGeneratedReport(null); }} placeholder={label(partnerLedgerSelected ? 'Select supplier (required)' : 'Select supplier', partnerLedgerSelected ? 'সরবরাহকারী নির্বাচন (বাধ্যতামূলক)' : 'সরবরাহকারী নির্বাচন করুন')} match={matchParty} subOf={item => item.code ? `${label('Code', 'কোড')}: ${item.code}` : item.mobile} />
         <SearchableSelect items={products} value={reportProductId} onPick={id => { setReportProductId(id); setGeneratedReport(null); }} placeholder={label('Select product', 'পণ্য নির্বাচন করুন')} match={matchProduct} subOf={item => item.code} />
       </View>
       <View style={{ backgroundColor: '#FFFFFF', borderRadius: 14, borderWidth: 1, borderColor: '#E2E8F0', padding: 14 }}>
@@ -1244,8 +1331,7 @@ export function AccountsDashboard({ go, focus, onFocusDone }: AccountsDashboardP
       {reportDataLoading ? <Text style={{ color: '#64748B' }}>{label('Loading report data…', 'রিপোর্টের তথ্য লোড হচ্ছে…')}</Text> : null}
       {generatedReport ? <View style={{ gap: 10 }}>
         <View style={{ backgroundColor: '#FFFFFF', borderRadius: 14, borderWidth: 1, borderColor: '#CBD5E1', padding: 14 }}><Text style={{ color: '#0F172A', fontSize: 18, fontWeight: '800' }}>{generatedReport.title}</Text><Text style={{ color: '#64748B', marginTop: 3 }}>{generatedReport.period}</Text>{generatedReport.meta?.map((item, index) => <Text key={index} style={{ color: '#64748B', marginTop: 3 }}>{item.label}: {item.value}</Text>)}</View>
-        {generatedReport.sections.map((section, index) => <View key={`${section.title}-${index}`} style={{ backgroundColor: '#FFFFFF', borderRadius: 12, borderWidth: 1, borderColor: '#E2E8F0', padding: 13 }}><Text style={{ color: '#123D64', fontWeight: '800', marginBottom: 7 }}>{section.title} · {section.rows.length}</Text>{section.rows.slice(0, 6).map((row, rowIndex) => <Row key={`${index}-${rowIndex}`} left={row.label} sub={row.sub} right={row.right} neg={row.neg} />)}{section.rows.length > 6 ? <Text style={{ color: '#64748B', marginTop: 6 }}>{label(`and ${section.rows.length - 6} more rows`, `আরও ${section.rows.length - 6}টি সারি`)}</Text> : null}{section.rows.length === 0 ? <Empty /> : null}</View>)}
-      </View> : null}
+        {generatedReport.sections.map((section, index) => <View key={`${section.title}-${index}`} style={{ backgroundColor: '#FFFFFF', borderRadius: 12, borderWidth: 1, borderColor: '#E2E8F0', padding: 13 }}><Text style={{ color: '#123D64', fontWeight: '800', marginBottom: 7 }}>{section.title} · {section.rows.length}</Text>{section.columns ? <ScrollView horizontal><View style={{ minWidth: 1600 }}><View style={{ flexDirection: 'row', backgroundColor: '#EFF6FF', paddingVertical: 9 }}>{section.columns.map((column, columnIndex) => <Text key={columnIndex} style={{ flex: 1, paddingHorizontal: 5, fontSize: 10, fontWeight: '800', color: '#334155' }}>{column}</Text>)}</View>{section.rows.slice(0, 6).map((row, rowIndex) => <View key={`${index}-${rowIndex}`} style={{ flexDirection: 'row', borderBottomWidth: 1, borderColor: '#E2E8F0', paddingVertical: 8 }}>{(row.cells ?? []).map((cell, columnIndex) => <Text key={columnIndex} style={{ flex: 1, paddingHorizontal: 5, fontSize: 10, color: '#0F172A' }}>{cell}</Text>)}</View>)}</View></ScrollView> : section.rows.slice(0, 6).map((row, rowIndex) => <Row key={`${index}-${rowIndex}`} left={row.label} sub={row.sub} right={row.right} neg={row.neg} />)}{section.rows.length > 6 ? <Text style={{ color: '#64748B', marginTop: 6 }}>{label(`and ${section.rows.length - 6} more rows`, `আরও ${section.rows.length - 6}টি সারি`)}</Text> : null}{section.rows.length === 0 ? <Empty /> : null}</View>)}</View> : null}
     </ScrollView>
   </View>;
 
@@ -1767,6 +1853,9 @@ export function AccountsDashboard({ go, focus, onFocusDone }: AccountsDashboardP
           { key: 'supplierPayment', labelBn: 'সরবরাহকারী পেমেন্ট', labelEn: 'Supplier Payment', icon: icons.pay },
           { key: 'expense', labelBn: '📉 খরচের রেজিস্টার', labelEn: 'Expense Register', icon: icons.expense },
           { key: 'houseExpense', labelBn: '🏠 বাসার খরচ', labelEn: 'House Expenses', icon: icons.moneyOut },
+          { key: 'transportPayment', labelBn: 'সমন্বিত পরিবহন পেমেন্ট', labelEn: 'Cumulative Transport Payment', icon: icons.pay },
+          { key: 'stockInPayment', labelBn: 'স্টক ইন পেমেন্ট', labelEn: 'Stock In Payment', icon: icons.pay },
+          { key: 'stockOutPayment', labelBn: 'স্টক আউট পেমেন্ট', labelEn: 'Stock Out Payment', icon: icons.pay },
         ].map(tTab => {
           const active = activeTab === tTab.key;
           return (
@@ -1788,6 +1877,9 @@ export function AccountsDashboard({ go, focus, onFocusDone }: AccountsDashboardP
       {activeTab === 'dailyCash' && <DailyCashDashboard embedded />}
       {activeTab === 'collection' && <Money kind="c" done={() => { setActiveTab('overview'); void refresh(); }} />}
       {activeTab === 'supplierPayment' && <Money kind="v" done={() => { setActiveTab('overview'); void refresh(); }} />}
+      {activeTab === 'transportPayment' && <LabourAccounts initialPaymentOperation="transport" />}
+      {activeTab === 'stockInPayment' && <LabourAccounts initialPaymentOperation="stockInLabour" />}
+      {activeTab === 'stockOutPayment' && <LabourAccounts initialPaymentOperation="stockOutLabour" />}
 
       {/* ==================== TAB 1: OVERVIEW & PERFORMANCE CURVES ==================== */}
       {activeTab === 'reports' && (
@@ -1808,6 +1900,7 @@ export function AccountsDashboard({ go, focus, onFocusDone }: AccountsDashboardP
               { id: 'balance', icon: icons.bankCash, color: '#0369A1', bg: '#E0F2FE', title: lang === 'bn' ? 'উদ্বৃত্তপত্র' : 'Balance sheet', value: lang === 'bn' ? 'আজ পর্যন্ত' : 'As of today', note: lang === 'bn' ? 'সম্পদ = দায় + মালিকানা' : 'Assets = liabilities + equity', action: () => { void printBalanceSheet().catch(() => Alert.alert(lang === 'bn' ? 'রিপোর্ট খোলা যায়নি' : 'Could not open report')); }, accent: '#0369A1' },
               { id: 'journal', icon: icons.report, color: '#7C3AED', bg: '#F5F3FF', title: lang === 'bn' ? 'জার্নাল এন্ট্রি' : 'Journal entries', value: lang === 'bn' ? 'ডেবিট ও ক্রেডিট' : 'Debits and credits', note: formatPeriodLabel(flt.from, flt.to), action: () => { void printJournalEntries().catch(() => Alert.alert(lang === 'bn' ? 'রিপোর্ট খোলা যায়নি' : 'Could not open report')); }, accent: '#7C3AED' },
               { id: 'ledger', icon: icons.report, color: '#6D28D9', bg: '#F5F3FF', title: lang === 'bn' ? 'সাধারণ খতিয়ান' : 'General ledger', value: lang === 'bn' ? 'অ্যাকাউন্ট অনুযায়ী' : 'By account', note: formatPeriodLabel(flt.from, flt.to), action: () => { void printGeneralLedger().catch(() => Alert.alert(lang === 'bn' ? 'রিপোর্ট খোলা যায়নি' : 'Could not open report')); }, accent: '#6D28D9' },
+              { id: 'partnerLedger', icon: icons.customers, color: '#0F766E', bg: '#CCFBF1', title: lang === 'bn' ? 'পার্টনার লেজার' : 'Partner ledger', value: lang === 'bn' ? 'গ্রাহক ও সরবরাহকারী' : 'Customer & supplier', note: lang === 'bn' ? 'পার্টনার ও মাস / তারিখের সীমা বেছে নিন' : 'Choose a partner and month / date range', action: () => { const range = presetRange('thisMonth', today()); setReportFrom(range.from); setReportTo(range.to); setReportCustomerId(undefined); setReportSupplierId(undefined); setReportProductId(undefined); setSelectedReportTypes(['partnerLedger']); setGeneratedReport(null); setReportCenterOpen(true); }, accent: '#0F766E' },
             ] as const).map(card => (
               <TouchableOpacity key={card.id} accessibilityRole="button" onPress={card.action} style={styles.reportCard} activeOpacity={0.82}>
                 <View style={styles.reportCardTop}>

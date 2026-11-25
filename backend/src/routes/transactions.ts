@@ -1307,19 +1307,19 @@ tx.get('/bootstrap', async (_req: Request, res: Response) => {
     periodFinance('day'),
     lifetimeFinance(),
     db.stockMovement.findMany({ where: { type: { in: ['ADJUSTMENT', 'REVALUE'] }, bucket: 'sellable' }, include: { product: { select: { name: true } } }, orderBy: [{ date: 'desc' }, { createdAt: 'desc' }] }),
-    db.saleItem.findMany({ select: { saleId: true, productId: true, product: { select: { name: true, code: true } } } }),
-    db.purchaseItem.findMany({ select: { purchaseId: true, productId: true, product: { select: { name: true, code: true } } } }),
+    db.saleItem.findMany({ select: { saleId: true, productId: true, unit: true, enteredQty: true, qtyKg: true, rate: true, product: { select: { name: true, code: true } } } }),
+    db.purchaseItem.findMany({ select: { purchaseId: true, productId: true, unit: true, enteredQty: true, qtyKg: true, rate: true, product: { select: { name: true, code: true } } } }),
   ]);
-  const saleLinesById = new Map<string, { productId: string; productName: string; productCode?: string }[]>();
+  const saleLinesById = new Map<string, { productId: string; productName: string; productCode?: string; unit: string; enteredQty: number; qtyKg: number; rate: number }[]>();
   for (const line of saleLines) {
     const list = saleLinesById.get(line.saleId) ?? [];
-    list.push({ productId: line.productId, productName: line.product.name, productCode: line.product.code ?? undefined });
+    list.push({ productId: line.productId, productName: line.product.name, productCode: line.product.code ?? undefined, unit: line.unit, enteredQty: line.enteredQty, qtyKg: line.qtyKg, rate: line.rate });
     saleLinesById.set(line.saleId, list);
   }
-  const purchaseLinesById = new Map<string, { productId: string; productName: string; productCode?: string }[]>();
+  const purchaseLinesById = new Map<string, { productId: string; productName: string; productCode?: string; unit: string; enteredQty: number; qtyKg: number; rate: number }[]>();
   for (const line of purchaseLines) {
     const list = purchaseLinesById.get(line.purchaseId) ?? [];
-    list.push({ productId: line.productId, productName: line.product.name, productCode: line.product.code ?? undefined });
+    list.push({ productId: line.productId, productName: line.product.name, productCode: line.product.code ?? undefined, unit: line.unit, enteredQty: line.enteredQty, qtyKg: line.qtyKg, rate: line.rate });
     purchaseLinesById.set(line.purchaseId, list);
   }
   const retNo = new Map(rets.map(r => [r.id, r.returnNo ?? '']));

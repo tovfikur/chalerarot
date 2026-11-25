@@ -32,8 +32,6 @@ async function main() {
   const baselineAccounts = [
     { id: 'cash', name: 'ক্যাশ বাক্স (Main Cash)', type: 'cash', legacyMethod: 'cash', openingBalance: 0, openingDate: today, active: true },
     { id: 'bank', name: 'প্রধান ব্যাংক একাউন্ট', type: 'bank', legacyMethod: 'bank', openingBalance: 0, openingDate: today, active: true },
-    { id: 'bkash', name: 'বিকাশ (bKash)', type: 'bkash', legacyMethod: 'bkash', openingBalance: 0, openingDate: today, active: true },
-    { id: 'nagad', name: 'নগদ (Nagad)', type: 'nagad', legacyMethod: 'nagad', openingBalance: 0, openingDate: today, active: true },
   ];
 
   for (const acc of baselineAccounts) {

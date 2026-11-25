@@ -50,7 +50,7 @@ let authExpired: (() => void) | undefined;
 export const onAuthExpired = (callback?: () => void) => { authExpired = callback; };
 export type MoneyMovementRow = { id: string; transactionNo: string; moneyAccountId: string | null; method?: string; direction: string; amount: number; date: string; sourceType: string; transferId?: string | null; note?: string | null; moneyAccount?: { name: string; type: string } | null };
 export type HouseExpenseRow = { id: string; transactionNo: string; date: string; amount: number; accountId: string; accountName: string; description: string; note: string };
-export type BusinessSettings = { name: string; address: string; phone: string; currency: string; fiscalStartMonth: number; language: 'bn' | 'en'; allowNegativeStock: boolean };
+export type BusinessSettings = { name: string; address: string; phone: string; currency: string; fiscalStartMonth: number; language: 'bn' | 'en'; allowNegativeStock: boolean; bagTransportRates: Record<string, number> };
 export type BulkImportRes = {
   total: number;
   successCount: number;
@@ -122,10 +122,12 @@ export type LabourAccountsData = {
   labourers: LabourAccountRow[];
   landingCosts: { id: string; voucherNo?: string; invoiceNo?: string; date: string; amount: number; type: 'transport' | 'stockInLabour' | 'stockOutLabour'; note?: string; paid: boolean }[];
   operations: Record<'transport' | 'stockInLabour' | 'stockOutLabour', {
-    total: number; paid: number; unpaid: number;
+    total: number; paid: number; advanceBalance: number; unpaid: number;
     entries: { id: string; date: string; amount: number; paid: number; unpaid: number; paymentAmount?: number; source: 'purchase' | 'labour'; invoiceNo?: string; voucherNo?: string; vendorName?: string; workerId?: string; workerName?: string; note?: string }[];
   }>;
 };
+export type LabourAttendanceEntry = { date: string; labourerId: string; value: number };
+export type LabourAttendanceMonth = { month: string; labourers: { id: string; name: string }[]; entries: LabourAttendanceEntry[] };
 
 export const MONEY_METHODS: MoneyMethod[] = ['cash', 'bank'];
 
@@ -218,8 +220,8 @@ export const api = {
     products: import('./store').Product[];
     customers: import('./store').Party[];
     vendors: import('./store').Party[];
-    sales: { id: string; customerId?: string; date: string; total: number; paid: number; due: number; status: SettlementStatus; profit: number; cogs: number; invoiceNo?: string; createdAt?: string; items?: { productId: string; productName: string; productCode?: string }[] }[];
-    purchases: { id: string; vendorId: string; date: string; createdAt?: string; total: number; paid: number; due: number; status: SettlementStatus; invoiceNo?: string; items?: { productId: string; productName: string; productCode?: string }[] }[];
+    sales: { id: string; customerId?: string; date: string; total: number; paid: number; due: number; status: SettlementStatus; profit: number; cogs: number; invoiceNo?: string; createdAt?: string; items?: { productId: string; productName: string; productCode?: string; unit: string; enteredQty: number; qtyKg: number; rate: number }[] }[];
+    purchases: { id: string; vendorId: string; date: string; createdAt?: string; total: number; paid: number; due: number; status: SettlementStatus; invoiceNo?: string; items?: { productId: string; productName: string; productCode?: string; unit: string; enteredQty: number; qtyKg: number; rate: number }[] }[];
     customerPayments: { id: string; paymentNo: string; transactionNo?: string; customerId: string; amount: number; date: string; note?: string; method?: string; returnId?: string; returnNo?: string; createdAt?: string; saleId?: string; accountId?: string; accountName?: string }[];
     vendorPayments: { id: string; paymentNo: string; transactionNo?: string; vendorId: string; amount: number; date: string; note?: string; returnId?: string; returnNo?: string; createdAt?: string; purchaseId?: string; accountId?: string; accountName?: string }[];
     movements: { id: string; productId: string; productName: string; type: string; qty: number; bags: number; unitCost: number; bagUnitPrice: number; amount: number; date: string; transactionNo?: string; note?: string }[];
@@ -263,6 +265,11 @@ export const api = {
 
   expenses: () => req<Expense[]>('/expenses'),
   labourAccounts: () => req<LabourAccountsData>('/labour-accounts'),
+  recordLandingAdvance: (body: { landingType: 'transport' | 'stockInLabour' | 'stockOutLabour'; amount: number; accountId: string; date: string; note?: string }) =>
+    req<{ id: string; amount: number }>('/labour-accounts/advances', { method: 'POST', body: JSON.stringify(body) }),
+  labourAttendance: (month: string) => req<LabourAttendanceMonth>(`/labour-accounts/attendance?month=${encodeURIComponent(month)}`),
+  saveLabourAttendance: (body: { month: string; entries: { date: string; labourerId: string; value: number | null }[] }) =>
+    req<{ saved: number }>('/labour-accounts/attendance', { method: 'PUT', body: JSON.stringify(body) }),
   createLabourer: (name: string) => req<{ id: string; name: string }>('/labour-accounts/labourers', { method: 'POST', body: JSON.stringify({ name }) }),
   createLabourCost: (b: { name: string; direction: 'stockIn' | 'stockOut'; date: string; amount?: number; note?: string; pricePerBag?: number; quantity?: number }) =>
     req<{ id: string; labourerId: string; amount: number }>('/labour-accounts/costs', { method: 'POST', body: JSON.stringify(b) }),
@@ -401,7 +408,7 @@ export type ReturnDetail = {
   id: string; returnNo?: string; kind: 'sale' | 'purchase'; date: string; createdAt: string;
   totalAmount: number; profitImpact: number; settlement: string; refundAmount: number;
   origInvoiceNo?: string | null; origDate?: string | null;
-  party: { name: string; mobile: string } | null;
+  party: { id?: string; name: string; mobile: string } | null;
   items: ReturnDetailItem[];
 };
 

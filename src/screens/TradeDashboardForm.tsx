@@ -1,4 +1,4 @@
-﻿import React, { useState, useEffect, useRef, useMemo, useCallback } from 'react';
+import React, { useState, useEffect, useRef, useMemo, useCallback } from 'react';
 import {
   View,
   Text,
@@ -12,7 +12,7 @@ import {
   Modal,
 } from 'react-native';
 import { useApp, today, Product, Party } from '../store';
-import { color, useMoney, useNum, toBnDigits, AccountPicker, Field, RequiredLabel } from '../ui';
+import { color, useMoney, useMoneyExact, useNum, toBnDigits, AccountPicker, Field, RequiredLabel } from '../ui';
 import { parseNum, localeDigits, toEnDigits } from '../bn';
 import { AppIcon, icons } from '../icons';
 import { MonthCal } from '../screens';
@@ -20,6 +20,7 @@ import { BagUnit, kgPerUnit } from '../bags';
 import { api, SaleDetail, PurchaseDetail } from '../api';
 import { UnitNames, InvData, fmtTime, unitDetail, buildInvoiceHTML, invoicePaymentAmount, invoicePaymentDescription } from '../invoice';
 import { showEntryError } from '../entryDialog';
+import { partyBalanceSnapshot } from '../partyBalance';
 
 export interface FormItemLine {
   id: string;
@@ -158,10 +159,11 @@ const evaluateArithmetic = (source: string): number | null => {
 
 export function TradeDashboardForm({ mode, onDone, onOpenHistory, editId }: TradeDashboardFormProps) {
   const isSale = mode === 'sale';
-  const { t, lang, products, vendors, customers, bal, purchase, sale, moneyAccounts, saveExpense, deleteExpense, expenses, sales, purchases, refresh } = useApp();
+  const { t, lang, products, vendors, customers, cTx, vTx, bal, purchase, sale, moneyAccounts, saveExpense, deleteExpense, expenses, sales, purchases, refresh } = useApp();
   const tx = (bn: string, en: string) => lang === 'bn' ? bn : en;
   const showFormError = (message: string) => showEntryError(lang, message);
   const m = useMoney();
+  const mr = useMoneyExact();
   const n = useNum();
 
   // Parties list based on mode
@@ -868,7 +870,7 @@ export function TradeDashboardForm({ mode, onDone, onOpenHistory, editId }: Trad
   }, [isSale, sales, purchases, defaultPartyCode, parties, focusCustomerInput]);
 
   // Direct invoice print handler
-  const printDoc = useCallback((kind: 'sale' | 'purchase', id: string, targetWindow?: Window | null) => {
+  const printDoc = useCallback((kind: 'sale' | 'purchase', id: string, targetWindow?: Window | null, balanceBefore?: number) => {
     if (typeof window === 'undefined') return;
     const w = targetWindow || window.open('', '_blank');
     if (w && !w.document.body?.innerHTML) {
@@ -880,6 +882,7 @@ export function TradeDashboardForm({ mode, onDone, onOpenHistory, editId }: Trad
         const isSaleKind = kind === 'sale';
         const sd = d as any, pd = d as any;
         const party = isSaleKind ? sd.customer : pd.vendor;
+        const partySnapshot = party ? partyBalanceSnapshot(isSaleKind ? cTx : vTx, party.id, d.id, (isSaleKind ? customers : vendors).find(row => row.id === party.id)?.opening ?? 0) : undefined;
         const belowCostLoss = isSaleKind
           ? sd.items.reduce((sum: number, item: any) => sum + Math.max(0, (item.unitCost ?? 0) - item.rate) * Math.max(0, item.qtyKg), 0)
           : 0;
@@ -887,6 +890,7 @@ export function TradeDashboardForm({ mode, onDone, onOpenHistory, editId }: Trad
           ? { kg: 'কেজি', small: 'ছোট বস্তা', medium: 'বস্তা', large: 'বড় বস্তা', ton: 'টন' }
           : { kg: 'kg', small: 'Small bag', medium: 'Bag', large: 'Large bag', ton: 'ton' };
         const paymentTotals = invoicePaymentAmount(d.payments, d.paid, d.total);
+        const previousDue = partySnapshot?.previousDue ?? balanceBefore ?? 0;
         const doc: InvData = {
           no: (d.invoiceNo ?? '').toString(),
           date: lang === 'bn' ? localeDigits(d.date, lang) : d.date,
@@ -895,10 +899,11 @@ export function TradeDashboardForm({ mode, onDone, onOpenHistory, editId }: Trad
           partyMobile: party?.mobile ?? '',
           lines: d.items.map((it: any) => ({
             name: it.productName,
-            detail: `${unitDetail(it.unit, it.enteredQty, it.qtyKg, un, n)} • ${m(it.rate)}/${tx('কেজি', 'kg')}`,
+            detail: `${unitDetail(it.unit, it.enteredQty, it.qtyKg, un, n)} • ${mr(it.rate)}/${tx('কেজি', 'kg')}`,
             total: m(it.qtyKg * it.rate),
           })),
           total: m(d.total),
+          balanceSummary: { previousDue: m(previousDue), amount: m(d.total), currentDue: m(Math.round((previousDue + d.total - paymentTotals.paid) * 100) / 100) },
           paid: m(paymentTotals.paid),
           due: m(paymentTotals.due),
           fullyPaid: paymentTotals.fullyPaid,
@@ -916,14 +921,15 @@ export function TradeDashboardForm({ mode, onDone, onOpenHistory, editId }: Trad
             tone: 'loss',
           }] : undefined,
           labels: {
-            shop: tx('চালের আড়ৎ', 'Chaler Arot'),
+            shop: tx('চালের আড়ত', 'Chaler Arot'),
             docTitle: isSaleKind ? tx('বিক্রয় ইনভয়েস', 'Sales invoice') : tx('ক্রয় ইনভয়েস', 'Purchase invoice'),
-            invoiceNo: tx('ইনভয়েস নং', 'Invoice no.'), date: tx('তারিখ', 'Date'), time: tx('সময়', 'Time'),
+            invoiceNo: tx('ইনভয়েস নম্বর', 'Invoice no.'), date: tx('তারিখ', 'Date'), time: tx('সময়', 'Time'),
             partyLabel: isSaleKind ? tx('কাস্টমার', 'Customer') : tx('সরবরাহকারী', 'Vendor'),
             mobile: tx('মোবাইল', 'Mobile'), product: tx('পণ্য', 'Product'), qty: tx('পরিমাণ', 'Quantity'), rate: tx('দর', 'Rate'),
             total: tx('মোট', 'Total'), paid: tx('পরিশোধ', 'Paid'), due: tx('বাকি', 'Due'), payDate: tx('পরবর্তী তারিখ', 'Next date'), thanks: tx('ধন্যবাদ, আবার আসবেন', 'Thank you for your business'),
+            previousDue: tx('আগের বাকি', 'Previous due'), amount: tx('পরিমাণ', 'Amount'), currentDue: tx(isSaleKind ? 'বর্তমান বাকি' : 'বর্তমান পাওনা', isSaleKind ? 'Current due' : 'Current payable'),
             paymentBreakdown: tx('পেমেন্টের বিবরণ', 'Payment breakdown'), transactionId: tx('লেনদেন আইডি', 'Transaction ID'), description: tx('বিবরণ', 'Description'), account: tx('অ্যাকাউন্ট', 'Account'),
-            totalDue: tx('মোট বকেয়া', 'Total due'), fullyPaid: tx('সম্পূর্ণ পরিশোধিত', 'Fully paid'), transportPayment: tx('পরিবহন পেমেন্ট', 'Transport payment'), advancePayment: tx('অগ্রিম পেমেন্ট সমন্বয়', 'Advance payment applied'), invoicePayment: tx('ইনভয়েস পেমেন্ট', 'Invoice payment'), purchaseInvoice: tx('ক্রয় ইনভয়েস', 'Purchase invoice'), salesInvoice: tx('বিক্রয় ইনভয়েস', 'Sales invoice'),
+            totalDue: tx('ইনভয়েস বাকি', 'Invoice due'), fullyPaid: tx('সম্পূর্ণ পরিশোধিত', 'Fully paid'), transportPayment: tx('পরিবহন পেমেন্ট', 'Transport payment'), advancePayment: tx('অগ্রিম পেমেন্ট সমন্বয়', 'Advance payment applied'), invoicePayment: tx('ইনভয়েস পেমেন্ট', 'Invoice payment'), purchaseInvoice: tx('ক্রয় ইনভয়েস', 'Purchase invoice'), salesInvoice: tx('বিক্রয় ইনভয়েস', 'Sales invoice'),
           },
         };
         w.document.open();
@@ -936,7 +942,7 @@ export function TradeDashboardForm({ mode, onDone, onOpenHistory, editId }: Trad
         if (w && !w.closed) w.close();
       }
     );
-  }, [lang, n]);
+  }, [lang, n, cTx, vTx, customers, vendors, m, tx]);
 
   // Open Split Confirmation Modal after preliminary validation
   const handleOpenConfirm = useCallback(() => {
@@ -1252,7 +1258,7 @@ export function TradeDashboardForm({ mode, onDone, onOpenHistory, editId }: Trad
 
       // If user selected Confirm & Print, trigger print
       if (win && res.id) {
-        printDoc(isSale ? 'sale' : 'purchase', res.id, win);
+        printDoc(isSale ? 'sale' : 'purchase', res.id, win, selectedPartyId ? bal(isSale ? 'c' : 'v', selectedPartyId).balance : 0);
       }
 
       setReviewSplitOpen(false);

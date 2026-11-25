@@ -4,7 +4,7 @@ import { db } from '../src/db';
 async function main() {
   const date = new Date().toISOString().slice(0, 10);
   await db.$transaction(async tx => {
-    for (const type of ['cash', 'bank', 'bkash', 'nagad']) {
+    for (const type of ['cash', 'bank']) {
       await tx.moneyAccount.upsert({ where: { id: type }, update: {}, create: {
         id: type, name: `Demo ${type}`, type, legacyMethod: type,
         openingBalance: type === 'cash' ? 100000 : 0, openingDate: date, active: true,

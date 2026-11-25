@@ -33,6 +33,7 @@ model BusinessSettings {
   fiscalStartMonth Int @default(7)
   language String @default("bn")
   allowNegativeStock Boolean @default(false)
+  bagTransportRates String @default("{\"25\":3,\"50\":6}")
 }
 
 datasource db {
@@ -324,11 +325,27 @@ model Labourer {
   costs     LabourCost[]
   payments  LabourPayment[]
   advances  LabourAdvance[]
+  attendance LabourAttendance[]
   createdAt DateTime       @default(now())
+}
+
+model LabourAttendance {
+  id         String   @id @default(cuid())
+  labourerId String
+  labourer   Labourer @relation(fields: [labourerId], references: [id], onDelete: Cascade)
+  date       String
+  value      Float // day fraction: 0 to 1
+  note       String?
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  @@unique([labourerId, date])
+  @@index([date])
 }
 
 model LabourCost {
   id        String   @id @default(cuid())
+  attendanceAutoKey String? @unique
   labourerId String
   labourer  Labourer @relation(fields: [labourerId], references: [id], onDelete: Restrict)
   pricePerBag Float
@@ -358,6 +375,20 @@ model LabourAdvance {
   createdAt   DateTime @default(now())
 
   @@index([labourerId, date])
+  @@index([accountId, date])
+}
+
+model LandingAdvance {
+  id            String      @id @default(cuid())
+  landingType   String      // transport | stockInLabour | stockOutLabour
+  amount        Float
+  date          String
+  accountId     String
+  moneyAccount  MoneyAccount @relation(fields: [accountId], references: [id], onDelete: Restrict)
+  note          String?
+  createdAt     DateTime    @default(now())
+
+  @@index([landingType, date])
   @@index([accountId, date])
 }
 
@@ -405,6 +436,7 @@ model MoneyAccount {
   movements    MoneyMovement[]
   labourPayments LabourPayment[]
   labourAdvances LabourAdvance[]
+  landingAdvances LandingAdvance[]
   ledgerAccount ChartAccount?
   outTransfers MoneyTransfer[] @relation("TransferFromAccount")
   inTransfers  MoneyTransfer[] @relation("TransferToAccount")

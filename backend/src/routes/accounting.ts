@@ -7,7 +7,7 @@ export const accounting = Router();
 const types = ['asset', 'liability', 'equity', 'income', 'expense'] as const;
 const isReservedLegacyMoneyCode = (code: string) => /^109[0-4]$/.test(code);
 const defaults = [
-  ['1100', 'Accounts receivable', 'asset'], ['1110', 'Supplier advances', 'asset'], ['1120', 'Labour Advances', 'asset'], ['1200', 'Inventory', 'asset'],
+  ['1100', 'Accounts receivable', 'asset'], ['1110', 'Supplier advances', 'asset'], ['1120', 'Labour Advances', 'asset'], ['1121', 'Landing Cost Advances', 'asset'], ['1200', 'Inventory', 'asset'],
   ['2000', 'Accounts payable', 'liability'], ['2010', 'Customer credits', 'liability'], ['2020', 'Landing Cost Payable', 'liability'],
   ['2021', 'Transport Cost Payable', 'liability'], ['2022', 'Stock In Labour Payable', 'liability'], ['2023', 'Stock Out Labour Payable', 'liability'],
   ['3000', 'Owner equity', 'equity'], ['3200', 'Owner drawings', 'equity'], ['3300', 'House Expenses', 'equity'], ['4000', 'Sales revenue', 'income'],

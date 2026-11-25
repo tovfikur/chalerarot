@@ -6,6 +6,7 @@ export type InvLabels = {
   shop: string; docTitle: string; invoiceNo: string; date: string; time: string;
   partyLabel: string; mobile: string; product: string; qty: string; rate: string;
   total: string; paid: string; due: string; payDate: string; thanks: string;
+  previousDue: string; amount: string; currentDue: string;
   paymentBreakdown: string; transactionId: string; description: string; account: string;
   totalDue: string; fullyPaid: string; transportPayment: string; advancePayment: string; invoicePayment: string;
   purchaseInvoice: string; salesInvoice: string;
@@ -22,6 +23,7 @@ export type InvData = {
   payments?: { transactionId: string; date?: string; description?: string; accountName?: string; amount: string }[];
   fullyPaid?: boolean;
   hidePay?: boolean;
+  balanceSummary?: { previousDue: string; amount: string; currentDue: string };
 };
 
 // Actual transaction UOM plus converted KG (never KG-only).
@@ -103,6 +105,7 @@ export function buildInvoiceText(d: InvData): string {
   out.push(
     '----------------------------------', '',
     ...(d.payments?.length ? [] : [`${L.total}: ${d.total}`]),
+    ...(d.balanceSummary ? [`${L.previousDue}: ${d.balanceSummary.previousDue}`, `${L.amount}: ${d.balanceSummary.amount}`, `${L.currentDue}: ${d.balanceSummary.currentDue}`] : []),
     ...(d.hidePay ? [] : [`${L.paid}: ${d.paid}`, d.fullyPaid ? L.fullyPaid : `${L.totalDue}: ${d.due}`]),
     ...(d.extra ?? []).map(e => `${e.label}: ${e.value}`),
     d.next ? `${L.payDate}: ${d.next}` : '',
@@ -161,6 +164,7 @@ ${d.partyMobile ? `<div class="row"><span>${esc(L.mobile)}</span><span>${esc(d.p
 ${d.payments?.length ? `<div class="payments"><div class="payments-title">${esc(L.paymentBreakdown)}</div>${payments}</div>` : ''}
 ${d.hidePay ? '' : `<div class="summary"><div class="row"><span>${esc(L.paid)}</span><span>${esc(d.paid)}</span></div>
 ${d.fullyPaid ? `<div class="row"><span>${esc(L.fullyPaid)}</span><span>✓</span></div>` : `<div class="row"><span>${esc(L.totalDue)}</span><span>${esc(d.due)}</span></div>`}</div>`}
+${d.balanceSummary ? `<div class="summary"><div class="row"><span>${esc(L.previousDue)}</span><span>${esc(d.balanceSummary.previousDue)}</span></div><div class="row"><span>${esc(L.amount)}</span><span>${esc(d.balanceSummary.amount)}</span></div><div class="row big"><span>${esc(L.currentDue)}</span><span>${esc(d.balanceSummary.currentDue)}</span></div></div>` : ''}
 ${(d.extra ?? []).map(e => `<div class="row${e.tone === 'loss' ? ' loss' : ''}"><span>${esc(e.label)}</span><span>${esc(e.value)}</span></div>`).join('')}
 ${d.next ? `<div class="row"><span>${esc(L.payDate)}</span><span>${esc(d.next)}</span></div>` : ''}
 <hr /><div class="center">${esc(L.thanks)}</div>

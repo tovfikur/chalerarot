@@ -15,10 +15,11 @@ export type ReportRow = {
   bold?: boolean;
 };
 
-export type ReportSection = { title?: string; columns?: string[]; rows: ReportRow[] };
+export type ReportSection = { title?: string; columns?: string[]; rightAlignColumns?: number[]; rows: ReportRow[] };
 
 export type ReportDoc = {
   kind?: 'report' | 'receipt';
+  landscape?: boolean;
   language?: 'bn' | 'en';
   shop: string;
   title: string;
@@ -103,7 +104,7 @@ export function buildReportHTML(d: ReportDoc, autoPrint: boolean): string {
     ${sec.title ? `<h3>${esc(sec.title)}</h3>` : ''}
     <table>
       ${sec.columns ? `<thead><tr>${sec.columns.map(c => `<th>${esc(c)}</th>`).join('')}</tr></thead>` : ''}
-      ${sec.rows.map(r => r.cells ? `<tr class="${r.bold ? 'b' : ''}">${r.cells.map((cell, i) => `<td class="${i === r.cells!.length - 1 ? `r ${r.neg ? 'neg' : ''}` : 'l'}">${esc(cell)}</td>`).join('')}</tr>` : `<tr class="${r.bold ? 'b' : ''}">
+      ${sec.rows.map(r => r.cells ? `<tr class="${r.bold ? 'b' : ''}">${r.cells.map((cell, i) => `<td class="${(sec.rightAlignColumns?.includes(i) || i === r.cells!.length - 1) ? `r ${r.neg ? 'neg' : ''}` : 'l'}">${esc(cell)}</td>`).join('')}</tr>` : `<tr class="${r.bold ? 'b' : ''}">
         <td class="l">${esc(r.label)}${r.sub ? `<div class="s">${esc(r.sub)}</div>` : ''}</td>
         <td class="r ${r.neg ? 'neg' : ''}">${esc(r.right)}</td></tr>`).join('')}
     </table>`).join('');
@@ -111,6 +112,7 @@ export function buildReportHTML(d: ReportDoc, autoPrint: boolean): string {
 <meta name="viewport" content="width=device-width, initial-scale=1" />
 <title>${esc(d.title)}</title>
 <style>
+  ${d.landscape ? '@page { size: A4 landscape; }' : ''}
   body { font-family: system-ui, -apple-system, "Segoe UI", sans-serif; margin: 0; padding: 20px; color: #172554; background: #F5F8FF; }
   .sheet { max-width: 780px; margin: 24px auto; padding: 28px; border: 1px solid #D7E2F4; border-radius: 16px; background: #fff; box-shadow: 0 8px 24px rgba(15,23,42,.06); }
   .sheet.receipt { max-width: 440px; padding: 16px 18px; border: 0; border-radius: 0; box-shadow: none; }
@@ -130,6 +132,8 @@ export function buildReportHTML(d: ReportDoc, autoPrint: boolean): string {
   td { padding: 8px 6px; border-bottom: 1px solid #E2E8F0; font-size: 14px; vertical-align: top; }
   th { text-align: left; padding: 8px 6px; border-bottom: 2px solid #CBD5E1; font-size: 12px; }
   th:not(:first-child) { text-align: right; }
+  table:has(thead) th { text-align: left; }
+  table:has(thead) th:nth-child(8), table:has(thead) th:nth-child(9), table:has(thead) th:nth-child(10), table:has(thead) th:nth-child(11), table:has(thead) th:nth-child(12) { text-align: right; }
   td.r { text-align: right; white-space: nowrap; font-weight: 600; padding-left: 10px; }
   td.r.neg { color: #C62828; }
   td .s { font-size: 12px; color: #526583; font-weight: 400; }

@@ -2,7 +2,7 @@ import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react'
 import { View, Text, TextInput, Alert, TouchableOpacity, Pressable, Modal, ActivityIndicator, ScrollView, Share, Platform } from 'react-native';
 import { useApp, today, Party, Product, Tx, type PeriodFinance } from './store';
 import { BagUnit, CartLine, kgPerUnit, toKg, lineTotal } from './bags';
-import { Card, Title, Muted, Btn, Field, RequiredLabel, Chips, Row, Empty, Screen, SectionHead, PageHeader, ListPageHeader, ListTable, type TableColumn, type TableSort, AccountPicker, ACCOUNT_TYPES, methodIcon, methodName, useMoney, useNum, useDateStr, color } from './ui';
+import { Card, Title, Muted, Btn, Field, RequiredLabel, Chips, Row, Empty, Screen, SectionHead, PageHeader, ListPageHeader, ListTable, type TableColumn, type TableSort, AccountPicker, ACCOUNT_TYPES, methodIcon, methodName, useMoney, useMoneyExact, useNum, useDateStr, color } from './ui';
 import { AppIcon, icons } from './icons';
 import { RGrid, TwoPanel, FormGrid, useFs, useBreakpoint } from './responsive';
 import { SearchToggle, SearchableSelect, SearchDropdown, NoResult, matchProduct, matchParty, codeStartsWith } from './search';
@@ -11,6 +11,7 @@ import { unitDetail, fmtTime, buildInvoiceText, buildInvoiceHTML, invoicePayment
 import { tp, Key } from './i18n';
 import { toEnDigits, toBnDigits, parseNum, localeDigits } from './bn';
 import { printReport, printedAtStamp, downloadReportCSV, downloadReportHTML, type ReportDoc, type ReportRow } from './report';
+import { partyBalanceSnapshot } from './partyBalance';
 import { downloadCSV } from './stockReport';
 import { showEntryError } from './entryDialog';
 import { EntryReportButtons } from './EntryReportButtons';
@@ -626,7 +627,8 @@ export function Trade({ mode, editId, onEditDone }: { mode: 'sale' | 'purchase';
  * here without any extra fetch and without a reload. Desktop gets the shared
  * Odoo-style table; mobile keeps the card pattern.
  */
-type TxnRow = { id: string; no: string; date: string; partyId?: string; partyName: string; partyCode?: string; productNames: string[]; productCodes: string[]; total: number; paid: number; due: number; status: SettlementStatus };
+type TxnProductLine = { shortCode: string; productName: string; quantity: string; rate: number; total: number; totalKg: number };
+type TxnRow = { id: string; no: string; date: string; partyId?: string; partyName: string; partyCode?: string; productNames: string[]; productCodes: string[]; productLines: TxnProductLine[]; total: number; paid: number; due: number; previousDue: number; currentDue: number; status: SettlementStatus };
 // Canonical status label: paid (due 0) / partial (some paid, due remains) / due.
 const statusLabel = (t: (k: Key) => string, r: { due: number; status?: SettlementStatus }) => {
   const st: SettlementStatus = r.status ?? (r.due > 0 ? 'due' : 'paid');
@@ -635,11 +637,17 @@ const statusLabel = (t: (k: Key) => string, r: { due: number; status?: Settlemen
 function TxnHistory({ kind, onNew, focus, onFocusDone }: {
   kind: 'sale' | 'purchase'; onNew: () => void; focus?: string | null; onFocusDone?: () => void;
 }) {
-  const { t, sales, purchases, customers, vendors, business, lang } = useApp();
+  const { t, sales, purchases, customers, vendors, cTx, vTx, business, lang } = useApp();
   const tx = (bn: string, en: string) => lang === 'bn' ? bn : en;
-  const m = useMoney(); const fd = useDateStr();
+  const m = useMoney(); const mr = useMoneyExact(); const fd = useDateStr();
+  const n = useNum(); const { kg, label: unitLabel } = useUnitLabel();
   const { isDesktop } = useBreakpoint();
   const isSale = kind === 'sale';
+  const productLines = (items: { productCode?: string; productName: string; unit: string; enteredQty: number; qtyKg: number; rate: number }[] = []): TxnProductLine[] => items.map(item => ({
+    shortCode: item.productCode ?? '', productName: item.productName,
+    quantity: `${n(item.enteredQty)} ${item.unit === 'kg' ? kg : unitLabel(item.unit as BagUnit)}`,
+    rate: item.rate, total: Math.round(item.qtyKg * item.rate * 100) / 100, totalKg: item.qtyKg,
+  }));
   // List state kept here so it survives opening a document.
   const [q, setQ] = useState('');
   const [period, setPeriod] = useState<'today' | 'all'>('all');
@@ -679,10 +687,10 @@ function TxnHistory({ kind, onNew, focus, onFocusDone }: {
     ? customers.find(c => c.id === id)?.code
     : vendors.find(v => v.id === id)?.code) ?? '';
   const rowsAll: TxnRow[] = useMemo(() => (isSale
-    ? sales.map(s => ({ id: s.id, no: s.invoiceNo ?? s.id, date: s.date, partyId: s.customerId, partyName: nameOf(s.customerId), partyCode: codeOf(s.customerId), productNames: (s.items ?? []).map(it => it.productName), productCodes: (s.items ?? []).map(it => it.productCode ?? '').filter(Boolean), total: s.total, paid: s.paid, due: s.due, status: s.status }))
-    : purchases.map(p => ({ id: p.id, no: p.invoiceNo ?? p.id, date: p.date, partyId: p.vendorId, partyName: nameOf(p.vendorId), partyCode: codeOf(p.vendorId), productNames: (p.items ?? []).map(it => it.productName), productCodes: (p.items ?? []).map(it => it.productCode ?? '').filter(Boolean), total: p.total, paid: p.paid, due: p.due, status: p.status }))),
+    ? sales.map(s => { const snapshot = s.customerId ? partyBalanceSnapshot(cTx, s.customerId, s.id, customers.find(p => p.id === s.customerId)?.opening ?? 0) : undefined; const previousDue = snapshot?.previousDue ?? 0; return { id: s.id, no: s.invoiceNo ?? s.id, date: s.date, partyId: s.customerId, partyName: nameOf(s.customerId), partyCode: codeOf(s.customerId), productNames: (s.items ?? []).map(it => it.productName), productCodes: (s.items ?? []).map(it => it.productCode ?? '').filter(Boolean), productLines: productLines(s.items), total: s.total, paid: s.paid, due: s.due, previousDue, currentDue: Math.round((previousDue + s.total - s.paid) * 100) / 100, status: s.status }; })
+    : purchases.map(p => { const snapshot = partyBalanceSnapshot(vTx, p.vendorId, p.id, vendors.find(v => v.id === p.vendorId)?.opening ?? 0); const previousDue = snapshot?.previousDue ?? 0; return { id: p.id, no: p.invoiceNo ?? p.id, date: p.date, partyId: p.vendorId, partyName: nameOf(p.vendorId), partyCode: codeOf(p.vendorId), productNames: (p.items ?? []).map(it => it.productName), productCodes: (p.items ?? []).map(it => it.productCode ?? '').filter(Boolean), productLines: productLines(p.items), total: p.total, paid: p.paid, due: p.due, previousDue, currentDue: Math.round((previousDue + p.total - p.paid) * 100) / 100, status: p.status }; })),
   // Newest first by default: a transaction just completed is the first row.
-  [sales, purchases, customers, vendors, isSale, t]);
+  [sales, purchases, customers, vendors, cTx, vTx, isSale, t]);
 
   const todayDate = today();
   const needle = q.trim().toLowerCase();
@@ -723,17 +731,24 @@ function TxnHistory({ kind, onNew, focus, onFocusDone }: {
       {statusLabel(t, r)}
     </Text>
   );
+  const productText = (r: TxnRow, key: keyof TxnProductLine) => r.productLines.map(line => String(line[key] ?? '')).join('\n') || '—';
+  const lineCell = (r: TxnRow, key: 'quantity' | 'rate' | 'total' | 'totalKg') => r.productLines.map(line => key === 'rate' ? mr(line.rate) : key === 'total' ? m(line.total) : key === 'totalKg' ? n(line.totalKg) : line.quantity).join('\n') || '—';
+  const tc = (value: string, fs: number, bold = false) => <Text style={{ fontSize: Math.min(fs, 12), color: color.text, fontWeight: bold ? '700' : '400', lineHeight: 18 }}>{value}</Text>;
   const columns: TableColumn<TxnRow>[] = useMemo(() => [
-    { key: 'no', label: isSale ? t('saleNo') : t('purchaseNo'), flex: 1.7, sort: r => r.no,
-      render: (r, fs) => <Text numberOfLines={1} style={{ fontSize: fs, fontWeight: '600', color: color.text }}>{r.no}</Text> },
-    { key: 'date', label: t('date'), flex: 1.1, sort: r => r.date, render: r => <Text style={{ fontSize: 14, color: color.text }}>{fd(r.date)}</Text> },
-    { key: 'party', label: isSale ? t('customer') : t('vendor'), flex: 1.8, sort: r => r.partyName,
-      render: r => <Text numberOfLines={1} style={{ fontSize: 14, color: color.text }}>{r.partyName}</Text> },
-    { key: 'total', label: t('total'), flex: 1.2, align: 'right', sort: r => r.total, render: r => money(r.total) },
-    { key: 'paid', label: t('paid'), flex: 1.2, align: 'right', sort: r => r.paid, render: r => money(r.paid) },
-    { key: 'due', label: t('due'), flex: 1.2, align: 'right', sort: r => r.due, render: r => money(r.due) },
-    { key: 'status', label: t('status'), flex: 1, sort: r => (r.status === 'paid' ? 0 : r.status === 'partial' ? 1 : 2), render: r => statusCell(r) },
-  ], [isSale, t, m, fd]);
+    { key: 'partyCode', label: isSale ? tx('গ্রাহক কোড', 'Customer code') : tx('সরবরাহকারী কোড', 'Supplier code'), flex: .85, render: (r, fs) => tc(r.partyCode || '—', fs) },
+    { key: 'partyName', label: isSale ? tx('গ্রাহক', 'Customer') : tx('সরবরাহকারী', 'Supplier'), flex: 1.05, sort: r => r.partyName, render: (r, fs) => tc(r.partyName, fs, true) },
+    { key: 'no', label: tx('মেমো / ইনভয়েস', 'Memo / Invoice'), flex: 1.05, sort: r => r.no, render: (r, fs) => tc(r.no, fs, true) },
+    { key: 'date', label: t('date'), flex: .9, sort: r => r.date, render: (r, fs) => tc(fd(r.date), fs) },
+    { key: 'shortCode', label: tx('শর্ট কোড', 'Short Code'), flex: .75, render: (r, fs) => tc(productText(r, 'shortCode'), fs) },
+    { key: 'productName', label: tx('পণ্যের নাম', 'Product Name'), flex: 1.15, render: (r, fs) => tc(productText(r, 'productName'), fs) },
+    { key: 'quantity', label: tx('পরিমাণ', 'Quantity'), flex: .9, render: (r, fs) => tc(lineCell(r, 'quantity'), fs) },
+    { key: 'rate', label: tx('দর', 'Rate'), flex: .75, align: 'right', render: (r, fs) => tc(lineCell(r, 'rate'), fs) },
+    { key: 'total', label: t('total'), flex: .85, align: 'right', sort: r => r.total, render: (r, fs) => tc(lineCell(r, 'total'), fs, true) },
+    { key: 'totalKg', label: tx('মোট কেজি', 'Total KG'), flex: .8, align: 'right', render: (r, fs) => tc(lineCell(r, 'totalKg'), fs) },
+    { key: 'paid', label: t('paid'), flex: .8, align: 'right', sort: r => r.paid, render: r => money(r.paid) },
+    { key: 'due', label: t('due'), flex: .8, align: 'right', sort: r => r.due, render: r => money(r.due) },
+    { key: 'status', label: t('status'), flex: .75, render: r => statusCell(r) },
+  ], [isSale, t, tx, m, fd, n]);
 
   // Display-only filter chips.
   const chip = (label: string, on: boolean, onPress: () => void) => (
@@ -744,40 +759,42 @@ function TxnHistory({ kind, onNew, focus, onFocusDone }: {
   );
   const sums = rows.reduce((s, r) => ({ total: s.total + r.total, paid: s.paid + r.paid, due: s.due + r.due }), { total: 0, paid: 0, due: 0 });
   const dateRangeLabel = `${fromFilter || tx('শুরু থেকে', 'Beginning')} – ${toFilter || tx('আজ পর্যন্ত', 'Today')}`;
+  const exportHeaders = [
+    isSale ? tx('ગ્રাহક কোড', 'Customer code') : tx('সরবরাহকারী কোড', 'Supplier code'),
+    isSale ? tx('গ্রাহক', 'Customer') : tx('সরবরাহকারী', 'Supplier'), tx('মেমো / ইনভয়েস', 'Memo / Invoice'), t('date'),
+    tx('শর্ট কোড', 'Short Code'), tx('পণ্যের নাম', 'Product Name'), tx('পরিমাণ', 'Quantity'), tx('দর', 'Rate'),
+    t('total'), tx('মোট কেজি', 'Total KG'), t('paid'), t('due'), t('status'),
+  ];
+  const exportRows = rows.flatMap(r => {
+    const invoiceLines = r.productLines.length ? r.productLines : [{ shortCode: '', productName: '', quantity: '', rate: 0, total: r.total, totalKg: 0 }];
+    return invoiceLines.map((line, index) => [r.partyCode ?? '', r.partyName, r.no, fd(r.date), line.shortCode, line.productName, line.quantity, mr(line.rate), m(line.total), n(line.totalKg), index === 0 ? m(r.paid) : '', index === 0 ? m(r.due) : '', index === 0 ? statusLabel(t, r) : '']);
+  });
   const exportExcel = () => {
     const cell = (value: unknown) => `"${String(value ?? '').replace(/"/g, '""')}"`;
-    const csv = [
-      [tx('তারিখ', 'Date'), tx('মেমো / ইনভয়েস', 'Memo / Invoice'), isSale ? t('customer') : t('vendor'), isSale ? tx('কাস্টমার কোড', 'Customer code') : tx('সরবরাহকারী কোড', 'Supplier code'), tx('পণ্যসমূহ', 'Products'), t('total'), t('paid'), t('due'), t('status')].map(cell).join(','),
-      ...rows.map(r => [r.date, r.no, r.partyName, r.partyCode, [...new Set(r.productNames)].join('; '), r.total, r.paid, r.due, statusLabel(t, r)].map(cell).join(',')),
-      ['', '', '', '', tx('ফিল্টারকৃত মোট', 'Filtered totals'), sums.total, sums.paid, sums.due, ''].map(cell).join(','),
-    ].join('\r\n');
+    const csv = [exportHeaders.map(cell).join(','), ...exportRows.map(row => row.map(cell).join(',')), ['', '', '', '', '', tx('ফিল্টার করা মোট', 'Filtered totals'), '', '', m(sums.total), '', m(sums.paid), m(sums.due), ''].map(cell).join(',')].join('\r\n');
     const filename = `${isSale ? 'sales' : 'purchases'}_${fromFilter || 'all'}_${toFilter || todayDate}.csv`;
-    if (!downloadCSV(filename, '\uFEFF' + csv)) Alert.alert(isSale ? tx('বিক্রয় প্রতিবেদন', 'Sales report') : tx('ক্রয় প্রতিবেদন', 'Purchase report'), tx('এক্সেল উপযোগী CSV ফাইল তৈরি করা যায়নি।', 'Could not create the Excel compatible CSV file.'));
+    if (!downloadCSV(filename, '\uFEFF' + csv)) Alert.alert(isSale ? tx('বিক্রয় প্রতিবেদন', 'Sales report') : tx('ক্রয় প্রতিবেদন', 'Purchase report'), tx('এক্সেল উপযোগী CSV ফাইল তৈরি করা যায়নি।', 'Could not create the Excel compatible CSV file.'));
   };
   const exportPdf = () => {
-    const lines: ReportRow[] = rows.map(r => ({
-      label: r.no,
-      sub: [fd(r.date), r.partyName, r.partyCode ? `${tx('কোড', 'Code')} ${r.partyCode}` : '', [...new Set(r.productNames)].join(', ')].filter(Boolean).join(' · '),
-      right: `${m(r.total)} · ${t('paid')} ${m(r.paid)} · ${t('due')} ${m(r.due)} · ${statusLabel(t, r)}`,
-      neg: r.due > 0,
-    }));
+    const lines: ReportRow[] = rows.flatMap(r => {
+      const invoiceLines = r.productLines.length ? r.productLines : [{ shortCode: '', productName: '', quantity: '', rate: 0, total: r.total, totalKg: 0 }];
+      return invoiceLines.map((line, index) => ({ label: r.no, right: m(line.total), neg: index === 0 && r.due > 0, cells: [r.partyCode ?? '', r.partyName, r.no, fd(r.date), line.shortCode, line.productName, line.quantity, mr(line.rate), m(line.total), n(line.totalKg), index === 0 ? m(r.paid) : '', index === 0 ? m(r.due) : '', index === 0 ? statusLabel(t, r) : ''] }));
+    });
     const doc: ReportDoc = {
-      language: lang,
-      shop: business.name,
-      title: isSale ? tx('বিক্রয় প্রতিবেদন', 'Sales report') : tx('ক্রয় প্রতিবেদন', 'Purchase report'),
+      language: lang, landscape: true, shop: business.name,
+      title: isSale ? tx('বিক্রয় প্রতিবেদন', 'Sales report') : tx('ক্রয় প্রতিবেদন', 'Purchase report'),
       period: dateRangeLabel,
       meta: [
         { label: tx('পণ্য', 'Product'), value: productQuery || tx('সব', 'All') },
-        { label: tx('মেমো / ইনভয়েস', 'Memo / Invoice'), value: memoQuery || tx('সব', 'All') },
+        { label: tx('মেমো / ইনভয়েস', 'Memo / Invoice'), value: memoQuery || tx('সব', 'All') },
         { label: isSale ? t('customer') : t('vendor'), value: partyNameQuery || tx('সব', 'All') },
-        { label: isSale ? tx('কাস্টমার কোড', 'Customer code') : tx('সরবরাহকারী কোড', 'Supplier code'), value: partyCodeQuery || tx('সব', 'All') },
+        { label: isSale ? tx('গ্রাহক কোড', 'Customer code') : tx('সরবরাহকারী কোড', 'Supplier code'), value: partyCodeQuery || tx('সব', 'All') },
       ],
-      sections: [{ title: tx('ফিল্টার করা লেনদেন', 'Filtered transactions'), rows: lines }],
+      sections: [{ title: tx('ফিল্টার করা লেনদেন', 'Filtered transactions'), columns: exportHeaders, rightAlignColumns: [7, 8, 9, 10, 11], rows: lines }],
       total: { label: tx('মোট / পরিশোধিত / বাকি', 'Total / Paid / Due'), value: `${m(sums.total)} / ${m(sums.paid)} / ${m(sums.due)}` },
-      printedAt: printedAtStamp(lang),
-      printLabel: lang === 'bn' ? 'প্রিন্ট / PDF হিসেবে সংরক্ষণ' : 'Print / Save as PDF',
+      printedAt: printedAtStamp(lang), printLabel: lang === 'bn' ? 'প্রিন্ট / PDF হিসেবে সংরক্ষণ' : 'Print / Save as PDF',
     };
-    if (!printReport(doc)) Alert.alert(isSale ? tx('বিক্রয় প্রতিবেদন', 'Sales report') : tx('ক্রয় প্রতিবেদন', 'Purchase report'), tx('PDF প্রতিবেদন ওয়েব অ্যাপে পাওয়া যাবে।', 'PDF export is available in the web app.'));
+    if (!printReport(doc)) Alert.alert(isSale ? tx('বিক্রয় প্রতিবেদন', 'Sales report') : tx('ক্রয় প্রতিবেদন', 'Purchase report'), tx('PDF প্রতিবেদন ওয়েব অ্যাপে পাওয়া যাবে।', 'PDF export is available in the web app.'));
   };
   const filterInput = (label: string, value: string, onChangeText: (value: string) => void, placeholder: string, width: number) => (
     <View style={{ flex: 1, minWidth: width }}>
@@ -862,7 +879,7 @@ function TxnHistory({ kind, onNew, focus, onFocusDone }: {
         </View>
       </View>
       {isDesktop ? (
-        <ListTable<TxnRow>
+        <ScrollView horizontal><View style={{ minWidth: 1720, flex: 1 }}><ListTable<TxnRow>
           columns={columns}
           rows={rows}
           rowKey={r => r.id}
@@ -870,7 +887,7 @@ function TxnHistory({ kind, onNew, focus, onFocusDone }: {
           onSortChange={setSort}
           onRowPress={r => setInv(r.id)}
           empty={<View style={{ padding: 8 }}>{needle ? <NoResult /> : <Empty />}</View>}
-        />
+        /></View></ScrollView>
       ) : (
         rows.length ? rows.map(r => (
           <Card key={r.id}>
@@ -1149,7 +1166,8 @@ export function Parties({ kind, focus, onFocusDone, onReturn, onEditTransaction 
   const openPaymentReceipt = (payment: Tx) => {
     const receiptParty = list.find(p => p.id === payment.partyId);
     if (!receiptParty) return;
-    setReceiptPreviewDoc(partyPaymentReceiptDoc({ payment, party: receiptParty, isCustomer: isC, lang, shop: business.name, amount: m(payment.amount), dateLabel: fd }));
+    const snapshot = partyBalanceSnapshot(txs, receiptParty.id, payment.id, receiptParty.opening);
+    setReceiptPreviewDoc(partyPaymentReceiptDoc({ payment, party: receiptParty, isCustomer: isC, lang, shop: business.name, amount: m(payment.amount), dateLabel: fd, balance: { previousDue: m(snapshot?.previousDue ?? 0), currentDue: m(snapshot?.currentDue ?? 0) } }));
   };
   const [v, setV] = useState({ name: '', mobile: '', address: '', opening: '', code: '' });
   const [pq, setPq] = useState('');
@@ -1344,6 +1362,15 @@ export function Parties({ kind, focus, onFocusDone, onReturn, onEditTransaction 
     <Btn kind="ghost" icon={icons.cancel} label={t('cancel')} onPress={back} /></Card></Screen>;
   if (sel) {
     const b = bal(kind, sel.id), txs = (isC ? cTx : vTx).filter(x => x.partyId === sel.id);
+    const runningBalanceByTx = new Map<string, { previousDue: number; balance: number }>();
+    let runningBalance = sel.opening;
+    const chronologicalTxs = [...txs].sort((a, b2) => a.date.localeCompare(b2.date) || String(a.createdAt ?? '').localeCompare(String(b2.createdAt ?? '')) || a.id.localeCompare(b2.id));
+    for (const transaction of chronologicalTxs) {
+      const previousDue = Math.round(runningBalance * 100) / 100;
+      const effect = transaction.kind === 'sale' || transaction.kind === 'purchase' ? transaction.amount : -transaction.amount;
+      runningBalance = Math.round((runningBalance + effect) * 100) / 100;
+      runningBalanceByTx.set(transaction.id, { previousDue, balance: runningBalance });
+    }
     const lbl = (k: string) => (k === 'payment' ? t('payment') : k === 'sreturn' ? t('saleReturn') : k === 'preturn' ? t('purchaseReturn') : isC ? t('sale') : t('purchase'));
     const matchingTxs = txs.filter(x => {
       if (txFrom && x.date < txFrom) return false;
@@ -1418,7 +1445,7 @@ export function Parties({ kind, focus, onFocusDone, onReturn, onEditTransaction 
         </View>
         {isDesktop ? <View style={{ width: '100%', alignSelf: 'stretch', borderWidth: 1, borderColor: '#E2E8F0', borderRadius: 10, overflow: 'hidden' }}>
             <View style={{ flexDirection: 'row', backgroundColor: '#F1F5F9', minHeight: 42, alignItems: 'center', paddingHorizontal: 10 }}>
-              {[['Date', 0.9], ['Type', 0.85], ['Invoice / payment code', 1.45], ['Details', 1.65], ['Amount', 1], ['Action', 0.75]].map(([h, weight]) => <Text key={String(h)} numberOfLines={1} style={{ flex: Number(weight), minWidth: 0, color: '#475569', fontSize: 11, fontWeight: '900', paddingHorizontal: 4 }}>{String(h)}</Text>)}
+              {[[lang === 'bn' ? 'তারিখ' : 'Date', 0.75], [lang === 'bn' ? 'ধরন' : 'Type', 0.65], [lang === 'bn' ? 'ইনভয়েস / পেমেন্ট কোড' : 'Invoice / payment code', 1.15], [lang === 'bn' ? 'বিবরণ' : 'Details', 1.35], [lang === 'bn' ? 'আগের বাকি' : 'Previous Due', 0.95], [lang === 'bn' ? 'পরিমাণ' : 'Amount', 0.8], [lang === 'bn' ? 'ব্যালেন্স' : 'Balance', 0.95], [lang === 'bn' ? 'কাজ' : 'Action', 0.65]].map(([h, weight]) => <Text key={String(h)} numberOfLines={1} style={{ flex: Number(weight), minWidth: 0, color: '#475569', fontSize: 11, fontWeight: '900', paddingHorizontal: 4 }}>{String(h)}</Text>)}
             </View>
             {matchingTxs.length ? matchingTxs.map(x => {
               const isPayment = x.kind === 'payment';
@@ -1426,12 +1453,14 @@ export function Parties({ kind, focus, onFocusDone, onReturn, onEditTransaction 
               const ref = isPayment ? x.ref ?? `${isC ? 'REC' : 'PAY'}-${refNo(x.id)}` : x.ref ?? `${isC ? 'INV' : 'PUR'}-${refNo(x.id)}`;
               const open = () => isPayment ? null : isReturn && x.returnId ? setRetId(x.returnId) : setInv({ kind: isC ? 'sale' : 'purchase', id: x.id });
               return <View key={x.id} style={{ flexDirection: 'row', alignItems: 'center', minHeight: 56, paddingHorizontal: 10, borderTopWidth: 1, borderTopColor: '#E2E8F0', backgroundColor: '#FFFFFF' }}>
-                <Text numberOfLines={1} style={{ flex: 0.9, minWidth: 0, color: '#334155', fontSize: 12, paddingHorizontal: 4 }}>{fd(x.date)}</Text>
-                <Text numberOfLines={1} style={{ flex: 0.85, minWidth: 0, color: isPayment ? '#047857' : isReturn ? '#B45309' : '#1D4ED8', fontSize: 12, fontWeight: '800', paddingHorizontal: 4 }}>{lbl(x.kind)}</Text>
-                <Text numberOfLines={1} style={{ flex: 1.45, minWidth: 0, color: '#0F172A', fontSize: 12, fontWeight: '700', paddingHorizontal: 4 }}>{ref}</Text>
-                <Text numberOfLines={2} style={{ flex: 1.65, minWidth: 0, color: '#64748B', fontSize: 11, paddingHorizontal: 4 }}>{[x.account, x.method, x.note].filter(Boolean).join(' · ') || (isPayment ? 'Party payment' : 'Invoice transaction')}</Text>
-                <Text numberOfLines={1} style={{ flex: 1, minWidth: 0, color: isPayment ? '#047857' : '#0F172A', fontSize: 12, fontWeight: '800', paddingHorizontal: 4 }}>{m(x.amount)}</Text>
-                <View style={{ flex: 0.75, minWidth: 0, paddingHorizontal: 3 }}>
+                <Text numberOfLines={1} style={{ flex: 0.75, minWidth: 0, color: '#334155', fontSize: 12, paddingHorizontal: 4 }}>{fd(x.date)}</Text>
+                <Text numberOfLines={1} style={{ flex: 0.65, minWidth: 0, color: isPayment ? '#047857' : isReturn ? '#B45309' : '#1D4ED8', fontSize: 12, fontWeight: '800', paddingHorizontal: 4 }}>{lbl(x.kind)}</Text>
+                <Text numberOfLines={1} style={{ flex: 1.15, minWidth: 0, color: '#0F172A', fontSize: 12, fontWeight: '700', paddingHorizontal: 4 }}>{ref}</Text>
+                <Text numberOfLines={2} style={{ flex: 1.35, minWidth: 0, color: '#64748B', fontSize: 11, paddingHorizontal: 4 }}>{[x.account, x.method, x.note].filter(Boolean).join(' · ') || (isPayment ? 'Party payment' : 'Invoice transaction')}</Text>
+                <Text numberOfLines={1} style={{ flex: 0.95, minWidth: 0, color: '#64748B', fontSize: 12, paddingHorizontal: 4 }}>{m(runningBalanceByTx.get(x.id)?.previousDue ?? 0)}</Text>
+                <Text numberOfLines={1} style={{ flex: 0.8, minWidth: 0, color: isPayment ? '#047857' : '#0F172A', fontSize: 12, fontWeight: '800', paddingHorizontal: 4 }}>{m(x.amount)}</Text>
+                <Text numberOfLines={1} style={{ flex: 0.95, minWidth: 0, color: (runningBalanceByTx.get(x.id)?.balance ?? 0) > 0 ? '#B91C1C' : '#047857', fontSize: 12, fontWeight: '800', paddingHorizontal: 4 }}>{m(runningBalanceByTx.get(x.id)?.balance ?? 0)}</Text>
+                <View style={{ flex: 0.65, minWidth: 0, paddingHorizontal: 3 }}>
                   {!isPayment ? <TouchableOpacity onPress={open} accessibilityRole="button" style={{ minHeight: 40, borderRadius: 8, backgroundColor: '#EFF6FF', borderWidth: 1, borderColor: '#BFDBFE', alignItems: 'center', justifyContent: 'center' }}><Text style={{ color: '#1D4ED8', fontSize: 12, fontWeight: '800' }}>View</Text></TouchableOpacity> : <TouchableOpacity onPress={() => openPaymentReceipt(x)} accessibilityRole="button" accessibilityLabel="Receipt" style={{ minHeight: 40, borderRadius: 8, backgroundColor: '#EFF6FF', borderWidth: 1, borderColor: '#BFDBFE', alignItems: 'center', justifyContent: 'center' }}><Text style={{ color: '#1D4ED8', fontSize: 12, fontWeight: '800' }}>Receipt</Text></TouchableOpacity>}
                 </View>
               </View>;
@@ -1445,6 +1474,10 @@ export function Parties({ kind, focus, onFocusDone, onReturn, onEditTransaction 
               return <View key={x.id} style={{ padding: 12, borderWidth: 1, borderColor: '#E2E8F0', borderRadius: 10, backgroundColor: '#FFFFFF' }}><TouchableOpacity onPress={open} disabled={isPayment} activeOpacity={0.75}>
                 <View style={{ flexDirection: 'row', justifyContent: 'space-between', gap: 8 }}><Text style={{ color: '#334155', fontSize: 12 }}>{fd(x.date)} · {lbl(x.kind)}</Text><Text style={{ color: isPayment ? '#047857' : '#0F172A', fontSize: 14, fontWeight: '900' }}>{m(x.amount)}</Text></View>
                 <Text style={{ color: '#0F172A', fontSize: 13, fontWeight: '800', marginTop: 5 }}>{ref}</Text>
+                <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 14, marginTop: 8 }}>
+                  <Text style={{ color: '#64748B', fontSize: 11 }}>{lang === 'bn' ? 'আগের বাকি:' : 'Previous Due:'} <Text style={{ color: color.text, fontWeight: '800' }}>{m(runningBalanceByTx.get(x.id)?.previousDue ?? 0)}</Text></Text>
+                  <Text style={{ color: '#64748B', fontSize: 11 }}>{lang === 'bn' ? 'ব্যালেন্স:' : 'Balance:'} <Text style={{ color: (runningBalanceByTx.get(x.id)?.balance ?? 0) > 0 ? '#B91C1C' : '#047857', fontWeight: '800' }}>{m(runningBalanceByTx.get(x.id)?.balance ?? 0)}</Text></Text>
+                </View>
                 <Text numberOfLines={1} style={{ color: '#64748B', fontSize: 11, marginTop: 3 }}>{[x.account, x.method, x.note].filter(Boolean).join(' · ') || (isPayment ? 'Party payment' : 'Invoice transaction')}</Text>
               </TouchableOpacity>{isPayment ? <TouchableOpacity onPress={() => openPaymentReceipt(x)} accessibilityRole="button" accessibilityLabel="Receipt" style={{ alignSelf: 'flex-start', marginTop: 9, minHeight: 38, paddingHorizontal: 14, borderRadius: 8, backgroundColor: '#EFF6FF', borderWidth: 1, borderColor: '#BFDBFE', justifyContent: 'center' }}><Text style={{ color: '#1D4ED8', fontSize: 13, fontWeight: '800' }}>Receipt</Text></TouchableOpacity> : null}</View>;
             }) : <Text style={{ padding: 18, color: '#64748B', textAlign: 'center' }}>No transactions match these filters.</Text>}
@@ -1605,12 +1638,14 @@ type CollectionReceiptData = {
   partyCode?: string;
   date: string;
   note?: string;
+  previousDue: number;
+  currentDue: number;
   payments: { paymentNo: string; transactionNo?: string; amount: number; accountName: string }[];
 };
 
-function partyPaymentReceiptDoc({ payment, party, isCustomer, lang, shop, amount, dateLabel }: {
+function partyPaymentReceiptDoc({ payment, party, isCustomer, lang, shop, amount, dateLabel, balance }: {
   payment: Tx; party: Party; isCustomer: boolean; lang: 'bn' | 'en'; shop: string;
-  amount: string; dateLabel: (date?: string) => string;
+  amount: string; dateLabel: (date?: string) => string; balance: { previousDue: string; currentDue: string };
 }): ReportDoc {
   const receiptNo = payment.ref || `${isCustomer ? 'REC' : 'PAY'}-${refNo(payment.id)}`;
   const paymentLabel = isCustomer ? (lang === 'bn' ? 'আদায়' : 'Received') : (lang === 'bn' ? 'পরিশোধ' : 'Paid');
@@ -1625,6 +1660,9 @@ function partyPaymentReceiptDoc({ payment, party, isCustomer, lang, shop, amount
       ...(party.code ? [{ label: lang === 'bn' ? 'কোড' : 'Code', value: party.code }] : []),
       { label: lang === 'bn' ? (isCustomer ? 'রসিদ নম্বর' : 'পেমেন্ট নম্বর') : (isCustomer ? 'Receipt no.' : 'Payment no.'), value: receiptNo },
       ...(payment.createdAt ? [{ label: lang === 'bn' ? 'সময়' : 'Time', value: fmtTime(payment.createdAt, lang === 'bn') }] : []),
+      { label: lang === 'bn' ? 'আগের বাকি' : 'Previous due', value: balance.previousDue },
+      { label: lang === 'bn' ? 'পরিমাণ' : 'Amount', value: amount },
+      { label: lang === 'bn' ? (isCustomer ? 'বর্তমান বাকি' : 'বর্তমান পাওনা') : (isCustomer ? 'Current due' : 'Current payable'), value: balance.currentDue },
       ...(payment.transactionNo ? [{ label: lang === 'bn' ? 'লেনদেন আইডি' : 'Transaction ID', value: payment.transactionNo }] : []),
       ...(payment.account ? [{ label: lang === 'bn' ? 'অ্যাকাউন্ট' : 'Account', value: payment.account }] : []),
       ...(payment.method ? [{ label: lang === 'bn' ? 'পদ্ধতি' : 'Method', value: payment.method }] : []),
@@ -1710,7 +1748,8 @@ export function Money({ kind, done }: { kind: 'c' | 'v'; done: () => void }) {
   const openPaymentReceipt = (payment: Tx) => {
     const txParty = parties.find(p => p.id === payment.partyId);
     if (!txParty) return;
-    setReceiptPreviewDoc(partyPaymentReceiptDoc({ payment, party: txParty, isCustomer: isC, lang, shop: business.name, amount: m(payment.amount), dateLabel: fd }));
+    const snapshot = partyBalanceSnapshot(isC ? cTx : vTx, txParty.id, payment.id, txParty.opening);
+    setReceiptPreviewDoc(partyPaymentReceiptDoc({ payment, party: txParty, isCustomer: isC, lang, shop: business.name, amount: m(payment.amount), dateLabel: fd, balance: { previousDue: m(snapshot?.previousDue ?? 0), currentDue: m(snapshot?.currentDue ?? 0) } }));
   };
   const codeRef = useRef<TextInput>(null), cashRef = useRef<TextInput>(null), bankRef = useRef<TextInput>(null), noteRef = useRef<TextInput>(null);
   const party = parties.find(p => p.id === partyId);
@@ -1722,10 +1761,11 @@ export function Money({ kind, done }: { kind: 'c' | 'v'; done: () => void }) {
     .sort((a, b) => b.date.localeCompare(a.date) || String(b.createdAt ?? '').localeCompare(String(a.createdAt ?? '')));
   const reportRows: ReportRow[] = reportPayments.map(tx => {
     const txParty = parties.find(p => p.id === tx.partyId);
+    const snapshot = txParty ? partyBalanceSnapshot(isC ? cTx : vTx, txParty.id, tx.id, txParty.opening) : undefined;
     return {
       label: tx.transactionNo ? `${tx.transactionNo} · ${txParty?.name ?? ''}` : (txParty?.name ?? ''),
       sub: [fd(tx.date), txParty?.code ? `${lang === 'bn' ? 'কোড' : 'Code'} ${txParty.code}` : '', tx.account ?? '', tx.note ?? ''].filter(Boolean).join(' · '),
-      right: m(tx.amount),
+      right: `${lang === 'bn' ? 'আগের বাকি' : 'Previous due'} ${m(snapshot?.previousDue ?? 0)} · ${lang === 'bn' ? 'পরিমাণ' : 'Amount'} ${m(tx.amount)} · ${lang === 'bn' ? (isC ? 'বর্তমান বাকি' : 'বর্তমান পাওনা') : (isC ? 'Current due' : 'Current payable')} ${m(snapshot?.currentDue ?? 0)}`,
     };
   });
   const paymentReportDoc: ReportDoc = {
@@ -1769,12 +1809,17 @@ export function Money({ kind, done }: { kind: 'c' | 'v'; done: () => void }) {
       printedAt: printedAtStamp(lang),
       printLabel: lang === 'bn' ? 'রসিদ প্রিন্ট করুন' : 'Print receipt',
     };
-    if (!printReport(doc)) showEntryError(lang, lang === 'bn' ? 'রসিদ প্রিন্ট করা যায়নি।' : 'Could not print receipt.');
+    if (!printReport({ ...doc, meta: [...(doc.meta ?? []),
+      { label: lang === 'bn' ? 'আগের বাকি' : 'Previous due', value: m(receipt.previousDue) },
+      { label: lang === 'bn' ? 'পরিমাণ' : 'Amount', value: m(receipt.payments.reduce((sum, payment) => sum + payment.amount, 0)) },
+      { label: lang === 'bn' ? (isC ? 'বর্তমান বাকি' : 'বর্তমান পাওনা') : (isC ? 'Current due' : 'Current payable'), value: m(receipt.currentDue) },
+    ] })) showEntryError(lang, lang === 'bn' ? 'রসিদ প্রিন্ট করা যায়নি।' : 'Could not print receipt.');
   };
   const receiptForPayment = (payment: Tx): CollectionReceiptData | null => {
     const txParty = parties.find(p => p.id === payment.partyId);
     if (!txParty) return null;
-    return { partyName: txParty.name, partyCode: txParty.code, date: payment.date, note: payment.note, payments: [{ paymentNo: payment.ref ?? '', transactionNo: payment.transactionNo, amount: payment.amount, accountName: payment.account ?? '' }] };
+    const snapshot = partyBalanceSnapshot(isC ? cTx : vTx, txParty.id, payment.id, txParty.opening);
+    return { partyName: txParty.name, partyCode: txParty.code, date: payment.date, note: payment.note, previousDue: snapshot?.previousDue ?? 0, currentDue: snapshot?.currentDue ?? 0, payments: [{ paymentNo: payment.ref ?? '', transactionNo: payment.transactionNo, amount: payment.amount, accountName: payment.account ?? '' }] };
   };
   const matches = codeQuery.trim() ? parties.filter(p => {
     const q = codeQuery.trim().toLocaleLowerCase();
@@ -1796,7 +1841,7 @@ export function Money({ kind, done }: { kind: 'c' | 'v'; done: () => void }) {
     if (!cashAccounts.some(a => a.id === cashAccountId)) setCashAccountId(cashAccounts[0]?.id ?? '');
     if (!bankAccounts.some(a => a.id === bankAccountId)) setBankAccountId(bankAccounts[0]?.id ?? '');
   }, [moneyAccounts]);
-  const submit = async () => {
+  const submit = async (printReceipt = false) => {
     if (busy) return;
     const cash = parseNum(cashAmount), bank = parseNum(bankAmount);
     if (!party) { showEntryError(lang, lang === 'bn' ? 'কাস্টমার বা সাপ্লায়ার নির্বাচন করুন।' : `Select a ${isC ? 'customer' : 'supplier'}.`); codeRef.current?.focus(); return; }
@@ -1809,8 +1854,22 @@ export function Money({ kind, done }: { kind: 'c' | 'v'; done: () => void }) {
     ];
     setBusy(true); setMessage('');
     try {
+      const previousDue = bal(kind, party.id).balance;
       const result = await partyPaymentSplit({ kind, partyId: party.id, payments, date, note: note.trim() || undefined });
       const refs = result.payments.map(p => p.paymentNo).join(' / ');
+      if (printReceipt) printPartyPaymentReceipt({
+        partyName: party.name,
+        partyCode: party.code,
+        date,
+        note: note.trim() || undefined,
+        previousDue,
+        currentDue: Math.round((previousDue - result.payments.reduce((sum, payment) => sum + payment.amount, 0)) * 100) / 100,
+        payments: result.payments.map(payment => ({
+          paymentNo: payment.paymentNo,
+          amount: payment.amount,
+          accountName: moneyAccounts.find(account => account.id === payment.accountId)?.name ?? '',
+        })),
+      });
       setCashAmount(''); setBankAmount(''); setNote(''); setCodeQuery(''); setPartyId(undefined);
       setMessage(lang === 'bn' ? `সংরক্ষিত: ${refs} · পরের এন্ট্রির জন্য কোড লিখুন` : `Saved ${refs}. Enter the next code.`);
       requestAnimationFrame(() => codeRef.current?.focus());
@@ -1925,12 +1984,13 @@ export function Money({ kind, done }: { kind: 'c' | 'v'; done: () => void }) {
         {accountPicker('bank', bankAccountId, setBankAccountId)}
         <View style={{ height: 10 }} />
         <Muted>{t('note')}</Muted>
-        <TextInput ref={noteRef} value={note} onChangeText={setNote} returnKeyType="done" onSubmitEditing={submit} editable={!!party && !busy} placeholder={lang === 'bn' ? 'ঐচ্ছিক বিবরণ' : 'Optional note'} style={fieldStyle} />
+        <TextInput ref={noteRef} value={note} onChangeText={setNote} returnKeyType="done" onSubmitEditing={() => { void submit(false); }} editable={!!party && !busy} placeholder={lang === 'bn' ? 'ঐচ্ছিক বিবরণ' : 'Optional note'} style={fieldStyle} />
       </View>
       {message ? <Text accessibilityRole="alert" style={{ color: message.startsWith('Saved') || message.startsWith('সংরক্ষিত') ? '#15803D' : color.red, marginTop: 10 }}>{message}</Text> : null}
       <View style={{ flexDirection: 'row', gap: 10, marginTop: 14 }}>
         <View style={{ flex: 1 }}><Btn kind="ghost" label={t('cancel')} onPress={done} /></View>
-        <View style={{ flex: 1 }}><Btn icon={isC ? icons.collect : icons.pay} label={busy ? t('wait') : t('save')} onPress={submit} /></View>
+        <View style={{ flex: 1 }}><Btn icon={isC ? icons.collect : icons.pay} label={busy ? t('wait') : lang === 'bn' ? 'সংরক্ষণ' : 'Record'} onPress={() => { void submit(false); }} /></View>
+        <View style={{ flex: 1.25 }}><Btn icon={icons.print} label={busy ? t('wait') : lang === 'bn' ? 'সংরক্ষণ ও প্রিন্ট' : 'Record & Print'} onPress={() => { void submit(true); }} /></View>
       </View>
     </Card>
     <Card>
@@ -3206,20 +3266,20 @@ export function DetailShell({ title, onClose, children, footer, bodyScroll = tru
 }
 
 function TxnItem({ it }: { it: DetailItem }) {
-  const m = useMoney(); const n = useNum();
+  const m = useMoney(); const mr = useMoneyExact(); const n = useNum();
   const { kg, label } = useUnitLabel();
   const u = it.unit as BagUnit;
   const per = it.enteredQty ? Math.round((it.qtyKg / it.enteredQty) * 100) / 100 : 0;
   const sub = u === 'kg'
-    ? `${n(it.enteredQty)} ${kg} × ${m(it.rate)}`
-    : `${n(it.enteredQty)} ${label(u)} × ${n(per)} ${kg} = ${n(it.qtyKg)} ${kg} • ${m(it.rate)}/${kg}`;
+    ? `${n(it.enteredQty)} ${kg} × ${mr(it.rate)}`
+    : `${n(it.enteredQty)} ${label(u)} × ${n(per)} ${kg} = ${n(it.qtyKg)} ${kg} • ${mr(it.rate)}/${kg}`;
   return <Row left={it.productName} sub={sub} right={m(it.qtyKg * it.rate)} />;
 }
 
 // Shared invoice assembly + print/share actions for saved transactions.
 function useInvoice() {
   const business = useApp().business;
-  const { t, lang } = useApp(); const m = useMoney(); const n = useNum(); const fd = useDateStr();
+  const { t, lang, cTx, vTx, customers, vendors } = useApp(); const m = useMoney(); const mr = useMoneyExact(); const n = useNum(); const fd = useDateStr();
   const { kg } = useUnitLabel();
   const un: UnitNames = { kg, small: t('smallBag'), medium: t('mediumBag'), large: t('largeBag'), ton: t('ton') };
   const toDoc = (
@@ -3229,6 +3289,8 @@ function useInvoice() {
     const isSale = kind === 'sale';
     const sd = d as SaleDetail, pd = d as PurchaseDetail;
     const party = isSale ? sd.customer : pd.vendor;
+    const partyId = party?.id;
+    const partySnapshot = partyId ? partyBalanceSnapshot(isSale ? cTx : vTx, partyId, d.id, (isSale ? customers : vendors).find(row => row.id === partyId)?.opening ?? 0) : undefined;
     const belowCostLoss = isSale
       ? sd.items.reduce((sum, item) => sum + Math.max(0, (item.unitCost ?? 0) - item.rate) * Math.max(0, item.qtyKg), 0)
       : 0;
@@ -3241,10 +3303,11 @@ function useInvoice() {
       partyMobile: localeDigits(party?.mobile, lang),
       lines: d.items.map(it => ({
         name: it.productName,
-        detail: `${unitDetail(it.unit, it.enteredQty, it.qtyKg, un, n)} • ${m(it.rate)}/${kg}`,
+        detail: `${unitDetail(it.unit, it.enteredQty, it.qtyKg, un, n)} • ${mr(it.rate)}/${kg}`,
         total: m(it.qtyKg * it.rate),
       })),
       total: m(d.total),
+      balanceSummary: partySnapshot ? { previousDue: m(partySnapshot.previousDue), amount: m(d.total), currentDue: m(Math.round((partySnapshot.previousDue + d.total - paymentTotals.paid) * 100) / 100) } : undefined,
       paid: m(paymentTotals.paid),
       due: m(paymentTotals.due),
       fullyPaid: paymentTotals.fullyPaid,
@@ -3268,8 +3331,9 @@ function useInvoice() {
         partyLabel: isSale ? t('customer') : t('vendor'),
         mobile: t('mobile'), product: t('product'), qty: t('qty'), rate: t('rate'),
         total: t('total'), paid: t('paid'), due: t('due'), payDate: t('payDate'), thanks: t('thanks'),
+        previousDue: lang === 'bn' ? 'আগের বাকি' : 'Previous due', amount: lang === 'bn' ? 'পরিমাণ' : 'Amount', currentDue: lang === 'bn' ? (isSale ? 'বর্তমান বাকি' : 'বর্তমান পাওনা') : (isSale ? 'Current due' : 'Current payable'),
         paymentBreakdown: lang === 'bn' ? 'পেমেন্টের বিবরণ' : 'Payment breakdown', transactionId: lang === 'bn' ? 'লেনদেন আইডি' : 'Transaction ID', description: lang === 'bn' ? 'বিবরণ' : 'Description', account: lang === 'bn' ? 'অ্যাকাউন্ট' : 'Account',
-        totalDue: lang === 'bn' ? 'মোট বকেয়া' : 'Total due', fullyPaid: lang === 'bn' ? 'সম্পূর্ণ পরিশোধিত' : 'Fully paid', transportPayment: lang === 'bn' ? 'পরিবহন পেমেন্ট' : 'Transport payment', advancePayment: lang === 'bn' ? 'অগ্রিম পেমেন্ট সমন্বয়' : 'Advance payment applied', invoicePayment: lang === 'bn' ? 'ইনভয়েস পেমেন্ট' : 'Invoice payment', purchaseInvoice: lang === 'bn' ? 'ক্রয় ইনভয়েস' : 'Purchase invoice', salesInvoice: lang === 'bn' ? 'বিক্রয় ইনভয়েস' : 'Sales invoice',
+        totalDue: lang === 'bn' ? 'ইনভয়েস বাকি' : 'Invoice due', fullyPaid: lang === 'bn' ? 'সম্পূর্ণ পরিশোধিত' : 'Fully paid', transportPayment: lang === 'bn' ? 'পরিবহন পেমেন্ট' : 'Transport payment', advancePayment: lang === 'bn' ? 'অগ্রিম পেমেন্ট সমন্বয়' : 'Advance payment applied', invoicePayment: lang === 'bn' ? 'ইনভয়েস পেমেন্ট' : 'Invoice payment', purchaseInvoice: lang === 'bn' ? 'ক্রয় ইনভয়েস' : 'Purchase invoice', salesInvoice: lang === 'bn' ? 'বিক্রয় ইনভয়েস' : 'Sales invoice',
       },
     };
   };
@@ -3319,6 +3383,9 @@ function useInvoice() {
   };
   const toRetDoc = (d: ReturnDetail): InvData => {
     const isSale = d.kind === 'sale';
+    const returnParty = d.party;
+    const returnPartyId = returnParty?.id;
+    const returnSnapshot = returnPartyId ? partyBalanceSnapshot(isSale ? cTx : vTx, returnPartyId, d.id, (isSale ? customers : vendors).find(row => row.id === returnPartyId)?.opening ?? 0) : undefined;
     return {
       no: d.returnNo ?? '',
       date: fd(d.date),
@@ -3330,10 +3397,11 @@ function useInvoice() {
         if (it.condition === 'partial') bits.push(`${t('goodQty')}: ${n(it.goodKg)} ${kg}, ${t('dmgQty')}: ${n(it.damagedKg)} ${kg}`);
         if (it.damageReason) bits.push(`${t('dmgReason')}: ${reasonLabel(it.damageReason)}`);
         if (it.note) bits.push(it.note);
-        bits.push(`${m(it.rate)}/${kg}`);
+        bits.push(`${mr(it.rate)}/${kg}`);
         return { name: it.productName, detail: bits.join(' • '), total: m(it.amount) };
       }),
       total: m(d.totalAmount),
+      balanceSummary: returnSnapshot ? { previousDue: m(returnSnapshot.previousDue), amount: m(returnSnapshot.amount), currentDue: m(returnSnapshot.currentDue) } : undefined,
       paid: '',
       due: '',
       hidePay: true,
@@ -3348,8 +3416,9 @@ function useInvoice() {
         partyLabel: isSale ? t('customer') : t('vendor'),
         mobile: t('mobile'), product: t('product'), qty: t('qty'), rate: t('rate'),
         total: t('returnValue'), paid: t('paid'), due: t('due'), payDate: t('payDate'), thanks: t('thanks'),
+        previousDue: lang === 'bn' ? 'আগের বাকি' : 'Previous due', amount: lang === 'bn' ? 'পরিমাণ' : 'Amount', currentDue: lang === 'bn' ? (isSale ? 'বর্তমান বাকি' : 'বর্তমান পাওনা') : (isSale ? 'Current due' : 'Current payable'),
         paymentBreakdown: lang === 'bn' ? 'পেমেন্টের বিবরণ' : 'Payment breakdown', transactionId: lang === 'bn' ? 'লেনদেন আইডি' : 'Transaction ID', description: lang === 'bn' ? 'বিবরণ' : 'Description', account: lang === 'bn' ? 'অ্যাকাউন্ট' : 'Account',
-        totalDue: lang === 'bn' ? 'মোট বকেয়া' : 'Total due', fullyPaid: lang === 'bn' ? 'সম্পূর্ণ পরিশোধিত' : 'Fully paid', transportPayment: lang === 'bn' ? 'পরিবহন পেমেন্ট' : 'Transport payment', advancePayment: lang === 'bn' ? 'অগ্রিম পেমেন্ট সমন্বয়' : 'Advance payment applied', invoicePayment: lang === 'bn' ? 'ইনভয়েস পেমেন্ট' : 'Invoice payment', purchaseInvoice: lang === 'bn' ? 'ক্রয় ইনভয়েস' : 'Purchase invoice', salesInvoice: lang === 'bn' ? 'বিক্রয় ইনভয়েস' : 'Sales invoice',
+        totalDue: lang === 'bn' ? 'ইনভয়েস বাকি' : 'Invoice due', fullyPaid: lang === 'bn' ? 'সম্পূর্ণ পরিশোধিত' : 'Fully paid', transportPayment: lang === 'bn' ? 'পরিবহন পেমেন্ট' : 'Transport payment', advancePayment: lang === 'bn' ? 'অগ্রিম পেমেন্ট সমন্বয়' : 'Advance payment applied', invoicePayment: lang === 'bn' ? 'ইনভয়েস পেমেন্ট' : 'Invoice payment', purchaseInvoice: lang === 'bn' ? 'ক্রয় ইনভয়েস' : 'Purchase invoice', salesInvoice: lang === 'bn' ? 'বিক্রয় ইনভয়েস' : 'Sales invoice',
       },
     };
   };

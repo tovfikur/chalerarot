@@ -40,6 +40,7 @@ export type MoneySourceType =
   | 'expense'
   | 'labourPayment'
   | 'labourAdvance'
+  | 'landingAdvance'
   | 'saleReturn'
   | 'purchaseReturn'
   | 'transferOut'

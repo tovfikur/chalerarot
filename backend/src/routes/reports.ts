@@ -34,6 +34,7 @@ const ledgerAccountCode = (name: string) => {
   if (name === 'Accounts receivable') return '1100';
   if (name === 'Supplier advances') return '1110';
   if (name === 'Labour Advances') return '1120';
+  if (name === 'Landing Cost Advances') return '1121';
   if (name === 'Inventory') return '1200';
   if (name === 'Accounts payable') return '2000';
   if (name === 'Landing Cost Payable') return '2020';
@@ -59,7 +60,7 @@ reports.get('/balance-sheet', async (req: Request, res: Response) => {
     return res.status(400).json({ error: 'A valid as-of date is required' });
   }
   const asOf = requestedAsOf ?? todayStr();
-  const [accounts, movements, stock, customers, sales, cPays, sReturns, vendors, purchases, vPays, pReturns, landedExpenses, labourAdvances] = await Promise.all([
+  const [accounts, movements, stock, customers, sales, cPays, sReturns, vendors, purchases, vPays, pReturns, landedExpenses, labourAdvances, landingAdvances] = await Promise.all([
     db.moneyAccount.findMany({ select: { id: true, openingBalance: true, openingDate: true, type: true } }),
     db.moneyMovement.findMany({ where: { active: true, date: { lte: asOf } }, select: { moneyAccountId: true, method: true, direction: true, amount: true } }),
     db.stockMovement.findMany({ where: { date: { lte: asOf }, bucket: 'sellable' } }),
@@ -71,6 +72,7 @@ reports.get('/balance-sheet', async (req: Request, res: Response) => {
     db.productReturn.findMany({ where: { kind: 'purchase', date: { lte: asOf } } }),
     db.expense.findMany({ where: { capitalized: true, deletedAt: null, date: { lte: asOf } }, select: { id: true, amount: true, landingType: true, capitalized: true, customName: true, note: true } }),
     db.labourAdvance.findMany({ where: { date: { lte: asOf }, memoOnly: false }, select: { amount: true, appliedAmount: true } }),
+    db.landingAdvance.findMany({ where: { date: { lte: asOf } }, select: { landingType: true, amount: true } }),
   ]);
   const landedExpenseIds = new Set(landedExpenses.map(expense => expense.id));
   const landedMovements = landedExpenses.length ? await db.moneyMovement.findMany({ where: { sourceType: 'expense', active: true, date: { lte: asOf } }, select: { sourceId: true, amount: true } }) : [];
@@ -92,7 +94,11 @@ reports.get('/balance-sheet', async (req: Request, res: Response) => {
     }
   }
   for (const type of Object.keys(landingPayableByType) as LandingCostType[]) landingPayableByType[type] = +landingPayableByType[type].toFixed(2);
-  const landingCostPayable = Object.values(landingPayableByType).reduce((total, amount) => total + amount, 0);
+  const landingAdvanceByType: Record<LandingCostType, number> = { transport: 0, stockInLabour: 0, stockOutLabour: 0 };
+  for (const advance of landingAdvances) if (advance.landingType in landingAdvanceByType) landingAdvanceByType[advance.landingType as LandingCostType] += advance.amount;
+  const landingAdvanceAsset = (Object.keys(landingPayableByType) as LandingCostType[]).reduce((sum, type) => sum + Math.max(0, landingAdvanceByType[type] - landingPayableByType[type]), 0);
+  for (const type of Object.keys(landingPayableByType) as LandingCostType[]) landingPayableByType[type] = Math.max(0, +((landingPayableByType[type] - landingAdvanceByType[type]).toFixed(2)));
+  const adjustedLandingCostPayable = Object.values(landingPayableByType).reduce((total, amount) => total + amount, 0);
   const labourAdvanceBalance = +labourAdvances.reduce((total, a) => total + a.amount - a.appliedAmount, 0).toFixed(2);
   const accountBalance = (type: string) => {
     const typedAccounts = accounts.filter(a => a.type === type);
@@ -135,8 +141,8 @@ reports.get('/balance-sheet', async (req: Request, res: Response) => {
   const payables = vendorPayableBase + Math.max(0, -payableAdjustment);
   const inventory = stock.reduce((t, x) => t + x.value, 0) + delta(code => code === '1200');
   const payablesFinal = payables;
-  const otherAssets = delta((code, _name, type, moneyType) => type === 'asset' && !moneyType && !['1090', '1091', '1092', '1093', '1094', '1100', '1110', '1120', '1200'].includes(code)) + labourAdvanceBalance;
-  const otherLiabilities = -delta((code, _name, type) => type === 'liability' && code !== '2000') + landingCostPayable;
+  const otherAssets = delta((code, _name, type, moneyType) => type === 'asset' && !moneyType && !['1090', '1091', '1092', '1093', '1094', '1100', '1110', '1120', '1121', '1200'].includes(code)) + labourAdvanceBalance + landingAdvanceAsset;
+  const otherLiabilities = -delta((code, _name, type) => type === 'liability' && code !== '2000') + adjustedLandingCostPayable;
   const assets = (cash ?? 0) + bankAndLegacyMoney + receivables + supplierAdvances + inventory + otherAssets;
   const totalLiabilities = payablesFinal + customerCredits + otherLiabilities;
   const equity = assets - totalLiabilities;
@@ -165,7 +171,7 @@ reports.get('/balance-sheet', async (req: Request, res: Response) => {
   const dynamicBalance = (code: string, name: string, type: string, balance: number) => ({ code, name: byCode.get(code)?.name ?? name, type, balance: +balance.toFixed(2) });
   const accountBreakdown = {
     assets: [
-      ...rowsOfType('asset').filter(row => !['1090', '1091', '1092', '1093', '1094', '1100', '1110', '1120', '1200'].includes(row.code) && !managedMoneyCodes.has(row.code)),
+      ...rowsOfType('asset').filter(row => !['1090', '1091', '1092', '1093', '1094', '1100', '1110', '1120', '1121', '1200'].includes(row.code) && !managedMoneyCodes.has(row.code)),
       ...(['cash', 'bank'] as const).flatMap(type => {
         const typeBalances = moneyBalancesAsOf.filter(account => account.type === type);
         const total = type === 'cash' ? cash ?? 0 : bankAndLegacyMoney;
@@ -181,6 +187,7 @@ reports.get('/balance-sheet', async (req: Request, res: Response) => {
       ...(receivables ? [dynamicBalance('1100', 'Accounts receivable', 'asset', receivables)] : []),
       ...(supplierAdvances ? [dynamicBalance('1110', 'Supplier advances', 'asset', supplierAdvances)] : []),
       ...(labourAdvanceBalance ? [dynamicBalance('1120', 'Labour Advances', 'asset', labourAdvanceBalance)] : []),
+      ...(landingAdvanceAsset ? [dynamicBalance('1121', 'Landing Cost Advances', 'asset', landingAdvanceAsset)] : []),
       ...(inventory ? [dynamicBalance('1200', 'Inventory', 'asset', inventory)] : []),
     ].sort((a, b) => a.code.localeCompare(b.code)),
     liabilities: [
@@ -515,6 +522,7 @@ async function deriveJournalRows(from: string, to: string) {
     else if (m.sourceType === 'saleReturn' || m.sourceType === 'purchaseReturn') continue; // return document owns the posting
     else if (m.sourceType === 'transferOut') add(m.date, ref, cashAccount, 'Account transfer out', 0, m.amount);
     else if (m.sourceType === 'transferIn') add(m.date, ref, cashAccount, 'Account transfer in', m.amount, 0);
+    else if (m.sourceType === 'landingAdvance') { add(m.date, ref, 'Landing Cost Advances', 'Landing cost advance', m.amount, 0); add(m.date, ref, cashAccount, 'Landing cost advance', 0, m.amount); }
     else if (m.sourceType === 'openingAdjust') {
       if (m.direction === 'in') { add(m.date, ref, cashAccount, 'Opening balance adjustment', m.amount, 0); add(m.date, ref, 'Owner equity', 'Opening balance adjustment', 0, m.amount); }
       else { add(m.date, ref, 'Owner equity', 'Opening balance adjustment', m.amount, 0); add(m.date, ref, cashAccount, 'Opening balance adjustment', 0, m.amount); }
@@ -757,7 +765,7 @@ reports.get('/cashflow', async (req: Request, res: Response) => {
   const customerReceipts = amount(['sale', 'customerPayment'], 'in');
   const supplierPayments = amount(['purchase', 'vendorPayment'], 'out');
   const landedIds = new Set(landedCostRows.map(e => e.id));
-  const inventoryCostPayments = period.filter(m => m.sourceType === 'expense' && linkedLandedExpenseId(m.sourceId, landedIds) && m.direction === 'out').reduce((total, m) => total + m.amount, 0);
+  const inventoryCostPayments = period.filter(m => (m.sourceType === 'landingAdvance' || (m.sourceType === 'expense' && linkedLandedExpenseId(m.sourceId, landedIds))) && m.direction === 'out').reduce((total, m) => total + m.amount, 0);
   const expensePayments = amount(['expense'], 'out') - inventoryCostPayments;
   const returnInflows = amount(['saleReturn', 'purchaseReturn'], 'in');
   const returnOutflows = amount(['saleReturn', 'purchaseReturn'], 'out');

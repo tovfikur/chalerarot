@@ -61,14 +61,14 @@ returns.get('/:id', async (req: Request, res: Response) => {
     where: { id: req.params.id },
     include: {
       items: { include: { product: { select: { name: true } } } },
-      sale: { select: { invoiceNo: true, date: true, customer: { select: { name: true, mobile: true } } } },
-      purchase: { select: { invoiceNo: true, date: true, vendor: { select: { name: true, mobile: true } } } },
+      sale: { select: { invoiceNo: true, date: true, customer: { select: { id: true, name: true, mobile: true } } } },
+      purchase: { select: { invoiceNo: true, date: true, vendor: { select: { id: true, name: true, mobile: true } } } },
     },
   });
   if (!r) return res.status(404).json({ error: 'Return not found' });
   const party = r.kind === 'sale'
-    ? (r.sale?.customer ? { name: r.sale.customer.name, mobile: r.sale.customer.mobile } : null)
-    : (r.purchase ? { name: r.purchase.vendor.name, mobile: r.purchase.vendor.mobile } : null);
+    ? (r.sale?.customer ? { id: r.sale.customer.id, name: r.sale.customer.name, mobile: r.sale.customer.mobile } : null)
+    : (r.purchase ? { id: r.purchase.vendor.id, name: r.purchase.vendor.name, mobile: r.purchase.vendor.mobile } : null);
   res.json({
     id: r.id, returnNo: r.returnNo, kind: r.kind, date: r.date, createdAt: r.createdAt,
     totalAmount: r.totalAmount, profitImpact: r.profitImpact,

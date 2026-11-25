@@ -2,7 +2,8 @@ import { Router } from 'express';
 import { randomUUID } from 'crypto';
 import { db } from '../db';
 import { resolveAccount, recordMovement } from '../money';
-import { transactionDay } from '../units';
+import { businessToday, transactionDay } from '../units';
+import { syncAttendanceWages } from '../attendanceWages';
 import { allocateLabourPayments, expenseLandingType, landedPaymentType, landingShares, linkedLandedExpenseId, LandingCostType } from '../landingCosts';
 import { seedChart } from './accounting';
 
@@ -11,13 +12,15 @@ const round2 = (n: number) => Math.round(n * 100) / 100;
 const cleanName = (v: unknown) => String(v ?? '').trim().replace(/\s+/g, ' ').slice(0, 100);
 
 labour.get('/', async (_req, res) => {
+  await syncAttendanceWages(businessToday().slice(0, 7));
   await seedChart();
-  const [workers, costs, labourPayments, advances, landedExpenses] = await Promise.all([
+  const [workers, costs, labourPayments, advances, landedExpenses, landingAdvances] = await Promise.all([
     db.labourer.findMany({ orderBy: { name: 'asc' } }),
     db.labourCost.findMany({ include: { labourer: { select: { id: true, name: true } } }, orderBy: [{ date: 'desc' }, { createdAt: 'desc' }] }),
     db.labourPayment.findMany({ select: { id: true, labourerId: true, amount: true, date: true, note: true, direction: true, createdAt: true } }),
     db.labourAdvance.findMany({ select: { id: true, labourerId: true, amount: true, appliedAmount: true, date: true, accountId: true, note: true, memoOnly: true, createdAt: true } }),
     db.expense.findMany({ where: { capitalized: true, deletedAt: null }, select: { id: true, voucherNo: true, amount: true, date: true, note: true, customName: true, landingType: true, capitalized: true } }),
+    db.landingAdvance.findMany({ select: { landingType: true, amount: true } }),
   ]);
   const expenseIds = new Set(landedExpenses.map(expense => expense.id));
   const expenseMovements = landedExpenses.length ? await db.moneyMovement.findMany({ where: { sourceType: 'expense', active: true }, select: { sourceId: true, amount: true } }) : [];
@@ -116,9 +119,38 @@ labour.get('/', async (_req, res) => {
   }
   const operations = Object.fromEntries((['transport', 'stockInLabour', 'stockOutLabour'] as const).map(type => {
     const entries = operationEntries[type].sort((a, b) => b.date.localeCompare(a.date) || b.id.localeCompare(a.id));
-    return [type, { total: round2(entries.reduce((sum, entry) => sum + entry.amount, 0)), paid: round2(entries.reduce((sum, entry) => sum + entry.paid, 0)), unpaid: round2(entries.reduce((sum, entry) => sum + entry.unpaid, 0)), entries }];
-  })) as Record<LandingCostType, { total: number; paid: number; unpaid: number; entries: any[] }>;
-  res.json({ summary: { total, paid, unpaid: round2(total - paid), advanceBalance: advanceBalanceTotal }, labourers: workersView, landingCosts, operations });
+    const total = round2(entries.reduce((sum, entry) => sum + entry.amount, 0));
+    const paid = round2(entries.reduce((sum, entry) => sum + entry.paid, 0));
+    const advanceBalance = round2(landingAdvances.filter(advance => advance.landingType === type).reduce((sum, advance) => sum + advance.amount, 0));
+    const dueBeforeAdvance = round2(total - paid);
+    return [type, { total, paid, advanceBalance: Math.max(0, round2(advanceBalance - dueBeforeAdvance)), unpaid: round2(dueBeforeAdvance - advanceBalance), entries }];
+  })) as Record<LandingCostType, { total: number; paid: number; advanceBalance: number; unpaid: number; entries: any[] }>;
+  const netUnpaid = round2(Object.values(operations).reduce((sum, operation) => sum + operation.unpaid, 0));
+  const landingAdvanceBalance = round2(Object.values(operations).reduce((sum, operation) => sum + operation.advanceBalance, 0));
+  res.json({ summary: { total, paid, unpaid: netUnpaid, advanceBalance: round2(advanceBalanceTotal + landingAdvanceBalance) }, labourers: workersView, landingCosts, operations });
+});
+
+labour.post('/advances', async (req, res) => {
+  const landingType = String(req.body?.landingType ?? '') as LandingCostType;
+  if (!['transport', 'stockInLabour', 'stockOutLabour'].includes(landingType)) return res.status(400).json({ error: 'Choose a valid landing cost type.' });
+  const amount = Number(req.body?.amount);
+  if (!Number.isFinite(amount) || amount <= 0) return res.status(400).json({ error: 'Advance amount must be greater than 0.' });
+  const note = String(req.body?.note ?? '').trim();
+  if (note.length > 500) return res.status(400).json({ error: 'Description cannot exceed 500 characters.' });
+  let date: string;
+  try { date = transactionDay(req.body?.date); } catch (e) { return res.status(400).json({ error: (e as Error).message }); }
+  try {
+    const advance = await db.$transaction(async t => {
+      const account = await resolveAccount(t, { accountId: req.body?.accountId ? String(req.body.accountId) : null });
+      const row = await t.landingAdvance.create({ data: { landingType, amount: round2(amount), date, accountId: account.id, note: note || null } });
+      await recordMovement(t, { accountId: account.id, method: account.type, direction: 'out', amount: row.amount, date, sourceType: 'landingAdvance', sourceId: row.id, note: `Landing cost advance Â· ${landingType}${note ? ` Â· ${note}` : ''}` });
+      return { id: row.id, amount: row.amount };
+    });
+    res.status(201).json(advance);
+  } catch (e) {
+    const err = e as Error & { status?: number };
+    res.status(err.status ?? 400).json({ error: err.message || 'Could not record landing cost advance.' });
+  }
 });
 
 labour.post('/labourers', async (req, res) => {
@@ -131,6 +163,44 @@ labour.post('/labourers', async (req, res) => {
   } catch (e) {
     res.status(400).json({ error: e instanceof Error ? e.message : 'Could not add labourer.' });
   }
+});
+
+labour.get('/attendance', async (req, res) => {
+  const month = String(req.query.month ?? '');
+  if (!/^\d{4}-(0[1-9]|1[0-2])$/.test(month)) return res.status(400).json({ error: 'Choose a valid attendance month.' });
+  await syncAttendanceWages(month);
+  const [workers, records] = await Promise.all([
+    db.labourer.findMany({ orderBy: { name: 'asc' }, select: { id: true, name: true } }),
+    db.labourAttendance.findMany({ where: { date: { startsWith: month } }, select: { date: true, labourerId: true, value: true } }),
+  ]);
+  res.json({ month, labourers: workers, entries: records });
+});
+
+labour.put('/attendance', async (req, res) => {
+  const month = String(req.body?.month ?? '');
+  const entries = req.body?.entries;
+  if (!/^\d{4}-(0[1-9]|1[0-2])$/.test(month) || !Array.isArray(entries) || entries.length > 10000) return res.status(400).json({ error: 'Choose a valid month and attendance list.' });
+  if (!entries.every((entry: any) => entry && typeof entry.labourerId === 'string' && typeof entry.date === 'string' && entry.date.startsWith(`${month}-`) && /^\d{4}-\d{2}-\d{2}$/.test(entry.date) && (entry.value === null || (Number.isFinite(entry.value) && entry.value >= 0 && entry.value <= 1)))) return res.status(400).json({ error: 'Each attendance value must be between 0 and 1.' });
+  const uniqueIds = [...new Set<string>(entries.map((entry: any) => entry.labourerId))];
+  const workers = uniqueIds.length ? await db.labourer.findMany({ where: { id: { in: uniqueIds } }, select: { id: true } }) : [];
+  if (workers.length !== uniqueIds.length) return res.status(400).json({ error: 'One or more selected labourers do not exist.' });
+  try {
+    await db.$transaction(async transaction => {
+      for (const entry of entries) {
+        if (entry.value === null) {
+          await transaction.labourAttendance.deleteMany({ where: { labourerId: entry.labourerId, date: entry.date } });
+        } else {
+          await transaction.labourAttendance.upsert({
+            where: { labourerId_date: { labourerId: entry.labourerId, date: entry.date } },
+            create: { labourerId: entry.labourerId, date: entry.date, value: entry.value },
+            update: { value: entry.value },
+          });
+        }
+      }
+    });
+    await syncAttendanceWages(month);
+    res.json({ saved: entries.length });
+  } catch { res.status(500).json({ error: 'Could not save labour attendance.' }); }
 });
 
 labour.post('/landing-costs/:expenseId/payments', async (req, res) => {
@@ -186,10 +256,11 @@ labour.post('/operations/:type/payments', async (req, res) => {
   try { date = transactionDay(req.body?.date); } catch (e) { return res.status(400).json({ error: (e as Error).message }); }
   try {
     const result = await db.$transaction(async t => {
-      const [expenses, costs, payments, account] = await Promise.all([
+      const [expenses, costs, payments, landingAdvances, account] = await Promise.all([
         t.expense.findMany({ where: { capitalized: true, deletedAt: null }, select: { id: true, amount: true, date: true, createdAt: true, voucherNo: true, note: true, customName: true, landingType: true, capitalized: true } }),
         t.labourCost.findMany({ include: { labourer: { select: { id: true, name: true } } } }),
         t.labourPayment.findMany({ select: { id: true, labourerId: true, amount: true, date: true, createdAt: true, direction: true } }),
+        t.landingAdvance.findMany({ where: { landingType: type }, select: { amount: true } }),
         resolveAccount(t, { accountId: req.body?.accountId ? String(req.body.accountId) : null }),
       ]);
       const expenseIds = new Set(expenses.map(expense => expense.id));
@@ -213,7 +284,7 @@ labour.post('/operations/:type/payments', async (req, res) => {
       });
       const wageAllocation = allocateLabourPayments(costs, payments);
       const rows = expenseRows.sort((a, b) => a.date.localeCompare(b.date) || a.createdAt.getTime() - b.createdAt.getTime() || a.id.localeCompare(b.id));
-      const available = round2(rows.reduce((sum, row) => sum + row.due, 0));
+      const available = round2(Math.max(0, rows.reduce((sum, row) => sum + row.due, 0) - landingAdvances.reduce((sum, advance) => sum + advance.amount, 0)));
       if (available <= 0.009) throw Object.assign(new Error('This page has no unpaid landed cost balance.'), { status: 409 });
       if (amount > available + 0.01) throw Object.assign(new Error('Payment cannot exceed the stock-out landed cost balance.'), { status: 400 });
       if (type === 'stockOutLabour' && labourerIds.length) {
